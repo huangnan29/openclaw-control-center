@@ -122,3 +122,36 @@ test("agent roster ignores name-only config entries and falls back to runtime ag
     await rm(home, { recursive: true, force: true });
   }
 });
+
+test("current agent catalog can load from explicit scoped paths", async () => {
+  const home = await mkdtemp(join(tmpdir(), "control-center-catalog-scope-"));
+  const configPath = join(home, "custom-openclaw.json");
+
+  try {
+    await writeFile(
+      configPath,
+      JSON.stringify(
+        {
+          agents: {
+            list: [
+              { id: "main", name: "main" },
+              { id: "qa", name: "qa" },
+            ],
+          },
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const { loadCurrentAgentCatalog } = await import("../src/runtime/current-agent-catalog");
+    const catalog = await loadCurrentAgentCatalog({ openclawHome: home, configPath });
+
+    assert.equal(catalog.status, "connected");
+    assert.deepEqual(catalog.entries.map((entry) => entry.agentId), ["main", "qa"]);
+    assert.equal(catalog.sourcePath, configPath);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});

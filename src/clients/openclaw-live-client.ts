@@ -39,6 +39,13 @@ interface SessionHistoryFileReadResult {
   status: "ok" | "missing" | "error";
 }
 
+interface OpenClawLiveClientScope {
+  openclawHome?: string;
+  openclawConfigPath?: string;
+  workspaceRoot?: string;
+  gatewayUrl?: string;
+}
+
 const ACTIVE_SESSION_STATES = new Set([
   "running",
   "active",
@@ -83,15 +90,20 @@ export class OpenClawLiveClient implements ToolClient {
   private sessionCache = new Map<string, SessionCacheItem>();
   private sessionFileCache = new Map<string, string>();
 
+  constructor(private readonly scope: OpenClawLiveClientScope = {}) {}
+
   async sessionsList(): Promise<SessionsListResponse> {
-    const openclawHome = resolveOpenClawHomePath();
+    const openclawHome = this.resolveOpenClawHomePath();
     const configuredAgentKeys = await this.loadConfiguredAgentKeys();
     let data: { sessions?: Array<Record<string, unknown>> };
     try {
       data = await runJson<{ sessions?: Array<Record<string, unknown>> }>([
         "sessions",
         "--json",
-      ]);
+      ], {
+        cwd: this.resolveWorkspaceRoot(),
+        env: this.buildScopedCommandEnv(),
+      });
     } catch {
       return this.loadSessionsFromStores();
     }
@@ -179,7 +191,7 @@ export class OpenClawLiveClient implements ToolClient {
     try {
       data = await runJson<{ jobs?: Array<Record<string, unknown>> }>(
         ["cron", "list", "--json"],
-        { timeoutMs: 2_500 },
+        { timeoutMs: 2_500, cwd: this.resolveWorkspaceRoot(), env: this.buildScopedCommandEnv() },
       );
     } catch {
       return { jobs: [] };
@@ -203,7 +215,7 @@ export class OpenClawLiveClient implements ToolClient {
     try {
       const json = await runJson<Record<string, unknown>>(
         ["approvals", "get", "--json"],
-        { timeoutMs: 2_500 },
+        { timeoutMs: 2_500, cwd: this.resolveWorkspaceRoot(), env: this.buildScopedCommandEnv() },
       );
       return {
         json,
@@ -211,7 +223,11 @@ export class OpenClawLiveClient implements ToolClient {
       };
     } catch {
       try {
-        const rawText = await runText(["approvals", "get"], { timeoutMs: 1_500 });
+        const rawText = await runText(["approvals", "get"], {
+          timeoutMs: 1_500,
+          cwd: this.resolveWorkspaceRoot(),
+          env: this.buildScopedCommandEnv(),
+        });
         return { rawText };
       } catch {
         return { rawText: "" };
@@ -224,7 +240,7 @@ export class OpenClawLiveClient implements ToolClient {
     const args = ["approvals", "approve", request.approvalId];
     if (request.reason) args.push("--reason", request.reason);
 
-    const rawText = await runText(args);
+    const rawText = await runText(args, { cwd: this.resolveWorkspaceRoot(), env: this.buildScopedCommandEnv() });
     return {
       ok: true,
       action: "approve",
@@ -237,7 +253,7 @@ export class OpenClawLiveClient implements ToolClient {
   async approvalsReject(request: ApprovalsRejectRequest): Promise<ApprovalsActionResponse> {
     assertApprovalActionsEnabled("reject");
     const args = ["approvals", "reject", request.approvalId, "--reason", request.reason];
-    const rawText = await runText(args);
+    const rawText = await runText(args, { cwd: this.resolveWorkspaceRoot(), env: this.buildScopedCommandEnv() });
     return {
       ok: true,
       action: "reject",
@@ -280,8 +296,8 @@ export class OpenClawLiveClient implements ToolClient {
         ? Math.max(5_000, Math.trunc(request.timeoutSeconds * 1_000))
         : 20 * 60 * 1_000,
       maxBuffer: 8 * 1024 * 1024,
-      cwd: transportOptions.cwd,
-      env: transportOptions.env,
+      cwd: transportOptions.cwd ?? this.resolveWorkspaceRoot(),
+      env: this.buildScopedCommandEnv(transportOptions.env),
     });
 
     const result = asObject(rawJson.result);
@@ -358,8 +374,8 @@ export class OpenClawLiveClient implements ToolClient {
     const transportOptions = buildAgentRunProcessOptions(request.context);
     const { stdout, stderr, code } = await runStreamingText(args, handlers, {
       timeoutMs,
-      cwd: transportOptions.cwd,
-      env: transportOptions.env,
+      cwd: transportOptions.cwd ?? this.resolveWorkspaceRoot(),
+      env: this.buildScopedCommandEnv(transportOptions.env),
     });
     if (code !== 0) {
       throw new Error(stderr.trim() || stdout.trim() || `openclaw agent exited with code ${code}`);
@@ -387,7 +403,7 @@ export class OpenClawLiveClient implements ToolClient {
   }
 
   private async loadSessionsFromStores(): Promise<SessionsListResponse> {
-    const openclawHome = resolveOpenClawHomePath();
+    const openclawHome = this.resolveOpenClawHomePath();
     const agentsPath = join(openclawHome, "agents");
     const configuredAgentKeys = await this.loadConfiguredAgentKeys();
     let agentDirs: string[] = [];
@@ -456,7 +472,7 @@ export class OpenClawLiveClient implements ToolClient {
     const cached = this.sessionFileCache.get(sessionKey);
     if (cached) return cached;
 
-    const openclawHome = resolveOpenClawHomePath();
+    const openclawHome = this.resolveOpenClawHomePath();
     const agentsPath = join(openclawHome, "agents");
     const configuredAgentKeys = await this.loadConfiguredAgentKeys();
     if (!matchesConfiguredAgents(extractAgentIdFromSessionKey(sessionKey), configuredAgentKeys)) {
@@ -495,8 +511,32 @@ export class OpenClawLiveClient implements ToolClient {
   }
 
   private async loadConfiguredAgentKeys(): Promise<Set<string>> {
-    const catalog = await loadCurrentAgentCatalog();
+    const catalog = await loadCurrentAgentCatalog({
+      openclawHome: this.scope.openclawHome,
+      configPath: this.scope.openclawConfigPath,
+    });
     return new Set(catalog.entries.map((entry) => normalizeAgentKey(entry.agentId)));
+  }
+
+  private resolveOpenClawHomePath(): string {
+    return resolveOpenClawHomePath({ openclawHome: this.scope.openclawHome });
+  }
+
+  private buildScopedCommandEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+    const scopedEnv: NodeJS.ProcessEnv = { ...env };
+    const openclawHome = this.scope.openclawHome?.trim();
+    if (openclawHome) scopedEnv.OPENCLAW_HOME = openclawHome;
+    const openclawConfigPath = this.scope.openclawConfigPath?.trim();
+    if (openclawConfigPath) scopedEnv.OPENCLAW_CONFIG_PATH = openclawConfigPath;
+    const workspaceRoot = this.scope.workspaceRoot?.trim();
+    if (workspaceRoot) scopedEnv.OPENCLAW_WORKSPACE_ROOT = workspaceRoot;
+    const gatewayUrl = this.scope.gatewayUrl?.trim();
+    if (gatewayUrl) scopedEnv.GATEWAY_URL = gatewayUrl;
+    return scopedEnv;
+  }
+
+  private resolveWorkspaceRoot(): string | undefined {
+    return this.scope.workspaceRoot?.trim() || undefined;
   }
 
   private async resolveSessionIdByKey(sessionKey: string): Promise<string | undefined> {

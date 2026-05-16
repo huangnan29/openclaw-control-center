@@ -16,8 +16,13 @@ export interface CurrentAgentCatalog {
   entries: CurrentAgentCatalogEntry[];
 }
 
-export async function loadCurrentAgentCatalog(): Promise<CurrentAgentCatalog> {
-  const sourcePath = resolveOpenClawConfigPath();
+export interface CurrentAgentCatalogInput {
+  openclawHome?: string;
+  configPath?: string;
+}
+
+export async function loadCurrentAgentCatalog(input: CurrentAgentCatalogInput = {}): Promise<CurrentAgentCatalog> {
+  const sourcePath = resolveOpenClawConfigPath(input);
 
   try {
     const raw = JSON.parse(await readFile(sourcePath, "utf8")) as unknown;
@@ -79,14 +84,16 @@ export async function loadCurrentAgentCatalog(): Promise<CurrentAgentCatalog> {
   }
 }
 
-export function resolveOpenClawHomePath(): string {
-  return process.env.OPENCLAW_HOME?.trim() || join(homedir(), ".openclaw");
+export function resolveOpenClawHomePath(input: CurrentAgentCatalogInput = {}): string {
+  return input.openclawHome?.trim() || process.env.OPENCLAW_HOME?.trim() || join(homedir(), ".openclaw");
 }
 
-export function resolveOpenClawConfigPath(): string {
+export function resolveOpenClawConfigPath(input: CurrentAgentCatalogInput = {}): string {
+  const scoped = input.configPath?.trim();
+  if (scoped) return scoped;
   const explicit = process.env.OPENCLAW_CONFIG_PATH?.trim();
   if (explicit) return explicit;
-  return join(resolveOpenClawHomePath(), "openclaw.json");
+  return join(resolveOpenClawHomePath(input), "openclaw.json");
 }
 
 function isFsNotFound(error: unknown): boolean {
