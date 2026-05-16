@@ -219,6 +219,11 @@ npm run dev:ui
   - `OPENCLAW_CONTROL_UI_URL`
   - `UI_BIND_ADDRESS=0.0.0.0`
 
+## 多实例只读模式
+- 如果你有多套 OpenClaw 实例，可以使用 `OPENCLAW_INSTANCES_FILE` 启用只读多实例总览。
+- 该模式默认只观察，不执行审批、导入、任务心跳、hall runtime dispatch 或其他修改类动作。
+- 部署前请先阅读 [多实例只读部署](docs/MULTI_INSTANCE_READONLY.md)，并确认实例目录都以 `:ro` 方式挂载。
+
 ## 多 Agent workspace 目录布局
 - 默认回退布局是 `<OPENCLAW_WORKSPACE_ROOT>/agents/<agentId>`。
 - 如果你的 agent 实际目录是 `workspace/a`、`workspace/b` 这种同级自定义目录，就需要在 `openclaw.json` 里给每个 agent 明确写 `workspace`。

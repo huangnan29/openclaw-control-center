@@ -128,3 +128,16 @@ test("core source directories are present and tracked in git", () => {
 
   assert.deepEqual(tracked.sort(), ["src/runtime/usage-cost.ts", "src/ui/server.ts"]);
 });
+
+test("multi-instance readonly docs describe safe Oracle deployment", async () => {
+  const doc = readFileSync(path.join(ROOT, "docs", "MULTI_INSTANCE_READONLY.md"), "utf8");
+  const compose = readFileSync(path.join(ROOT, "docker-compose.example.yml"), "utf8");
+  const env = readFileSync(path.join(ROOT, ".env.example"), "utf8");
+
+  assert(doc.includes("OPENCLAW_INSTANCES_FILE"));
+  assert(doc.includes("/srv/openclaw-work"));
+  assert(doc.includes(":ro"));
+  assert(doc.includes("不挂载 /var/run/docker.sock"));
+  assert(compose.includes("OPENCLAW_INSTANCES_FILE"));
+  assert(env.includes("OPENCLAW_INSTANCES_JSON"));
+});

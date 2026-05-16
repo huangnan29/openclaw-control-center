@@ -15,6 +15,7 @@ services:
       UI_BIND_ADDRESS: "0.0.0.0"
       UI_TIMEZONE: "UTC"
       READONLY_MODE: "true"
+      OPENCLAW_INSTANCES_FILE: "/app/config/instances.json"
       LOCAL_TOKEN_AUTH_REQUIRED: "true"
       LOCAL_API_TOKEN: "change-this-before-exposing-the-ui"
       # If the OpenClaw Gateway runs on the host, try host.docker.internal.
@@ -30,10 +31,17 @@ services:
       CODEX_HOME: "/data/.codex"
     volumes:
       - control-center-runtime:/app/runtime
+      # Multi-instance readonly config. Create this file from docs/MULTI_INSTANCE_READONLY.md.
+      - /absolute/path/to/instances.json:/app/config/instances.json:ro
       # Mount the same OpenClaw / Codex data used by your real deployment.
       - /absolute/path/to/openclaw-home:/data/.openclaw:ro
       - /absolute/path/to/openclaw-workspace:/data/workspace:ro
       - /absolute/path/to/codex-home:/data/.codex:ro
+      # Optional multi-instance mounts. Keep every instance read-only and do not mount /var/run/docker.sock.
+      # - /srv/openclaw/config:/instances/main/config:ro
+      # - /srv/openclaw/workspace:/instances/main/workspace:ro
+      # - /srv/openclaw-work/config:/instances/tom/config:ro
+      # - /srv/openclaw-work/workspace:/instances/tom/workspace:ro
 
 volumes:
   control-center-runtime: {}

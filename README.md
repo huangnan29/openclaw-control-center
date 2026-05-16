@@ -227,6 +227,11 @@ Notes:
   - `OPENCLAW_CONTROL_UI_URL`
   - `UI_BIND_ADDRESS=0.0.0.0`
 
+## Multi-instance readonly mode
+- If you run multiple OpenClaw instances, set `OPENCLAW_INSTANCES_FILE` to enable a readonly multi-instance overview.
+- This mode observes only. It does not perform approvals, imports, task heartbeats, hall runtime dispatch, or other mutation actions.
+- Before deploying, read [multi-instance readonly deployment](docs/MULTI_INSTANCE_READONLY.md) and make sure instance directories are mounted with `:ro`.
+
 ## Multi-agent workspace layouts
 - The default fallback layout is `<OPENCLAW_WORKSPACE_ROOT>/agents/<agentId>`.
 - If your agents actually live in sibling folders such as `workspace/a` and `workspace/b`, define each agent's `workspace` explicitly in `openclaw.json`.
