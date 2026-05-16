@@ -15,6 +15,7 @@ type InstanceConfigEnv = Partial<
     NodeJS.ProcessEnv,
     | "GATEWAY_URL"
     | "OPENCLAW_HOME"
+    | "OPENCLAW_CONFIG_PATH"
     | "OPENCLAW_WORKSPACE_ROOT"
     | "OPENCLAW_INSTANCES_FILE"
     | "OPENCLAW_INSTANCES_JSON"
@@ -68,14 +69,21 @@ export function parseOpenClawInstanceConfigText(
 
     seenIds.add(id);
 
-    const openclawHome = readTrimmedString(entry.openclawHome) ?? join(homedir(), ".openclaw");
+    const instanceIssues = validateInstanceEntry(entry, id);
+    if (instanceIssues.length > 0) {
+      issues.push(...instanceIssues);
+      continue;
+    }
+
+    const name = readTrimmedString(entry.name) ?? readTrimmedString(entry.label) ?? id;
+    const openclawHome = readTrimmedString(entry.openclawHome) as string;
     const gatewayUrl = readTrimmedString(entry.gatewayUrl) ?? DEFAULT_GATEWAY_URL;
     const openclawConfigPath = readTrimmedString(entry.openclawConfigPath) ?? join(openclawHome, "openclaw.json");
     const workspaceRoot = readTrimmedString(entry.workspaceRoot);
 
     instances.push({
       id,
-      label: readTrimmedString(entry.label) ?? id,
+      name,
       gatewayUrl,
       openclawHome,
       openclawConfigPath,
@@ -109,6 +117,7 @@ export function loadOpenClawInstanceConfigs(
   }
 
   const openclawHome = readTrimmedString(env.OPENCLAW_HOME) ?? join(homedir(), ".openclaw");
+  const openclawConfigPath = readTrimmedString(env.OPENCLAW_CONFIG_PATH) ?? join(openclawHome, "openclaw.json");
   const workspaceRoot = readTrimmedString(env.OPENCLAW_WORKSPACE_ROOT);
   return {
     source: "fallback",
@@ -116,10 +125,10 @@ export function loadOpenClawInstanceConfigs(
     instances: [
       {
         id: "default",
-        label: "default",
+        name: "default",
         gatewayUrl: readTrimmedString(env.GATEWAY_URL) ?? DEFAULT_GATEWAY_URL,
         openclawHome,
-        openclawConfigPath: join(openclawHome, "openclaw.json"),
+        openclawConfigPath,
         ...(workspaceRoot ? { workspaceRoot } : {}),
         readonly: true,
       },
@@ -135,6 +144,33 @@ function readInstanceEntries(parsed: unknown): unknown[] | undefined {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function validateInstanceEntry(entry: Record<string, unknown>, id: string): OpenClawInstanceConfigIssue[] {
+  const issues: OpenClawInstanceConfigIssue[] = [];
+  if (entry.name !== undefined && readTrimmedString(entry.name) === undefined) {
+    issues.push({ message: `invalid name for id: ${id}` });
+  } else if (entry.name === undefined && entry.label !== undefined && readTrimmedString(entry.label) === undefined) {
+    issues.push({ message: `invalid name for id: ${id}` });
+  } else if (entry.name === undefined && entry.label === undefined) {
+    issues.push({ message: `missing name for id: ${id}` });
+  }
+
+  if (entry.openclawHome === undefined) {
+    issues.push({ message: `missing openclawHome for id: ${id}` });
+  } else if (readTrimmedString(entry.openclawHome) === undefined) {
+    issues.push({ message: `invalid openclawHome for id: ${id}` });
+  }
+
+  if (entry.gatewayUrl !== undefined && readTrimmedString(entry.gatewayUrl) === undefined) {
+    issues.push({ message: `invalid gatewayUrl for id: ${id}` });
+  }
+
+  if (entry.workspaceRoot !== undefined && readTrimmedString(entry.workspaceRoot) === undefined) {
+    issues.push({ message: `invalid workspaceRoot for id: ${id}` });
+  }
+
+  return issues;
 }
 
 function readTrimmedString(value: unknown): string | undefined {

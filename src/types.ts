@@ -1,9 +1,9 @@
 export type AgentRunState = "idle" | "running" | "blocked" | "waiting_approval" | "error";
-export type InstanceConnectionStatus = "unknown" | "connected" | "disconnected" | "error";
+export type InstanceConnectionStatus = "connected" | "partial" | "not_connected";
 
 export interface OpenClawInstanceConfig {
   id: string;
-  label: string;
+  name: string;
   gatewayUrl: string;
   openclawHome: string;
   openclawConfigPath: string;
