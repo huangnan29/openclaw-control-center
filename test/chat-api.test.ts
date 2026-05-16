@@ -183,6 +183,7 @@ test("room mutation routes require local token when the gate is enabled", async 
     const server = startUiServer(0, new ReadonlyToolClient(), {
       localTokenAuthRequired: true,
       localApiToken: localToken,
+      readonlyMode: false,
     });
     try {
       if (!server.listening) {

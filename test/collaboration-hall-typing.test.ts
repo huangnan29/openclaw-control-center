@@ -534,6 +534,7 @@ async function startTestUiServer() {
   const { startUiServer } = await import("../src/ui/server");
   return startUiServer(0, new ReadonlyToolClient(), {
     localTokenAuthRequired: false,
+    readonlyMode: false,
   });
 }
 

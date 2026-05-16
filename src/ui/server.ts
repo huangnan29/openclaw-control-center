@@ -1008,6 +1008,7 @@ interface LinkageGraph {
 interface StartUiServerOptions {
   localTokenAuthRequired?: boolean;
   localApiToken?: string;
+  readonlyMode?: boolean;
   createMultiInstanceSnapshot?: (
     instances: OpenClawInstanceConfig[],
     selectedInstanceId?: string,
@@ -1053,11 +1054,13 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
   const approvalActions = new ApprovalActionService(toolClient);
   const localTokenGateRequired = options.localTokenAuthRequired ?? LOCAL_TOKEN_AUTH_REQUIRED;
   const localApiToken = options.localApiToken ?? LOCAL_API_TOKEN;
+  const readonlyMode = options.readonlyMode ?? READONLY_MODE;
   const assertMutationAuthorized = (
     req: IncomingMessage,
     routeLabel: string,
     explicitToken?: string | null,
   ): void => {
+    assertReadonlyMutationAllowed(req, routeLabel, readonlyMode);
     assertMutationAuthorizedWithConfig(
       req,
       routeLabel,
@@ -1073,6 +1076,7 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
     routeLabel: string,
     explicitToken?: string | null,
   ): void => {
+    assertReadonlyMutationAllowed(req, routeLabel, readonlyMode);
     assertMutationAuthorizedWithConfig(
       req,
       routeLabel,
@@ -19672,6 +19676,28 @@ function assertMutationAuthorizedWithConfig(
   if (!decision.ok) {
     throw new RequestValidationError(decision.message, decision.statusCode);
   }
+}
+
+function assertReadonlyMutationAllowed(req: IncomingMessage, routeLabel: string, readonlyMode: boolean): void {
+  const instanceConfig = loadOpenClawInstanceConfigs();
+  if (!isReadonlyMultiInstanceMode({ readonlyMode, instanceCount: instanceConfig.instances.length })) return;
+
+  const url = new URL(req.url ?? "/", "http://127.0.0.1");
+  const language = resolveUiLanguage(url.searchParams, "zh");
+  throw new RequestValidationError(readonlyMutationError(routeLabel, language), 403);
+}
+
+function isReadonlyMultiInstanceMode(input: { readonlyMode: boolean; instanceCount: number }): boolean {
+  return input.readonlyMode || input.instanceCount > 1;
+}
+
+function readonlyMutationError(routeLabel: string, language: UiLanguage): string {
+  const message = pickUiText(
+    language,
+    "This control center is running in readonly multi-instance mode. Mutation endpoints are disabled.",
+    "控制中心正以只读多实例模式运行，修改类接口已禁用。",
+  );
+  return `${message} ${routeLabel}`;
 }
 
 function readHeaderValue(req: IncomingMessage, name: string): string | undefined {
