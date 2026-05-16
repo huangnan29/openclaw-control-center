@@ -1,4 +1,36 @@
 export type AgentRunState = "idle" | "running" | "blocked" | "waiting_approval" | "error";
+export type InstanceConnectionStatus = "unknown" | "connected" | "disconnected" | "error";
+
+export interface OpenClawInstanceConfig {
+  id: string;
+  label: string;
+  gatewayUrl: string;
+  openclawHome: string;
+  openclawConfigPath: string;
+  workspaceRoot?: string;
+  readonly: boolean;
+}
+
+export interface OpenClawInstanceConfigIssue {
+  message: string;
+}
+
+export interface OpenClawInstanceConfigLoadResult {
+  source: string;
+  instances: OpenClawInstanceConfig[];
+  issues: OpenClawInstanceConfigIssue[];
+}
+
+export interface InstanceSnapshot {
+  instance: OpenClawInstanceConfig;
+  connectionStatus: InstanceConnectionStatus;
+  generatedAt: string;
+}
+
+export interface MultiInstanceSnapshot {
+  instances: InstanceSnapshot[];
+  generatedAt: string;
+}
 
 export interface SessionSummary {
   sessionKey: string;
