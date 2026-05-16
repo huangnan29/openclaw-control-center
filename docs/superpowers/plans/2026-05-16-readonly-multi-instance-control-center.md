@@ -1437,6 +1437,6 @@ Do not deploy to Tom until Anan explicitly approves.
 ## 自检
 
 - Spec 覆盖：计划覆盖多实例配置、聚合、UI 总览、实例详情切换、只读安全和部署文档。
-- 占位符扫描：计划不包含 TBD/TODO/待定。
+- 占位内容扫描：计划不包含未完成标记。
 - 类型一致性：所有新增类型以 `src/types.ts` 为来源，后续模块只引用这些类型。
 - 安全边界：第一版没有启用写操作，也不要求 Docker socket 或 privileged。
