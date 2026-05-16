@@ -23,13 +23,27 @@ export interface OpenClawInstanceConfigLoadResult {
 
 export interface InstanceSnapshot {
   instance: OpenClawInstanceConfig;
-  connectionStatus: InstanceConnectionStatus;
-  generatedAt: string;
+  status: InstanceConnectionStatus;
+  detail: string;
+  snapshot: ReadModelSnapshot;
 }
 
 export interface MultiInstanceSnapshot {
-  instances: InstanceSnapshot[];
   generatedAt: string;
+  selectedInstanceId: string;
+  instances: InstanceSnapshot[];
+  totals: {
+    instances: number;
+    connected: number;
+    partial: number;
+    notConnected: number;
+    sessions: number;
+    running: number;
+    blocked: number;
+    errors: number;
+    pendingApprovals: number;
+    cronJobs: number;
+  };
 }
 
 export interface SessionSummary {
