@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFile } from "node:fs/promises";
+import { ReadonlyToolClient } from "../src/clients/tool-client";
 import type { AuditTimelineSnapshot } from "../src/runtime/audit-timeline";
 import type { SessionConversationDetailResult } from "../src/runtime/session-conversations";
 import type { MultiInstanceSnapshot, OpenClawInstanceConfig, ReadModelSnapshot } from "../src/types";
@@ -43,6 +44,54 @@ function smokeSnapshot(generatedAt = "2026-03-03T09:00:00.000Z"): ReadModelSnaps
       evaluations: [],
     },
     generatedAt,
+  };
+}
+
+function routeSmokeMultiSnapshot(
+  instances: OpenClawInstanceConfig[],
+  selectedInstanceId: string,
+): MultiInstanceSnapshot {
+  const generatedAt = "2026-03-03T09:02:00.000Z";
+  const snapshots = instances.map((instance) => {
+    const snapshot = smokeSnapshot(generatedAt);
+    const status: "connected" | "partial" | "not_connected" = instance.id === "jerry" ? "partial" : "connected";
+    snapshot.sessions = [
+      {
+        sessionKey: `${instance.id}-route-session`,
+        label: `${instance.name} route session`,
+        state: instance.id === "tom" ? "running" : "idle",
+      },
+    ];
+    snapshot.approvals = instance.id === "tom" ? [{ approvalId: "approval-route", status: "pending" }] : [];
+    return {
+      instance,
+      status,
+      detail: `${instance.name} route detail`,
+      snapshot,
+    };
+  });
+  return {
+    generatedAt,
+    selectedInstanceId,
+    instances: snapshots,
+    totals: {
+      instances: snapshots.length,
+      connected: snapshots.filter((item) => item.status === "connected").length,
+      partial: snapshots.filter((item) => item.status === "partial").length,
+      notConnected: snapshots.filter((item) => item.status === "not_connected").length,
+      sessions: snapshots.reduce((total, item) => total + item.snapshot.sessions.length, 0),
+      running: snapshots.reduce(
+        (total, item) => total + item.snapshot.sessions.filter((session) => session.state === "running").length,
+        0,
+      ),
+      blocked: 0,
+      errors: 0,
+      pendingApprovals: snapshots.reduce(
+        (total, item) => total + item.snapshot.approvals.filter((approval) => approval.status === "pending").length,
+        0,
+      ),
+      cronJobs: 0,
+    },
   };
 }
 
@@ -107,6 +156,132 @@ test("multi-instance overview renders status metrics detail links and selected s
   assert(html.includes("当前实例"));
   assert(html.includes("gateway unavailable &lt;unsafe&gt;"));
   assert(!html.includes("gateway unavailable <unsafe>"));
+});
+
+test("multi-instance routes render overview detail and invalid-instance fallback", async () => {
+  const { startUiServer } = await import("../src/ui/server");
+  const previousInstancesJson = process.env.OPENCLAW_INSTANCES_JSON;
+  const previousInstancesFile = process.env.OPENCLAW_INSTANCES_FILE;
+  process.env.OPENCLAW_INSTANCES_JSON = JSON.stringify({
+    instances: [smokeInstance("tom", "Tom Workspace"), smokeInstance("jerry", "Jerry Workspace")],
+  });
+  delete process.env.OPENCLAW_INSTANCES_FILE;
+  const calls: string[] = [];
+  const server = startUiServer(0, new ReadonlyToolClient(), {
+    async createMultiInstanceSnapshot(instances, selectedInstanceId) {
+      calls.push(selectedInstanceId ?? "");
+      return routeSmokeMultiSnapshot(instances, selectedInstanceId ?? "tom");
+    },
+  });
+
+  try {
+    if (!server.listening) {
+      await new Promise<void>((resolve, reject) => {
+        server.once("listening", resolve);
+        server.once("error", reject);
+      });
+    }
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Failed to bind ephemeral UI port.");
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+
+    const overviewResponse = await fetch(`${baseUrl}/`);
+    assert.equal(overviewResponse.status, 200);
+    const overviewHtml = await overviewResponse.text();
+    assert(overviewHtml.includes("多实例只读总览"));
+    assert(overviewHtml.includes('href="/?instance=tom&amp;section=overview'));
+
+    const detailResponse = await fetch(`${baseUrl}/?instance=tom&section=projects-tasks&lang=zh`);
+    assert.equal(detailResponse.status, 200);
+    const detailHtml = await detailResponse.text();
+    assert(detailHtml.includes("只读实例详情"));
+    assert(detailHtml.includes("Tom Workspace"));
+    assert(detailHtml.includes("tom-route-session"));
+    assert(detailHtml.includes("本页不挂载执行、编辑或审批控件"));
+    assert(detailHtml.includes('href="/?section=projects-tasks&amp;lang=zh"'));
+    assert(detailHtml.includes('href="/?instance=tom&amp;section=projects-tasks&amp;lang=zh"'));
+    assert(detailHtml.includes('href="/?instance=jerry&amp;section=projects-tasks&amp;lang=zh"'));
+    assert(!detailHtml.includes("data-file-save"));
+    assert(!detailHtml.includes("data-task-room-approve"));
+    assert(!detailHtml.includes("<script"));
+    assert(!detailHtml.includes("/api/approvals"));
+    assert(!detailHtml.includes("/api/files/content"));
+    assert(!detailHtml.includes("fetch("));
+
+    const invalidResponse = await fetch(`${baseUrl}/?instance=missing`);
+    assert.equal(invalidResponse.status, 200);
+    const invalidHtml = await invalidResponse.text();
+    assert(invalidHtml.includes("未找到该实例"));
+    assert(invalidHtml.includes("多实例只读总览"));
+    assert.deepEqual(calls, ["tom", "tom", "missing"]);
+  } finally {
+    if (server.listening) {
+      await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+    }
+    if (previousInstancesJson === undefined) {
+      delete process.env.OPENCLAW_INSTANCES_JSON;
+    } else {
+      process.env.OPENCLAW_INSTANCES_JSON = previousInstancesJson;
+    }
+    if (previousInstancesFile === undefined) {
+      delete process.env.OPENCLAW_INSTANCES_FILE;
+    } else {
+      process.env.OPENCLAW_INSTANCES_FILE = previousInstancesFile;
+    }
+  }
+});
+
+test("explicit single instance config still uses multi-instance overview", async () => {
+  const { startUiServer } = await import("../src/ui/server");
+  const previousInstancesJson = process.env.OPENCLAW_INSTANCES_JSON;
+  const previousInstancesFile = process.env.OPENCLAW_INSTANCES_FILE;
+  process.env.OPENCLAW_INSTANCES_JSON = JSON.stringify({
+    instances: [smokeInstance("solo", "Solo Workspace")],
+  });
+  delete process.env.OPENCLAW_INSTANCES_FILE;
+  const server = startUiServer(0, new ReadonlyToolClient(), {
+    async createMultiInstanceSnapshot(instances, selectedInstanceId) {
+      return routeSmokeMultiSnapshot(instances, selectedInstanceId ?? "solo");
+    },
+  });
+
+  try {
+    if (!server.listening) {
+      await new Promise<void>((resolve, reject) => {
+        server.once("listening", resolve);
+        server.once("error", reject);
+      });
+    }
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Failed to bind ephemeral UI port.");
+    const response = await fetch(`http://127.0.0.1:${address.port}/`);
+    assert.equal(response.status, 200);
+    const html = await response.text();
+    assert(html.includes("多实例只读总览"));
+    assert(html.includes("Solo Workspace"));
+    assert(html.includes('href="/?instance=solo&amp;section=overview'));
+
+    const detailResponse = await fetch(`http://127.0.0.1:${address.port}/?instance=solo&section=overview&lang=zh`);
+    assert.equal(detailResponse.status, 200);
+    const detailHtml = await detailResponse.text();
+    assert(detailHtml.includes("只读实例详情"));
+    assert(detailHtml.includes("Solo Workspace"));
+    assert(detailHtml.includes("solo-route-session"));
+  } finally {
+    if (server.listening) {
+      await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+    }
+    if (previousInstancesJson === undefined) {
+      delete process.env.OPENCLAW_INSTANCES_JSON;
+    } else {
+      process.env.OPENCLAW_INSTANCES_JSON = previousInstancesJson;
+    }
+    if (previousInstancesFile === undefined) {
+      delete process.env.OPENCLAW_INSTANCES_FILE;
+    } else {
+      process.env.OPENCLAW_INSTANCES_FILE = previousInstancesFile;
+    }
+  }
 });
 
 test("session drilldown page renders without network and escapes content", async () => {
