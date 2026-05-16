@@ -17,7 +17,9 @@ import {
   UI_TIMEZONE,
 } from "../config";
 import type { ToolClient } from "../clients/tool-client";
+import { createScopedToolClient } from "../clients/factory";
 import { mapSessionsListToSummaries } from "../mappers/openclaw-mappers";
+import { MultiInstanceReadonlyAdapter } from "../adapters/multi-instance-readonly";
 import { buildApiDocs } from "../runtime/api-docs";
 import { computeBudgetSummary } from "../runtime/budget-governance";
 import { BUDGET_POLICY_PATH, loadBudgetPolicy } from "../runtime/budget-policy";
@@ -34,6 +36,7 @@ import { collectDiagnosticsBundle, formatDiagnosticsText } from "../runtime/diag
 import { loadLatestDigest, renderLatestDigestPage } from "../runtime/digest-renderer";
 import { buildExportBundle, writeExportBundle } from "../runtime/export-bundle";
 import { buildHealthzPayload } from "../runtime/healthz";
+import { loadOpenClawInstanceConfigs } from "../runtime/instance-config";
 import { applyImportMutation, readImportMutationGuardState } from "../runtime/import-live";
 import { validateExportBundleDryRun, validateExportFileDryRun } from "../runtime/import-dry-run";
 import {
@@ -183,6 +186,9 @@ import type {
   CommanderExceptionsFeed,
   DoneChecklistSnapshot,
   NotificationCenterSnapshot,
+  MultiInstanceSnapshot,
+  InstanceSnapshot,
+  OpenClawInstanceConfig,
   ReadinessCategoryScore,
   ProjectState,
   ReadModelSnapshot,
@@ -1111,6 +1117,43 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
         if (path !== "/") {
           const target = `${buildHomeHref(filters, compactStatusStrip, section, language, usageView)}${legacyAnchor ? `#${legacyAnchor}` : ""}`;
           return redirect(res, 302, target);
+        }
+
+        const instanceConfigs = loadOpenClawInstanceConfigs();
+        if (instanceConfigs.instances.length > 1) {
+          const requestedInstanceId = normalizeQueryString(url.searchParams.get("instance"), "instance", 120, true);
+          const selectedInstance = requestedInstanceId
+            ? instanceConfigs.instances.find((instance) => instance.id === requestedInstanceId)
+            : undefined;
+
+          if (!requestedInstanceId || !selectedInstance) {
+            const snapshot = await new MultiInstanceReadonlyAdapter(instanceConfigs.instances).snapshot(
+              requestedInstanceId ?? instanceConfigs.instances[0]?.id,
+            );
+            const warning = requestedInstanceId
+              ? pickUiText(language, "Instance not found. Showing the readonly overview.", "未找到该实例，已显示只读总览。")
+              : undefined;
+            const html = renderMultiInstanceOverview(snapshot, language, warning);
+            return writeText(res, 200, html, "text/html; charset=utf-8");
+          }
+
+          const scopedClient = createScopedToolClient(selectedInstance);
+          const html = await renderHtml(filters, scopedClient, {
+            section,
+            language,
+            compactStatusStrip,
+            usageView,
+            preferencesPath: prefs.path,
+            search,
+            selectedRoomId,
+            selectedTaskCardId,
+          });
+          return writeText(
+            res,
+            200,
+            decorateInstanceDetailHtml(html, instanceConfigs.instances, selectedInstance.id, language),
+            "text/html; charset=utf-8",
+          );
         }
 
         if (hasAnyQueryKey(url.searchParams, ["quick", "status", "owner", "project", "compact", "lang", "usage_view"])) {
@@ -5804,6 +5847,149 @@ async function loadCachedReplayPreview(): Promise<Awaited<ReturnType<typeof load
   } finally {
     renderReplayPreviewInFlight = undefined;
   }
+}
+
+function renderMultiInstanceOverview(
+  snapshot: MultiInstanceSnapshot,
+  language: UiLanguage = "zh",
+  warning?: string,
+): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const totalChips = [
+    { label: t("Instances", "实例数"), value: snapshot.totals.instances },
+    { label: t("Connected", "已连接"), value: snapshot.totals.connected },
+    { label: t("Sessions", "会话数"), value: snapshot.totals.sessions },
+    { label: t("Pending approvals", "待审批"), value: snapshot.totals.pendingApprovals },
+    { label: t("Errors", "错误数"), value: snapshot.totals.errors },
+  ]
+    .map((item) => `<div class="status-chip"><span>${escapeHtml(item.label)}</span><strong>${item.value}</strong></div>`)
+    .join("");
+  const cards = snapshot.instances.map((instance) => renderMultiInstanceCard(instance, snapshot.selectedInstanceId, language)).join("");
+  const selectedInstance = snapshot.instances.find((item) => item.instance.id === snapshot.selectedInstanceId);
+  const selectedMessage = selectedInstance
+    ? `${t("Current instance", "当前实例")}${language === "zh" ? "：" : ": "}${selectedInstance.instance.name}`
+    : t("No instance is selected.", "当前未选中实例。");
+  const warningHtml = warning ? `<div class="notice warning">${escapeHtml(warning)}</div>` : "";
+
+  return `<!doctype html>
+<html lang="${escapeHtml(language)}">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtml(t("OpenClaw Multi-instance Overview", "OpenClaw 多实例总览"))}</title>
+  <style>
+    :root { color-scheme: light; --border: rgba(17, 24, 39, 0.12); --muted: #667085; --text: #1d1d1f; --bg: #f5f7fb; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--text); background: var(--bg); }
+    .shell { max-width: 1180px; margin: 0 auto; padding: 28px 20px 40px; }
+    .hero { display: grid; gap: 10px; margin-bottom: 18px; }
+    .hero h1 { margin: 0; font-size: 28px; letter-spacing: 0; }
+    .meta { color: var(--muted); font-size: 13px; }
+    .notice { border: 1px solid rgba(180, 83, 9, 0.24); background: #fff7ed; color: #92400e; border-radius: 8px; padding: 10px 12px; margin: 14px 0; }
+    .status-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 16px 0; }
+    .status-chip { border: 1px solid var(--border); border-radius: 8px; padding: 12px; background: rgba(255, 255, 255, 0.9); }
+    .status-chip span { display: block; color: var(--muted); font-size: 12px; }
+    .status-chip strong { display: block; margin-top: 5px; font-size: 24px; line-height: 1.08; }
+    .instance-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-top: 14px; }
+    .card { border: 1px solid var(--border); border-radius: 8px; background: #fff; padding: 14px; }
+    .card.active { border-color: rgba(0, 113, 227, 0.5); box-shadow: 0 8px 24px rgba(0, 113, 227, 0.08); }
+    .card-head { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+    .card h2 { margin: 0; font-size: 17px; letter-spacing: 0; }
+    .badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 8px; font-size: 12px; border: 1px solid var(--border); color: #344054; background: #f9fafb; }
+    .badge.connected { color: #05603a; background: #ecfdf3; border-color: #abefc6; }
+    .badge.partial { color: #92400e; background: #fffbeb; border-color: #fde68a; }
+    .badge.not_connected { color: #b42318; background: #fef3f2; border-color: #fecdca; }
+    .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0; }
+    .metric { border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
+    .metric span { display: block; color: var(--muted); font-size: 12px; }
+    .metric strong { display: block; margin-top: 3px; font-size: 18px; }
+    a.button { display: inline-flex; margin-top: 8px; text-decoration: none; color: #005cb9; font-weight: 600; }
+    @media (max-width: 720px) { .metrics { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div class="meta">OpenClaw Control Center</div>
+      <h1>${escapeHtml(t("Readonly multi-instance overview", "多实例只读总览"))}</h1>
+      <div class="meta">${escapeHtml(t("Readonly monitoring only. No execution, pause, or approval actions are available here.", "仅用于只读监控。这里不提供执行、暂停或审批动作。"))}</div>
+      <div class="meta">${escapeHtml(t("Updated", "更新时间"))}${escapeHtml(language === "zh" ? "：" : ": ")}${escapeHtml(formatUiTimestamp(snapshot.generatedAt, language))}</div>
+      <div class="meta">${escapeHtml(selectedMessage)}</div>
+    </section>
+    ${warningHtml}
+    <section class="status-strip">${totalChips}</section>
+    <section class="instance-grid">${cards || `<div class="card">${escapeHtml(t("No instances configured.", "尚未配置实例。"))}</div>`}</section>
+  </main>
+</body>
+</html>`;
+}
+
+function renderMultiInstanceCard(instance: InstanceSnapshot, selectedInstanceId: string, language: UiLanguage): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const sessionCount = instance.snapshot.sessions.length;
+  const pendingApprovals = instance.snapshot.approvals.filter((approval) => approval.status === "pending").length;
+  const errorCount = instance.snapshot.sessions.filter((session) => session.state === "error").length;
+  const isSelected = instance.instance.id === selectedInstanceId;
+  const detailHref = `/?instance=${encodeURIComponent(instance.instance.id)}&amp;lang=${encodeURIComponent(language)}`;
+  const metrics = [
+    { label: t("Sessions", "会话数"), value: sessionCount },
+    { label: t("Pending", "待审批"), value: pendingApprovals },
+    { label: t("Errors", "错误数"), value: errorCount },
+  ]
+    .map((item) => `<div class="metric"><span>${escapeHtml(item.label)}</span><strong>${item.value}</strong></div>`)
+    .join("");
+  const selected = isSelected ? `<div class="meta">${escapeHtml(t("Current instance", "当前实例"))}</div>` : "";
+  return `<article class="card${isSelected ? " active" : ""}">
+    <div class="card-head">
+      <div>
+        <h2>${escapeHtml(instance.instance.name)}</h2>
+        <div class="meta">${escapeHtml(instance.instance.id)}</div>
+      </div>
+      ${badge(instance.status, multiInstanceStatusLabel(instance.status, language))}
+    </div>
+    ${selected}
+    <div class="metrics">${metrics}</div>
+    <div class="meta">${escapeHtml(instance.detail)}</div>
+    <a class="button" href="${detailHref}">${escapeHtml(t("Open readonly detail", "进入只读详情"))}</a>
+  </article>`;
+}
+
+function multiInstanceStatusLabel(status: InstanceSnapshot["status"], language: UiLanguage): string {
+  if (status === "connected") return pickUiText(language, "Connected", "已连接");
+  if (status === "partial") return pickUiText(language, "Partial", "部分连接");
+  return pickUiText(language, "Not connected", "未连接");
+}
+
+function decorateInstanceDetailHtml(
+  html: string,
+  instances: OpenClawInstanceConfig[],
+  selectedInstanceId: string,
+  language: UiLanguage,
+): string {
+  const banner = renderInstanceSwitcherBanner(instances, selectedInstanceId, language);
+  return html.replace('<div class="app-shell">', `${banner}<div class="app-shell">`);
+}
+
+function renderInstanceSwitcherBanner(
+  instances: OpenClawInstanceConfig[],
+  selectedInstanceId: string,
+  language: UiLanguage,
+): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const selected = instances.find((instance) => instance.id === selectedInstanceId);
+  const links = instances
+    .map((instance) => {
+      const active = instance.id === selectedInstanceId;
+      const label = active ? `${instance.name} · ${t("Current", "当前")}` : instance.name;
+      return `<a href="/?instance=${encodeURIComponent(instance.id)}&amp;lang=${encodeURIComponent(language)}" style="display:inline-flex;align-items:center;border:1px solid ${active ? "rgba(0,113,227,.5)" : "rgba(17,24,39,.14)"};border-radius:999px;padding:6px 10px;text-decoration:none;color:${active ? "#005cb9" : "#344054"};background:${active ? "#eff8ff" : "#fff"};">${escapeHtml(label)}</a>`;
+    })
+    .join("");
+  return `<div class="instance-switcher" style="position:sticky;top:0;z-index:20;background:rgba(255,255,255,.96);border-bottom:1px solid rgba(17,24,39,.12);padding:10px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+    <strong>${escapeHtml(t("Readonly instance detail", "只读实例详情"))}</strong>
+    <span style="color:#667085;">${escapeHtml(t("Current instance", "当前实例"))}${escapeHtml(language === "zh" ? "：" : ": ")}${escapeHtml(selected?.name ?? selectedInstanceId)}</span>
+    <a href="/?lang=${encodeURIComponent(language)}" style="color:#005cb9;text-decoration:none;font-weight:600;">${escapeHtml(t("Back to overview", "返回总览"))}</a>
+    ${links}
+  </div>`;
 }
 
 async function renderHtml(
@@ -17963,6 +18149,13 @@ export function renderSubscriptionStatusCardForSmoke(subscription: UsageCostSnap
 
 export function pickLatestSessionActivityTimestampForSmoke(...values: Array<string | undefined>): string | undefined {
   return pickLatestSessionActivityTimestamp(...values);
+}
+
+export function renderMultiInstanceOverviewForSmoke(
+  snapshot: MultiInstanceSnapshot,
+  language: UiLanguage = "en",
+): string {
+  return renderMultiInstanceOverview(snapshot, language);
 }
 
 export function renderDashboardSectionNavForSmoke(

@@ -3,7 +3,111 @@ import test from "node:test";
 import { readFile } from "node:fs/promises";
 import type { AuditTimelineSnapshot } from "../src/runtime/audit-timeline";
 import type { SessionConversationDetailResult } from "../src/runtime/session-conversations";
-import type { ReadModelSnapshot } from "../src/types";
+import type { MultiInstanceSnapshot, OpenClawInstanceConfig, ReadModelSnapshot } from "../src/types";
+
+function smokeInstance(id: string, name: string): OpenClawInstanceConfig {
+  return {
+    id,
+    name,
+    gatewayUrl: `ws://127.0.0.1:${id === "tom" ? "18789" : "18790"}`,
+    openclawHome: `/tmp/openclaw-${id}`,
+    openclawConfigPath: `/tmp/openclaw-${id}/openclaw.json`,
+    readonly: true,
+  };
+}
+
+function smokeSnapshot(generatedAt = "2026-03-03T09:00:00.000Z"): ReadModelSnapshot {
+  return {
+    sessions: [],
+    statuses: [],
+    cronJobs: [],
+    approvals: [],
+    projects: { projects: [], updatedAt: generatedAt },
+    projectSummaries: [],
+    tasks: { tasks: [], agentBudgets: [], updatedAt: generatedAt },
+    tasksSummary: {
+      projects: 0,
+      tasks: 0,
+      todo: 0,
+      inProgress: 0,
+      blocked: 0,
+      done: 0,
+      owners: 0,
+      artifacts: 0,
+    },
+    budgetSummary: {
+      total: 0,
+      ok: 0,
+      warn: 0,
+      over: 0,
+      evaluations: [],
+    },
+    generatedAt,
+  };
+}
+
+test("multi-instance overview renders status metrics detail links and selected state", async () => {
+  const { renderMultiInstanceOverviewForSmoke } = await import("../src/ui/server");
+  const tomSnapshot = smokeSnapshot();
+  tomSnapshot.sessions = [
+    { sessionKey: "sess-running", label: "Running Session", state: "running" },
+    { sessionKey: "sess-error", label: "Broken Session", state: "error" },
+  ];
+  tomSnapshot.approvals = [
+    { approvalId: "approval-1", status: "pending", command: "dangerous command" },
+  ];
+
+  const jerrySnapshot = smokeSnapshot();
+  jerrySnapshot.sessions = [{ sessionKey: "sess-waiting", label: "Waiting Session", state: "waiting_approval" }];
+
+  const snapshot: MultiInstanceSnapshot = {
+    generatedAt: "2026-03-03T09:01:00.000Z",
+    selectedInstanceId: "tom",
+    instances: [
+      {
+        instance: smokeInstance("tom", "Tom Workspace"),
+        status: "connected",
+        detail: "ok",
+        snapshot: tomSnapshot,
+      },
+      {
+        instance: smokeInstance("jerry", "Jerry Workspace"),
+        status: "not_connected",
+        detail: "gateway unavailable <unsafe>",
+        snapshot: jerrySnapshot,
+      },
+    ],
+    totals: {
+      instances: 2,
+      connected: 1,
+      partial: 0,
+      notConnected: 1,
+      sessions: 3,
+      running: 1,
+      blocked: 1,
+      errors: 1,
+      pendingApprovals: 1,
+      cronJobs: 0,
+    },
+  };
+
+  const html = renderMultiInstanceOverviewForSmoke(snapshot, "zh");
+  assert(html.includes("多实例只读总览"));
+  assert(html.includes("Tom Workspace"));
+  assert(html.includes("Jerry Workspace"));
+  assert(html.includes("已连接"));
+  assert(html.includes("未连接"));
+  assert(html.includes("会话数"));
+  assert(html.includes("待审批"));
+  assert(html.includes("错误数"));
+  assert(html.includes("<strong>2</strong>"));
+  assert(html.includes("<strong>1</strong>"));
+  assert(html.includes('href="/?instance=tom'));
+  assert(html.includes('href="/?instance=jerry'));
+  assert(html.includes("当前实例"));
+  assert(html.includes("gateway unavailable &lt;unsafe&gt;"));
+  assert(!html.includes("gateway unavailable <unsafe>"));
+});
 
 test("session drilldown page renders without network and escapes content", async () => {
   const { renderSessionDrilldownPageForSmoke } = await import("../src/ui/server");
