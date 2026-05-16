@@ -39,6 +39,14 @@ interface SessionHistoryFileReadResult {
   status: "ok" | "missing" | "error";
 }
 
+interface SessionHistoryCliOptions {
+  timeoutMs?: number;
+  maxBuffer?: number;
+  fastRecovery?: boolean;
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+}
+
 interface OpenClawLiveClientScope {
   openclawHome?: string;
   openclawConfigPath?: string;
@@ -163,6 +171,10 @@ export class OpenClawLiveClient implements ToolClient {
     }
 
     const limit = normalizeLimit(request.limit);
+    const cliOptions = {
+      cwd: this.resolveWorkspaceRoot(),
+      env: this.buildScopedCommandEnv(),
+    };
     let sessionFile = this.sessionCache.get(sessionKey)?.sessionFile;
     if (!sessionFile) {
       sessionFile = await this.lookupSessionFile(sessionKey);
@@ -179,11 +191,12 @@ export class OpenClawLiveClient implements ToolClient {
       // Cached/session-store file paths can go stale or become unreadable.
       // Keep recovery bounded so one bad session cannot stall the whole page.
       return readSessionHistoryFromCli(sessionKey, limit, {
+        ...cliOptions,
         timeoutMs: SESSION_HISTORY_RECOVERY_TIMEOUT_MS,
         fastRecovery: true,
       });
     }
-    return readSessionHistoryFromCli(sessionKey, limit);
+    return readSessionHistoryFromCli(sessionKey, limit, cliOptions);
   }
 
   async cronList(): Promise<CronListResponse> {
@@ -536,7 +549,7 @@ export class OpenClawLiveClient implements ToolClient {
   }
 
   private resolveWorkspaceRoot(): string | undefined {
-    return this.scope.workspaceRoot?.trim() || undefined;
+    return this.scope.workspaceRoot?.trim() || process.env.OPENCLAW_WORKSPACE_ROOT?.trim() || undefined;
   }
 
   private async resolveSessionIdByKey(sessionKey: string): Promise<string | undefined> {
@@ -721,7 +734,7 @@ export function buildWindowsOpenClawCommandLine(command: string, args: string[])
 async function readSessionHistoryFromCli(
   sessionKey: string,
   limit: number,
-  options?: { timeoutMs?: number; fastRecovery?: boolean },
+  options?: SessionHistoryCliOptions,
 ): Promise<SessionsHistoryResponse> {
   const attempts: string[][] = options?.fastRecovery
     ? [
@@ -736,7 +749,12 @@ async function readSessionHistoryFromCli(
 
   for (const args of attempts) {
     try {
-      const json = await runJson<Record<string, unknown>>(args, { timeoutMs: options?.timeoutMs });
+      const json = await runJson<Record<string, unknown>>(args, {
+        timeoutMs: options?.timeoutMs,
+        maxBuffer: options?.maxBuffer,
+        cwd: options?.cwd,
+        env: options?.env,
+      });
       return {
         json,
         rawText: JSON.stringify(json),
@@ -761,7 +779,7 @@ async function readSessionHistoryFromCli(
 async function runHistoryText(
   sessionKey: string,
   limit: number,
-  options?: { timeoutMs?: number; maxBuffer?: number },
+  options?: SessionHistoryCliOptions,
 ): Promise<string> {
   try {
     return await runText(["sessions", "history", sessionKey, "--limit", String(limit)], options);
