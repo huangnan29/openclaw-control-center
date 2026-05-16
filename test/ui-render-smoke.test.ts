@@ -60,9 +60,75 @@ function routeSmokeMultiSnapshot(
         sessionKey: `${instance.id}-route-session`,
         label: `${instance.name} route session`,
         state: instance.id === "tom" ? "running" : "idle",
+        lastMessageAt: generatedAt,
       },
     ];
+    snapshot.statuses = [
+      {
+        sessionKey: `${instance.id}-route-session`,
+        model: "gpt-5.2",
+        tokensIn: 120,
+        tokensOut: 45,
+        cost: 0.0123,
+        updatedAt: generatedAt,
+      },
+    ];
+    snapshot.cronJobs = [{ jobId: `${instance.id}-cron`, name: `${instance.name} cron`, enabled: true, nextRunAt: generatedAt }];
     snapshot.approvals = instance.id === "tom" ? [{ approvalId: "approval-route", status: "pending" }] : [];
+    snapshot.projects.projects = [
+      {
+        projectId: `${instance.id}-project`,
+        title: `${instance.name} project`,
+        status: "active",
+        owner: "operator",
+        budget: {},
+        updatedAt: generatedAt,
+      },
+    ];
+    snapshot.tasks.tasks = [
+      {
+        projectId: `${instance.id}-project`,
+        taskId: `${instance.id}-task`,
+        title: `${instance.name} task`,
+        status: "in_progress",
+        owner: "main",
+        definitionOfDone: [],
+        artifacts: [],
+        rollback: { strategy: "manual", steps: [] },
+        sessionKeys: [`${instance.id}-route-session`],
+        budget: {},
+        updatedAt: generatedAt,
+      },
+    ];
+    snapshot.tasksSummary = {
+      projects: 1,
+      tasks: 1,
+      todo: 0,
+      inProgress: 1,
+      blocked: 0,
+      done: 0,
+      owners: 1,
+      artifacts: 0,
+    };
+    snapshot.budgetSummary = {
+      total: 1,
+      ok: instance.id === "tom" ? 0 : 1,
+      warn: instance.id === "tom" ? 1 : 0,
+      over: 0,
+      evaluations: instance.id === "tom"
+        ? [
+            {
+              scope: "agent",
+              scopeId: "main",
+              label: "main token budget",
+              thresholds: { totalTokens: 100 },
+              usage: { tokensIn: 90, tokensOut: 20, totalTokens: 110, cost: 0.0123 },
+              metrics: [{ metric: "totalTokens", used: 110, limit: 100, warnAt: 80, status: "warn" }],
+              status: "warn",
+            },
+          ]
+        : [],
+    };
     return {
       instance,
       status,
@@ -90,7 +156,7 @@ function routeSmokeMultiSnapshot(
         (total, item) => total + item.snapshot.approvals.filter((approval) => approval.status === "pending").length,
         0,
       ),
-      cronJobs: 0,
+      cronJobs: snapshots.reduce((total, item) => total + item.snapshot.cronJobs.length, 0),
     },
   };
 }
@@ -149,6 +215,9 @@ test("multi-instance overview renders status metrics detail links and selected s
   assert(html.includes("会话数"));
   assert(html.includes("待审批"));
   assert(html.includes("错误数"));
+  assert(html.includes("实例矩阵"));
+  assert(html.includes("关注队列"));
+  assert(html.includes("最近活动"));
   assert(html.includes("<strong>2</strong>"));
   assert(html.includes("<strong>1</strong>"));
   assert(html.includes('href="/?instance=tom'));
@@ -197,6 +266,15 @@ test("multi-instance routes render overview detail and invalid-instance fallback
     assert(detailHtml.includes("只读实例详情"));
     assert(detailHtml.includes("Tom Workspace"));
     assert(detailHtml.includes("tom-route-session"));
+    assert(detailHtml.includes("运行态分布"));
+    assert(detailHtml.includes("项目"));
+    assert(detailHtml.includes("任务"));
+    assert(detailHtml.includes("预算关注"));
+    assert(detailHtml.includes("gpt-5.2"));
+    assert(detailHtml.includes("120/45"));
+    assert(detailHtml.includes("Tom Workspace project"));
+    assert(detailHtml.includes("Tom Workspace task"));
+    assert(detailHtml.includes("main token budget"));
     assert(detailHtml.includes("本页不挂载执行、编辑或审批控件"));
     assert(detailHtml.includes('href="/?section=projects-tasks&amp;lang=zh"'));
     assert(detailHtml.includes('href="/?instance=tom&amp;section=projects-tasks&amp;lang=zh"'));

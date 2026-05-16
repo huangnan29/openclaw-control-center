@@ -5849,6 +5849,148 @@ async function loadCachedReplayPreview(): Promise<Awaited<ReturnType<typeof load
   }
 }
 
+interface MultiInstanceUiMetrics {
+  sessions: number;
+  running: number;
+  blocked: number;
+  errors: number;
+  pendingApprovals: number;
+  cronJobs: number;
+  projects: number;
+  tasks: number;
+  lastActivityAt?: string;
+}
+
+function buildInstanceUiMetrics(item: InstanceSnapshot): MultiInstanceUiMetrics {
+  const sessions = item.snapshot.sessions;
+  const lastActivityAt = sessions
+    .map((session) => session.lastMessageAt)
+    .filter((value): value is string => typeof value === "string" && !Number.isNaN(Date.parse(value)))
+    .sort((a, b) => Date.parse(b) - Date.parse(a))[0];
+
+  return {
+    sessions: sessions.length,
+    running: sessions.filter((session) => session.state === "running").length,
+    blocked: sessions.filter((session) => session.state === "blocked" || session.state === "waiting_approval").length,
+    errors: sessions.filter((session) => session.state === "error").length,
+    pendingApprovals: item.snapshot.approvals.filter((approval) => approval.status === "pending").length,
+    cronJobs: item.snapshot.cronJobs.length,
+    projects: item.snapshot.projects.projects.length,
+    tasks: item.snapshot.tasks.tasks.length,
+    lastActivityAt,
+  };
+}
+
+function renderFleetMetricChip(label: string, value: number | string, tone = ""): string {
+  return `<div class="status-chip${tone ? ` ${escapeHtml(tone)}` : ""}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></div>`;
+}
+
+function renderMiniSessions(item: InstanceSnapshot, language: UiLanguage, limit = 3): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const sessions = [...item.snapshot.sessions]
+    .sort((a, b) => toSortableMs(b.lastMessageAt) - toSortableMs(a.lastMessageAt))
+    .slice(0, limit);
+  if (sessions.length === 0) return `<div class="meta">${escapeHtml(t("No sessions reported.", "暂无会话上报。"))}</div>`;
+  return `<ul class="mini-list">${sessions
+    .map(
+      (session) =>
+        `<li><span>${badge(session.state, sessionStateLabel(session.state))}</span><code>${escapeHtml(safeTruncate(session.label ?? session.agentId ?? session.sessionKey, 46))}</code></li>`,
+    )
+    .join("")}</ul>`;
+}
+
+function renderFleetMatrix(snapshot: MultiInstanceSnapshot, language: UiLanguage): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const rows = snapshot.instances
+    .map((item) => {
+      const metrics = buildInstanceUiMetrics(item);
+      const href = `/?instance=${encodeURIComponent(item.instance.id)}&amp;section=overview&amp;lang=${encodeURIComponent(language)}`;
+      return `<tr>
+        <td><a href="${href}">${escapeHtml(item.instance.name)}</a><div class="meta"><code>${escapeHtml(item.instance.id)}</code></div></td>
+        <td>${badge(item.status, multiInstanceStatusLabel(item.status, language))}</td>
+        <td>${metrics.sessions}</td>
+        <td>${metrics.running}</td>
+        <td>${metrics.blocked}</td>
+        <td>${metrics.errors}</td>
+        <td>${metrics.pendingApprovals}</td>
+        <td>${metrics.cronJobs}</td>
+        <td>${escapeHtml(metrics.lastActivityAt ? formatUiTimestamp(metrics.lastActivityAt, language) : "-")}</td>
+      </tr>`;
+    })
+    .join("");
+  return `<section class="panel">
+    <div class="panel-head">
+      <h2>${escapeHtml(t("Instance matrix", "实例矩阵"))}</h2>
+      <div class="meta">${escapeHtml(t("Read-only comparison across configured OpenClaw homes.", "跨已配置 OpenClaw Home 的只读对比。"))}</div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>${escapeHtml(t("Instance", "实例"))}</th><th>${escapeHtml(t("Status", "状态"))}</th><th>${escapeHtml(t("Sessions", "会话"))}</th><th>${escapeHtml(t("Running", "运行中"))}</th><th>${escapeHtml(t("Blocked", "阻塞"))}</th><th>${escapeHtml(t("Errors", "错误"))}</th><th>${escapeHtml(t("Pending", "待审"))}</th><th>Cron</th><th>${escapeHtml(t("Last activity", "最近活动"))}</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  </section>`;
+}
+
+function renderFleetAttention(snapshot: MultiInstanceSnapshot, language: UiLanguage): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const attention = snapshot.instances
+    .map((item) => ({ item, metrics: buildInstanceUiMetrics(item) }))
+    .filter(({ item, metrics }) => item.status !== "connected" || metrics.blocked > 0 || metrics.errors > 0 || metrics.pendingApprovals > 0)
+    .sort((a, b) => b.metrics.errors + b.metrics.blocked + b.metrics.pendingApprovals - (a.metrics.errors + a.metrics.blocked + a.metrics.pendingApprovals));
+
+  const body = attention.length === 0
+    ? `<div class="empty-state">${escapeHtml(t("No blocked sessions, errors, or pending approvals across the fleet.", "当前所有实例暂无阻塞、错误或待审批。"))}</div>`
+    : `<ul class="attention-list">${attention
+        .map(({ item, metrics }) => {
+          const href = `/?instance=${encodeURIComponent(item.instance.id)}&amp;section=overview&amp;lang=${encodeURIComponent(language)}`;
+          const summary = [
+            item.status !== "connected" ? multiInstanceStatusLabel(item.status, language) : "",
+            metrics.blocked > 0 ? `${t("Blocked", "阻塞")} ${metrics.blocked}` : "",
+            metrics.errors > 0 ? `${t("Errors", "错误")} ${metrics.errors}` : "",
+            metrics.pendingApprovals > 0 ? `${t("Pending", "待审")} ${metrics.pendingApprovals}` : "",
+          ].filter(Boolean).join(" · ");
+          return `<li><a href="${href}">${escapeHtml(item.instance.name)}</a><span>${escapeHtml(summary)}</span></li>`;
+        })
+        .join("")}</ul>`;
+
+  return `<section class="panel">
+    <div class="panel-head">
+      <h2>${escapeHtml(t("Attention queue", "关注队列"))}</h2>
+      <div class="meta">${escapeHtml(t("Only read-only signals are shown here.", "这里仅展示只读信号。"))}</div>
+    </div>
+    ${body}
+  </section>`;
+}
+
+function renderFleetRecentActivity(snapshot: MultiInstanceSnapshot, language: UiLanguage): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const rows = snapshot.instances
+    .flatMap((item) =>
+      item.snapshot.sessions.map((session) => ({
+        item,
+        session,
+        updatedAt: session.lastMessageAt,
+      })),
+    )
+    .filter((entry) => entry.updatedAt && !Number.isNaN(Date.parse(entry.updatedAt)))
+    .sort((a, b) => toSortableMs(b.updatedAt) - toSortableMs(a.updatedAt))
+    .slice(0, 8)
+    .map(
+      ({ item, session, updatedAt }) =>
+        `<tr><td>${escapeHtml(item.instance.name)}</td><td><code>${escapeHtml(safeTruncate(session.label ?? session.agentId ?? session.sessionKey, 54))}</code></td><td>${badge(session.state, sessionStateLabel(session.state))}</td><td>${escapeHtml(updatedAt ? formatUiTimestamp(updatedAt, language) : "-")}</td></tr>`,
+    )
+    .join("");
+
+  return `<section class="panel">
+    <div class="panel-head">
+      <h2>${escapeHtml(t("Recent activity", "最近活动"))}</h2>
+      <div class="meta">${escapeHtml(t("Newest runtime session signal across every instance.", "所有实例最近的运行会话信号。"))}</div>
+    </div>
+    ${rows ? `<div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Instance", "实例"))}</th><th>${escapeHtml(t("Session", "会话"))}</th><th>${escapeHtml(t("State", "状态"))}</th><th>${escapeHtml(t("Updated", "更新时间"))}</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-state">${escapeHtml(t("No recent session activity reported.", "暂无最近会话活动。"))}</div>`}
+  </section>`;
+}
+
 function renderMultiInstanceOverview(
   snapshot: MultiInstanceSnapshot,
   language: UiLanguage = "zh",
@@ -5856,14 +5998,15 @@ function renderMultiInstanceOverview(
 ): string {
   const t = (en: string, zh: string): string => pickUiText(language, en, zh);
   const totalChips = [
-    { label: t("Instances", "实例数"), value: snapshot.totals.instances },
-    { label: t("Connected", "已连接"), value: snapshot.totals.connected },
-    { label: t("Sessions", "会话数"), value: snapshot.totals.sessions },
-    { label: t("Pending approvals", "待审批"), value: snapshot.totals.pendingApprovals },
-    { label: t("Errors", "错误数"), value: snapshot.totals.errors },
-  ]
-    .map((item) => `<div class="status-chip"><span>${escapeHtml(item.label)}</span><strong>${item.value}</strong></div>`)
-    .join("");
+    renderFleetMetricChip(t("Instances", "实例数"), snapshot.totals.instances),
+    renderFleetMetricChip(t("Connected", "已连接"), `${snapshot.totals.connected}/${snapshot.totals.instances}`, snapshot.totals.notConnected > 0 ? "warn" : "ok"),
+    renderFleetMetricChip(t("Sessions", "会话数"), snapshot.totals.sessions),
+    renderFleetMetricChip(t("Running", "运行中"), snapshot.totals.running, snapshot.totals.running > 0 ? "active" : ""),
+    renderFleetMetricChip(t("Blocked", "阻塞"), snapshot.totals.blocked, snapshot.totals.blocked > 0 ? "warn" : ""),
+    renderFleetMetricChip(t("Pending approvals", "待审批"), snapshot.totals.pendingApprovals, snapshot.totals.pendingApprovals > 0 ? "warn" : ""),
+    renderFleetMetricChip(t("Errors", "错误数"), snapshot.totals.errors, snapshot.totals.errors > 0 ? "danger" : ""),
+    renderFleetMetricChip("Cron", snapshot.totals.cronJobs),
+  ].join("");
   const cards = snapshot.instances.map((instance) => renderMultiInstanceCard(instance, snapshot.selectedInstanceId, language)).join("");
   const selectedInstance = snapshot.instances.find((item) => item.instance.id === snapshot.selectedInstanceId);
   const selectedMessage = selectedInstance
@@ -5881,30 +6024,50 @@ function renderMultiInstanceOverview(
     :root { color-scheme: light; --border: rgba(17, 24, 39, 0.12); --muted: #667085; --text: #1d1d1f; --bg: #f5f7fb; }
     * { box-sizing: border-box; }
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--text); background: var(--bg); }
-    .shell { max-width: 1180px; margin: 0 auto; padding: 28px 20px 40px; }
+    .shell { max-width: 1240px; margin: 0 auto; padding: 28px 20px 44px; }
     .hero { display: grid; gap: 10px; margin-bottom: 18px; }
-    .hero h1 { margin: 0; font-size: 28px; letter-spacing: 0; }
+    .hero h1 { margin: 0; font-size: 30px; letter-spacing: 0; }
     .meta { color: var(--muted); font-size: 13px; }
+    .empty-state { color: var(--muted); font-size: 13px; border: 1px dashed var(--border); border-radius: 8px; padding: 12px; background: rgba(255, 255, 255, 0.72); }
     .notice { border: 1px solid rgba(180, 83, 9, 0.24); background: #fff7ed; color: #92400e; border-radius: 8px; padding: 10px 12px; margin: 14px 0; }
-    .status-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 16px 0; }
+    .status-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); gap: 10px; margin: 16px 0; }
     .status-chip { border: 1px solid var(--border); border-radius: 8px; padding: 12px; background: rgba(255, 255, 255, 0.9); }
+    .status-chip.ok { border-color: rgba(22, 163, 74, 0.28); background: #f0fdf4; }
+    .status-chip.warn { border-color: rgba(217, 119, 6, 0.3); background: #fffbeb; }
+    .status-chip.danger { border-color: rgba(220, 38, 38, 0.28); background: #fef2f2; }
+    .status-chip.active { border-color: rgba(37, 99, 235, 0.28); background: #eff6ff; }
     .status-chip span { display: block; color: var(--muted); font-size: 12px; }
     .status-chip strong { display: block; margin-top: 5px; font-size: 24px; line-height: 1.08; }
-    .instance-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-top: 14px; }
-    .card { border: 1px solid var(--border); border-radius: 8px; background: #fff; padding: 14px; }
+    .overview-layout { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(320px, 0.9fr); gap: 12px; align-items: start; margin-top: 14px; }
+    .instance-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+    .card, .panel { border: 1px solid var(--border); border-radius: 8px; background: #fff; padding: 14px; }
     .card.active { border-color: rgba(0, 113, 227, 0.5); box-shadow: 0 8px 24px rgba(0, 113, 227, 0.08); }
     .card-head { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
-    .card h2 { margin: 0; font-size: 17px; letter-spacing: 0; }
+    .card h2, .panel h2 { margin: 0; font-size: 17px; letter-spacing: 0; }
+    .panel { margin-top: 12px; }
+    .panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 10px; }
     .badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 8px; font-size: 12px; border: 1px solid var(--border); color: #344054; background: #f9fafb; }
     .badge.connected { color: #05603a; background: #ecfdf3; border-color: #abefc6; }
     .badge.partial { color: #92400e; background: #fffbeb; border-color: #fde68a; }
-    .badge.not_connected { color: #b42318; background: #fef3f2; border-color: #fecdca; }
+    .badge.not_connected, .badge.error { color: #b42318; background: #fef3f2; border-color: #fecdca; }
+    .badge.running, .badge.waiting_approval { color: #005cb9; background: #eff8ff; border-color: #b2ddff; }
     .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0; }
     .metric { border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
     .metric span { display: block; color: var(--muted); font-size: 12px; }
     .metric strong { display: block; margin-top: 3px; font-size: 18px; }
+    .mini-list, .attention-list { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 7px; }
+    .mini-list li, .attention-list li { display: flex; justify-content: space-between; gap: 10px; align-items: center; font-size: 12px; color: var(--muted); }
+    .attention-list li { align-items: flex-start; border-bottom: 1px solid rgba(17, 24, 39, 0.08); padding-bottom: 8px; }
+    .attention-list li:last-child { border-bottom: 0; padding-bottom: 0; }
+    .attention-list a { color: #005cb9; font-weight: 600; text-decoration: none; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { text-align: left; border-bottom: 1px solid rgba(17, 24, 39, 0.08); padding: 8px 6px; vertical-align: top; }
+    th { color: var(--muted); font-weight: 600; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
     a.button { display: inline-flex; margin-top: 8px; text-decoration: none; color: #005cb9; font-weight: 600; }
-    @media (max-width: 720px) { .metrics { grid-template-columns: 1fr; } }
+    @media (max-width: 980px) { .overview-layout { grid-template-columns: 1fr; } }
+    @media (max-width: 720px) { .metrics { grid-template-columns: 1fr; } .panel-head { display: grid; } }
   </style>
 </head>
 <body>
@@ -5918,7 +6081,16 @@ function renderMultiInstanceOverview(
     </section>
     ${warningHtml}
     <section class="status-strip">${totalChips}</section>
-    <section class="instance-grid">${cards || `<div class="card">${escapeHtml(t("No instances configured.", "尚未配置实例。"))}</div>`}</section>
+    <section class="overview-layout">
+      <div>
+        <section class="instance-grid">${cards || `<div class="card">${escapeHtml(t("No instances configured.", "尚未配置实例。"))}</div>`}</section>
+        ${renderFleetMatrix(snapshot, language)}
+      </div>
+      <div>
+        ${renderFleetAttention(snapshot, language)}
+        ${renderFleetRecentActivity(snapshot, language)}
+      </div>
+    </section>
   </main>
 </body>
 </html>`;
@@ -5926,15 +6098,16 @@ function renderMultiInstanceOverview(
 
 function renderMultiInstanceCard(instance: InstanceSnapshot, selectedInstanceId: string, language: UiLanguage): string {
   const t = (en: string, zh: string): string => pickUiText(language, en, zh);
-  const sessionCount = instance.snapshot.sessions.length;
-  const pendingApprovals = instance.snapshot.approvals.filter((approval) => approval.status === "pending").length;
-  const errorCount = instance.snapshot.sessions.filter((session) => session.state === "error").length;
+  const metrics = buildInstanceUiMetrics(instance);
   const isSelected = instance.instance.id === selectedInstanceId;
   const detailHref = `/?instance=${encodeURIComponent(instance.instance.id)}&amp;section=overview&amp;lang=${encodeURIComponent(language)}`;
-  const metrics = [
-    { label: t("Sessions", "会话数"), value: sessionCount },
-    { label: t("Pending", "待审批"), value: pendingApprovals },
-    { label: t("Errors", "错误数"), value: errorCount },
+  const metricHtml = [
+    { label: t("Sessions", "会话数"), value: metrics.sessions },
+    { label: t("Running", "运行中"), value: metrics.running },
+    { label: t("Blocked", "阻塞"), value: metrics.blocked },
+    { label: t("Pending", "待审批"), value: metrics.pendingApprovals },
+    { label: t("Errors", "错误数"), value: metrics.errors },
+    { label: "Cron", value: metrics.cronJobs },
   ]
     .map((item) => `<div class="metric"><span>${escapeHtml(item.label)}</span><strong>${item.value}</strong></div>`)
     .join("");
@@ -5948,8 +6121,9 @@ function renderMultiInstanceCard(instance: InstanceSnapshot, selectedInstanceId:
       ${badge(instance.status, multiInstanceStatusLabel(instance.status, language))}
     </div>
     ${selected}
-    <div class="metrics">${metrics}</div>
-    <div class="meta">${escapeHtml(instance.detail)}</div>
+    <div class="metrics">${metricHtml}</div>
+    <div class="meta">${escapeHtml(instance.detail)}${metrics.lastActivityAt ? ` · ${escapeHtml(t("Last", "最近"))}${escapeHtml(language === "zh" ? "：" : ": ")}${escapeHtml(formatUiTimestamp(metrics.lastActivityAt, language))}` : ""}</div>
+    ${renderMiniSessions(instance, language)}
     <a class="button" href="${detailHref}">${escapeHtml(t("Open readonly detail", "进入只读详情"))}</a>
   </article>`;
 }
@@ -5970,12 +6144,15 @@ function renderMultiInstanceDetail(
   const overviewHref = `/?section=${encodeURIComponent(section)}&amp;lang=${encodeURIComponent(language)}`;
   const selected = snapshot.instances.find((item) => item.instance.id === selectedInstanceId);
   const selectedSnapshot = selected?.snapshot;
+  const selectedMetrics = selected ? buildInstanceUiMetrics(selected) : undefined;
+  const statusBySession = new Map((selectedSnapshot?.statuses ?? []).map((status) => [status.sessionKey, status]));
   const runningCount = selectedSnapshot?.sessions.filter((session) => session.state === "running").length ?? 0;
   const blockedCount =
     selectedSnapshot?.sessions.filter((session) => session.state === "blocked" || session.state === "waiting_approval").length ??
     0;
   const errorCount = selectedSnapshot?.sessions.filter((session) => session.state === "error").length ?? 0;
   const pendingApprovals = selectedSnapshot?.approvals.filter((approval) => approval.status === "pending").length ?? 0;
+  const idleCount = selectedSnapshot?.sessions.filter((session) => session.state === "idle").length ?? 0;
   const switcher = snapshot.instances
     .map((item) => {
       const active = item.instance.id === selectedInstanceId;
@@ -5985,25 +6162,55 @@ function renderMultiInstanceDetail(
     })
     .join("");
   const sessionRows = (selectedSnapshot?.sessions ?? [])
-    .slice(0, 12)
+    .sort((a, b) => toSortableMs(b.lastMessageAt) - toSortableMs(a.lastMessageAt))
+    .slice(0, 50)
     .map(
-      (session) =>
-        `<tr><td><code>${escapeHtml(session.sessionKey)}</code></td><td>${badge(session.state, sessionStateLabel(session.state))}</td><td>${escapeHtml(session.label ?? session.agentId ?? "-")}</td><td>${escapeHtml(session.lastMessageAt ? formatUiTimestamp(session.lastMessageAt, language) : "-")}</td></tr>`,
+      (session) => {
+        const status = statusBySession.get(session.sessionKey);
+        const tokenText =
+          typeof status?.tokensIn === "number" || typeof status?.tokensOut === "number"
+            ? `${status?.tokensIn ?? 0}/${status?.tokensOut ?? 0}`
+            : "-";
+        const costText = typeof status?.cost === "number" ? status.cost.toFixed(4) : "-";
+        return `<tr><td><code>${escapeHtml(session.sessionKey)}</code></td><td>${badge(session.state, sessionStateLabel(session.state))}</td><td>${escapeHtml(session.label ?? session.agentId ?? "-")}</td><td>${escapeHtml(status?.model ?? "-")}</td><td>${escapeHtml(tokenText)}</td><td>${escapeHtml(costText)}</td><td>${escapeHtml(session.lastMessageAt ? formatUiTimestamp(session.lastMessageAt, language) : "-")}</td></tr>`;
+      },
     )
     .join("");
   const approvalRows = (selectedSnapshot?.approvals ?? [])
-    .filter((approval) => approval.status === "pending")
-    .slice(0, 8)
+    .sort(compareApprovals)
+    .slice(0, 20)
     .map(
       (approval) =>
-        `<tr><td><code>${escapeHtml(approval.approvalId)}</code></td><td>${escapeHtml(approval.agentId ?? approval.sessionKey ?? "-")}</td><td>${escapeHtml(safeTruncate(approval.command ?? approval.decision ?? approval.reason ?? "-", 120))}</td></tr>`,
+        `<tr><td><code>${escapeHtml(approval.approvalId)}</code></td><td>${badge(approval.status, approval.status)}</td><td>${escapeHtml(approval.agentId ?? approval.sessionKey ?? "-")}</td><td>${escapeHtml(safeTruncate(approval.command ?? approval.decision ?? approval.reason ?? "-", 120))}</td><td>${escapeHtml(formatUiTimestamp(approval.updatedAt ?? approval.requestedAt, language))}</td></tr>`,
     )
     .join("");
   const cronRows = (selectedSnapshot?.cronJobs ?? [])
-    .slice(0, 10)
+    .slice(0, 20)
     .map(
       (job) =>
         `<tr><td><code>${escapeHtml(job.jobId)}</code></td><td>${badge(job.enabled ? "connected" : "partial", job.enabled ? t("Enabled", "已启用") : t("Disabled", "已禁用"))}</td><td>${escapeHtml(job.nextRunAt ? formatUiTimestamp(job.nextRunAt, language) : "-")}</td></tr>`,
+    )
+    .join("");
+  const taskRows = (selectedSnapshot?.tasks.tasks ?? [])
+    .slice(0, 16)
+    .map(
+      (task) =>
+        `<tr><td>${escapeHtml(safeTruncate(task.title, 84))}</td><td>${badge(task.status, task.status)}</td><td>${escapeHtml(task.owner)}</td><td>${escapeHtml(task.updatedAt ? formatUiTimestamp(task.updatedAt, language) : "-")}</td></tr>`,
+    )
+    .join("");
+  const projectRows = (selectedSnapshot?.projects.projects ?? [])
+    .slice(0, 12)
+    .map(
+      (project) =>
+        `<tr><td>${escapeHtml(safeTruncate(project.title, 80))}</td><td>${badge(project.status, project.status)}</td><td>${escapeHtml(project.owner)}</td><td>${escapeHtml(project.updatedAt ? formatUiTimestamp(project.updatedAt, language) : "-")}</td></tr>`,
+    )
+    .join("");
+  const budgetRows = (selectedSnapshot?.budgetSummary.evaluations ?? [])
+    .filter((item) => item.status === "warn" || item.status === "over")
+    .slice(0, 10)
+    .map(
+      (item) =>
+        `<tr><td>${escapeHtml(item.label)}</td><td>${badge(item.status, item.status)}</td><td>${escapeHtml(item.scope)}</td><td>${renderMetricSummary(item)}</td></tr>`,
     )
     .join("");
   const metrics = [
@@ -6013,6 +6220,9 @@ function renderMultiInstanceDetail(
     { label: t("Errors", "错误数"), value: errorCount },
     { label: t("Pending approvals", "待审批"), value: pendingApprovals },
     { label: "Cron", value: selectedSnapshot?.cronJobs.length ?? 0 },
+    { label: t("Projects", "项目"), value: selectedSnapshot?.projects.projects.length ?? 0 },
+    { label: t("Tasks", "任务"), value: selectedSnapshot?.tasks.tasks.length ?? 0 },
+    { label: t("Budget warnings", "预算关注"), value: (selectedSnapshot?.budgetSummary.warn ?? 0) + (selectedSnapshot?.budgetSummary.over ?? 0) },
   ]
     .map((item) => `<div class="status-chip"><span>${escapeHtml(item.label)}</span><strong>${item.value}</strong></div>`)
     .join("");
@@ -6046,7 +6256,9 @@ function renderMultiInstanceDetail(
     .status-chip { padding: 12px; }
     .status-chip span { display: block; color: var(--muted); font-size: 12px; }
     .status-chip strong { display: block; margin-top: 5px; font-size: 24px; line-height: 1.08; }
+    .detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; margin-top: 12px; }
     .card { padding: 14px; margin-top: 12px; }
+    .detail-grid .card { margin-top: 0; }
     .card h2 { margin: 0 0 8px; font-size: 17px; letter-spacing: 0; }
     .badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 8px; font-size: 12px; border: 1px solid var(--border); color: #344054; background: #f9fafb; }
     .badge.connected { color: #05603a; background: #ecfdf3; border-color: #abefc6; }
@@ -6057,6 +6269,11 @@ function renderMultiInstanceDetail(
     th, td { text-align: left; border-bottom: 1px solid rgba(17, 24, 39, 0.08); padding: 8px 6px; vertical-align: top; }
     th { color: var(--muted); font-weight: 600; }
     code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+    .state-line { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 10px; }
+    .state-line div { border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
+    .state-line span { display: block; color: var(--muted); font-size: 12px; }
+    .state-line strong { display: block; margin-top: 3px; font-size: 18px; }
+    @media (max-width: 720px) { .state-line { grid-template-columns: 1fr 1fr; } }
   </style>
 </head>
 <body>
@@ -6076,25 +6293,53 @@ function renderMultiInstanceDetail(
     </section>
     ${notFound}
     <section class="status-strip">${metrics}</section>
-    <section class="card">
-      <h2>${escapeHtml(t("Instance connection", "实例连接"))}</h2>
-      <div class="meta">ID: <code>${escapeHtml(selected?.instance.id ?? selectedInstanceId)}</code></div>
-      <div class="meta">Gateway: <code>${escapeHtml(selected?.instance.gatewayUrl ?? "-")}</code></div>
-      <div class="meta">OPENCLAW_HOME: <code>${escapeHtml(selected?.instance.openclawHome ?? "-")}</code></div>
-      <div class="meta">OPENCLAW_CONFIG_PATH: <code>${escapeHtml(selected?.instance.openclawConfigPath ?? "-")}</code></div>
-      <div class="meta">${escapeHtml(t("Readonly", "只读"))}: ${escapeHtml(String(selected?.instance.readonly ?? true))}</div>
+    <section class="detail-grid">
+      <section class="card">
+        <h2>${escapeHtml(t("Instance connection", "实例连接"))}</h2>
+        <div class="meta">ID: <code>${escapeHtml(selected?.instance.id ?? selectedInstanceId)}</code></div>
+        <div class="meta">Gateway: <code>${escapeHtml(selected?.instance.gatewayUrl ?? "-")}</code></div>
+        <div class="meta">OPENCLAW_HOME: <code>${escapeHtml(selected?.instance.openclawHome ?? "-")}</code></div>
+        <div class="meta">OPENCLAW_CONFIG_PATH: <code>${escapeHtml(selected?.instance.openclawConfigPath ?? "-")}</code></div>
+        <div class="meta">${escapeHtml(t("Readonly", "只读"))}: ${escapeHtml(String(selected?.instance.readonly ?? true))}</div>
+      </section>
+      <section class="card">
+        <h2>${escapeHtml(t("Runtime state", "运行态分布"))}</h2>
+        <div class="meta">${escapeHtml(t("Latest session activity", "最近会话活动"))}${escapeHtml(language === "zh" ? "：" : ": ")}${escapeHtml(selectedMetrics?.lastActivityAt ? formatUiTimestamp(selectedMetrics.lastActivityAt, language) : "-")}</div>
+        <div class="state-line">
+          <div><span>${escapeHtml(t("Idle", "待命"))}</span><strong>${idleCount}</strong></div>
+          <div><span>${escapeHtml(t("Running", "运行中"))}</span><strong>${runningCount}</strong></div>
+          <div><span>${escapeHtml(t("Blocked", "阻塞"))}</span><strong>${blockedCount}</strong></div>
+          <div><span>${escapeHtml(t("Errors", "错误"))}</span><strong>${errorCount}</strong></div>
+        </div>
+      </section>
     </section>
     <section class="card">
       <h2>${escapeHtml(t("Sessions", "会话"))}</h2>
-      ${sessionRows ? `<table><thead><tr><th>Session</th><th>${escapeHtml(t("State", "状态"))}</th><th>${escapeHtml(t("Label", "标签"))}</th><th>${escapeHtml(t("Last activity", "最近活动"))}</th></tr></thead><tbody>${sessionRows}</tbody></table>` : `<div class="meta">${escapeHtml(t("No sessions reported.", "暂无会话上报。"))}</div>`}
+      ${sessionRows ? `<div class="table-wrap"><table><thead><tr><th>Session</th><th>${escapeHtml(t("State", "状态"))}</th><th>${escapeHtml(t("Label", "标签"))}</th><th>Model</th><th>Tokens In/Out</th><th>Cost</th><th>${escapeHtml(t("Last activity", "最近活动"))}</th></tr></thead><tbody>${sessionRows}</tbody></table></div>` : `<div class="meta">${escapeHtml(t("No sessions reported.", "暂无会话上报。"))}</div>`}
+    </section>
+    <section class="detail-grid">
+      <section class="card">
+        <h2>${escapeHtml(t("Projects", "项目"))}</h2>
+        ${projectRows ? `<div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Title", "标题"))}</th><th>${escapeHtml(t("State", "状态"))}</th><th>${escapeHtml(t("Owner", "负责人"))}</th><th>${escapeHtml(t("Updated", "更新时间"))}</th></tr></thead><tbody>${projectRows}</tbody></table></div>` : `<div class="meta">${escapeHtml(t("No projects reported.", "暂无项目上报。"))}</div>`}
+      </section>
+      <section class="card">
+        <h2>${escapeHtml(t("Tasks", "任务"))}</h2>
+        ${taskRows ? `<div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Title", "标题"))}</th><th>${escapeHtml(t("State", "状态"))}</th><th>${escapeHtml(t("Owner", "负责人"))}</th><th>${escapeHtml(t("Updated", "更新时间"))}</th></tr></thead><tbody>${taskRows}</tbody></table></div>` : `<div class="meta">${escapeHtml(t("No tasks reported.", "暂无任务上报。"))}</div>`}
+      </section>
+    </section>
+    <section class="detail-grid">
+      <section class="card">
+        <h2>${escapeHtml(t("Approvals", "审批"))}</h2>
+        ${approvalRows ? `<div class="table-wrap"><table><thead><tr><th>Approval</th><th>${escapeHtml(t("State", "状态"))}</th><th>${escapeHtml(t("Owner", "负责人"))}</th><th>${escapeHtml(t("Command", "命令"))}</th><th>${escapeHtml(t("Updated", "更新时间"))}</th></tr></thead><tbody>${approvalRows}</tbody></table></div>` : `<div class="meta">${escapeHtml(t("No approvals reported.", "暂无审批上报。"))}</div>`}
+      </section>
+      <section class="card">
+        <h2>Cron</h2>
+        ${cronRows ? `<div class="table-wrap"><table><thead><tr><th>Job</th><th>${escapeHtml(t("State", "状态"))}</th><th>${escapeHtml(t("Next run", "下次运行"))}</th></tr></thead><tbody>${cronRows}</tbody></table></div>` : `<div class="meta">${escapeHtml(t("No cron jobs reported.", "暂无 Cron 任务。"))}</div>`}
+      </section>
     </section>
     <section class="card">
-      <h2>${escapeHtml(t("Pending approvals", "待审批"))}</h2>
-      ${approvalRows ? `<table><thead><tr><th>Approval</th><th>${escapeHtml(t("Owner", "负责人"))}</th><th>${escapeHtml(t("Command", "命令"))}</th></tr></thead><tbody>${approvalRows}</tbody></table>` : `<div class="meta">${escapeHtml(t("No pending approvals.", "暂无待审批。"))}</div>`}
-    </section>
-    <section class="card">
-      <h2>Cron</h2>
-      ${cronRows ? `<table><thead><tr><th>Job</th><th>${escapeHtml(t("State", "状态"))}</th><th>${escapeHtml(t("Next run", "下次运行"))}</th></tr></thead><tbody>${cronRows}</tbody></table>` : `<div class="meta">${escapeHtml(t("No cron jobs reported.", "暂无 Cron 任务。"))}</div>`}
+      <h2>${escapeHtml(t("Budget attention", "预算关注"))}</h2>
+      ${budgetRows ? `<div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Label", "标签"))}</th><th>${escapeHtml(t("State", "状态"))}</th><th>${escapeHtml(t("Scope", "范围"))}</th><th>${escapeHtml(t("Metrics", "指标"))}</th></tr></thead><tbody>${budgetRows}</tbody></table></div>` : `<div class="meta">${escapeHtml(t("No budget warnings.", "暂无预算关注。"))}</div>`}
     </section>
   </main>
 </body>
