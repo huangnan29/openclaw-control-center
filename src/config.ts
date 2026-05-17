@@ -29,6 +29,9 @@ export const APPROVAL_ACTIONS_ENABLED = process.env.APPROVAL_ACTIONS_ENABLED ===
 export const APPROVAL_ACTIONS_DRY_RUN = process.env.APPROVAL_ACTIONS_DRY_RUN !== "false";
 export const MANAGED_ACTIONS_LIVE_ENABLED = process.env.MANAGED_ACTIONS_LIVE_ENABLED === "true";
 export const MANAGED_ACTIONS_LIVE_ALLOWED_ACTIONS = readCsvEnv(process.env.MANAGED_ACTIONS_LIVE_ALLOWED_ACTIONS);
+export const MANAGED_ACTIONS_LIVE_ROLLOUT_FILE = readOptionalStringEnv(
+  process.env.MANAGED_ACTIONS_LIVE_ROLLOUT_FILE,
+);
 export const IMPORT_MUTATION_ENABLED = process.env.IMPORT_MUTATION_ENABLED === "true";
 export const IMPORT_MUTATION_DRY_RUN = process.env.IMPORT_MUTATION_DRY_RUN === "true";
 export const LOCAL_TOKEN_AUTH_REQUIRED = process.env.LOCAL_TOKEN_AUTH_REQUIRED !== "false";

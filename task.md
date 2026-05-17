@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-真实执行前置 dry-run 申请有效性校验：live 请求必须引用仍有效的 dry-run 申请，并校验动作、目标实例、确认状态和有效期；当前仍不启用真实执行。
+单动作真实执行灰度配置文件：新增默认禁用的灰度配置解析层，限定未来可灰度的动作、实例、操作者、风险等级和 dry-run 有效期；当前仍不接真实执行器。
 
 ## 本轮不做
 
@@ -17,12 +17,12 @@
 
 ## 当前下一步
 
-设计单动作真实执行灰度配置文件：
+部署灰度配置解析层到 Tom 并验证行为不变：
 
-- 配置文件只描述允许灰度的动作、实例、操作者和风险等级。
-- 默认配置为空或禁用。
-- 不接真实执行器。
 - Tom 继续保持 `MANAGED_ACTIONS_LIVE_ENABLED=false`。
+- Tom 不配置 `MANAGED_ACTIONS_LIVE_ROLLOUT_FILE`。
+- `/api/managed-actions/live` 继续返回 `blocked_disabled`。
+- 页面继续不出现真实执行入口。
 
 ## 最近完成
 
@@ -156,7 +156,17 @@
 - 已验证 Tom 动作不一致返回 `dryRunReference.status=action_mismatch`。
 - 已验证 Tom `/api/managed-actions/live` 仍返回 `blocked_disabled`、`liveExecution=false`、`enabled=false`。
 - 已验证 Tom 页面仍无真实执行入口。
+- 已新增配置项：`MANAGED_ACTIONS_LIVE_ROLLOUT_FILE`。
+- 已新增灰度配置解析模块：`src/runtime/managed-action-live-rollout.ts`。
+- 已定义灰度规则字段：`action`、`instanceId`、`operators`、`risk`、`enabled`、`maxDryRunAgeMinutes`。
+- 已验证默认配置为禁用且无规则。
+- 已验证窄匹配规则只允许指定动作、实例和操作者。
+- 已验证 `operators:["*"]` 支持通配操作者，但禁用规则不会放行。
+- 已验证非法规则进入 `issues`，且不会被允许。
+- 已验证可以从 JSON 文件加载灰度配置。
+- 已验证 `npm test -- test/managed-action-live-rollout.test.ts test/managed-actions-dry-run.test.ts test/managed-action-live-audit.test.ts test/managed-action-executor.test.ts test/phase9-routes-commands.test.ts test/readonly-multi-instance-safety.test.ts test/multi-instance-readonly.test.ts test/ui-render-smoke.test.ts`。
+- 已验证 `npm run build`。
 
 ## 阶段完成后的下一步
 
-单动作真实执行灰度配置文件：只实现配置解析和测试，默认禁用，不在 Tom 开启真实执行。
+部署 Tom 验证灰度配置解析层不改变运行行为；通过后，下一步把 rollout 决策接入 live gate 响应，但仍默认禁用。

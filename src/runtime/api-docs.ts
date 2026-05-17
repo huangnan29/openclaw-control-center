@@ -24,6 +24,7 @@ export function buildApiDocs(): ApiDocsPayload {
       APPROVAL_ACTIONS_DRY_RUN: true,
       MANAGED_ACTIONS_LIVE_ENABLED: false,
       MANAGED_ACTIONS_LIVE_ALLOWED_ACTIONS: "",
+      MANAGED_ACTIONS_LIVE_ROLLOUT_FILE: "",
       IMPORT_MUTATION_ENABLED: false,
       IMPORT_MUTATION_DRY_RUN: false,
       LOCAL_TOKEN_AUTH_REQUIRED: true,
