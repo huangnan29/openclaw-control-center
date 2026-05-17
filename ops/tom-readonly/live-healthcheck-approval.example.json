@@ -1,8 +1,13 @@
 {
   "schemaVersion": 1,
+  "approvalId": "",
   "approved": false,
   "approvedAt": "",
   "approvedBy": "",
+  "consumed": false,
+  "consumedAt": "",
+  "consumedBy": "",
+  "consumedReason": "",
   "instanceId": "tom",
   "action": "healthcheck",
   "operator": "Anan",

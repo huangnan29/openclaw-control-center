@@ -41,9 +41,14 @@ const fs = require("node:fs");
 const outputPath = process.argv[2];
 const approval = {
   schemaVersion: 1,
+  approvalId: "",
   approved: false,
   approvedAt: "",
   approvedBy: "",
+  consumed: false,
+  consumedAt: "",
+  consumedBy: "",
+  consumedReason: "",
   instanceId: process.env.INSTANCE_ID || "tom",
   action: "healthcheck",
   operator: process.env.OPERATOR || "Anan",
@@ -93,6 +98,7 @@ approve_record() {
     APPROVED_BY="$APPROVED_BY" \
     node <<'NODE'
 const fs = require("node:fs");
+const crypto = require("node:crypto");
 
 const file = process.env.APPROVAL_FILE;
 const expectedInstanceId = process.env.INSTANCE_ID || "tom";
@@ -111,9 +117,14 @@ if (fs.existsSync(file)) {
 const next = {
   ...approval,
   schemaVersion: 1,
+  approvalId: crypto.randomUUID(),
   approved: true,
   approvedAt: new Date().toISOString(),
   approvedBy,
+  consumed: false,
+  consumedAt: "",
+  consumedBy: "",
+  consumedReason: "",
   instanceId: expectedInstanceId,
   action: "healthcheck",
   operator: expectedOperator,
@@ -139,6 +150,74 @@ fs.writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`, "utf8");
 NODE
   log "已写入人工批准记录：${output}"
   check_approval "$output"
+}
+
+consume_record() {
+  local input="${1:-$APPROVAL_FILE}"
+  [ -f "$input" ] || fail "批准文件不存在：${input}"
+
+  APPROVAL_FILE="$input" \
+    INSTANCE_ID="$INSTANCE_ID" \
+    OPERATOR="$OPERATOR" \
+    node <<'NODE'
+const fs = require("node:fs");
+const crypto = require("node:crypto");
+
+const file = process.env.APPROVAL_FILE;
+const expectedInstanceId = process.env.INSTANCE_ID || "tom";
+const expectedOperator = process.env.OPERATOR || "Anan";
+
+let approval;
+try {
+  approval = JSON.parse(fs.readFileSync(file, "utf8"));
+} catch (error) {
+  console.error(`[失败] 批准文件无法解析：${error instanceof Error ? error.message : String(error)}`);
+  process.exit(2);
+}
+
+if (approval.approved !== true) {
+  console.error("[失败] 批准文件尚未 approved=true，不能标记为已使用");
+  process.exit(2);
+}
+if (approval.instanceId !== expectedInstanceId) {
+  console.error(`[失败] instanceId 必须为 ${expectedInstanceId}`);
+  process.exit(2);
+}
+if (approval.action !== "healthcheck") {
+  console.error("[失败] action 必须为 healthcheck");
+  process.exit(2);
+}
+if (approval.operator !== expectedOperator) {
+  console.error(`[失败] operator 必须为 ${expectedOperator}`);
+  process.exit(2);
+}
+
+const next = {
+  ...approval,
+  approvalId: approval.approvalId || crypto.randomUUID(),
+  consumed: true,
+  consumedAt: approval.consumed === true && approval.consumedAt ? approval.consumedAt : new Date().toISOString(),
+  consumedBy: approval.consumed === true && approval.consumedBy ? approval.consumedBy : expectedOperator,
+  consumedReason: approval.consumed === true && approval.consumedReason
+    ? approval.consumedReason
+    : "live-healthcheck-window.sh run 已完成 live healthcheck 调用，批准记录自动标记为已使用。",
+};
+
+fs.writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+console.log(JSON.stringify({
+  status: "consumed",
+  file,
+  approvalId: next.approvalId,
+  approvedBy: next.approvedBy,
+  approvedAt: next.approvedAt,
+  consumed: next.consumed,
+  consumedAt: next.consumedAt,
+  consumedBy: next.consumedBy,
+  instanceId: next.instanceId,
+  action: next.action,
+  operator: next.operator,
+}, null, 2));
+NODE
 }
 
 check_approval() {
@@ -174,6 +253,7 @@ function readJson(path) {
 const approval = readJson(file);
 if (approval.schemaVersion !== 1) fail("schemaVersion 必须为 1");
 if (approval.approved !== true) fail("approved 必须为 true");
+if (approval.consumed === true) fail("批准记录已被使用，请重新运行 approve 生成新的批准记录");
 if (typeof approval.approvedBy !== "string" || approval.approvedBy.trim() === "") fail("approvedBy 必须填写");
 
 const approvedAt = Date.parse(String(approval.approvedAt || ""));
@@ -264,6 +344,8 @@ try {
 
 const issues = [];
 if (approval.approved !== true) issues.push("approved is not true");
+const consumed = approval.consumed === true;
+if (consumed) issues.push("approval has been consumed; run approve again");
 if (typeof approval.approvedBy !== "string" || approval.approvedBy.trim() === "") issues.push("approvedBy is empty");
 const approvedAtMs = Date.parse(String(approval.approvedAt || ""));
 if (!Number.isFinite(approvedAtMs)) {
@@ -288,10 +370,14 @@ for (const key of [
   if (checklist[key] !== true) issues.push(`checklist.${key} is not true`);
 }
 
-print(issues.length === 0 ? "approved" : "needs_manual_approval", {
+print(consumed ? "consumed" : issues.length === 0 ? "approved" : "needs_manual_approval", {
+  approvalId: typeof approval.approvalId === "string" ? approval.approvalId : "",
   approved: approval.approved === true,
   approvedBy: typeof approval.approvedBy === "string" ? approval.approvedBy : "",
   approvedAt: typeof approval.approvedAt === "string" ? approval.approvedAt : "",
+  consumed,
+  consumedAt: typeof approval.consumedAt === "string" ? approval.consumedAt : "",
+  consumedBy: typeof approval.consumedBy === "string" ? approval.consumedBy : "",
   instanceId: approval.instanceId,
   action: approval.action,
   operator: approval.operator,
@@ -305,6 +391,7 @@ usage() {
 用法：
   live-healthcheck-approval.sh prepare [approval.json]
   live-healthcheck-approval.sh approve [approval.json]
+  live-healthcheck-approval.sh consume [approval.json]
   live-healthcheck-approval.sh template [approval.json]
   live-healthcheck-approval.sh check [approval.json]
   live-healthcheck-approval.sh status [approval.json]
@@ -312,6 +399,7 @@ usage() {
 说明：
   prepare 只在文件不存在时生成模板，并输出当前状态。
   approve 需要 CONFIRM_APPROVAL_RECORD 和 APPROVED_BY，只写批准文件，不会启用 live gate。
+  consume 将已批准记录标记为已使用，后续 check 会要求重新 approve。
   template 只生成批准文件模板，不会启用 live gate。
   check 只校验批准文件，不会调用 live API。
   status 只读取批准文件状态，不会失败，也不会调用 live API。
@@ -326,6 +414,9 @@ main() {
       ;;
     approve)
       approve_record "${2:-$APPROVAL_FILE}"
+      ;;
+    consume)
+      consume_record "${2:-$APPROVAL_FILE}"
       ;;
     template)
       write_template "${2:-$APPROVAL_FILE}"

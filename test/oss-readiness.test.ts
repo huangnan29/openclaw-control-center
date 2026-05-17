@@ -174,17 +174,20 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   const approvalText = readFileSync(liveHealthcheckApproval, "utf8");
   assert.match(approvalText, /live-healthcheck-approval\.sh prepare/);
   assert.match(approvalText, /live-healthcheck-approval\.sh approve/);
+  assert.match(approvalText, /live-healthcheck-approval\.sh consume/);
   assert.match(approvalText, /live-healthcheck-approval\.sh template/);
   assert.match(approvalText, /live-healthcheck-approval\.sh status/);
   assert.match(approvalText, /I_APPROVE_LIVE_HEALTHCHECK_RECORD/);
   assert.match(approvalText, /APPROVED_BY/);
   assert.match(approvalText, /needs_manual_approval/);
   assert.match(approvalText, /approved 必须为 true/);
+  assert.match(approvalText, /批准记录已被使用/);
   assert.match(approvalText, /I_UNDERSTAND_THIS_TEMPORARILY_ENABLES_LIVE_GATE/);
   assert.match(approvalText, /I_UNDERSTAND_THIS_CALLS_LIVE_API/);
   assert.match(approvalText, /mutatesOpenClawInstance/);
   const approvalExample = JSON.parse(readFileSync(liveHealthcheckApprovalExample, "utf8"));
   assert.equal(approvalExample.approved, false);
+  assert.equal(approvalExample.consumed, false);
   assert.equal(approvalExample.action, "healthcheck");
   assert.equal(approvalExample.scope.mutatesOpenClawInstance, false);
   const preflightText = readFileSync(liveHealthcheckPreflight, "utf8");
@@ -199,6 +202,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(reportText, /managed_action_live_result/);
   assert.match(reportText, /managed_action_dry_run/);
   assert.match(reportText, /mutatesOpenClawInstance/);
+  assert.match(reportText, /approval\.consumed === true/);
   assert.match(reportText, /markdownReport/);
   assert.match(readFileSync(liveHealthcheckSmoke, "utf8"), /CONFIRM_LIVE_HEALTHCHECK/);
   assert.match(readFileSync(liveHealthcheckSmoke, "utf8"), /LIVE-ACTION-APPROVED/);
@@ -212,6 +216,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(liveWindowText, /stop_live_window/);
   assert.match(liveWindowText, /live-healthcheck-approval\.sh/);
   assert.match(liveWindowText, /check_approval_file/);
+  assert.match(liveWindowText, /consume_approval_file/);
   assert.match(liveWindowText, /APPROVAL_SCRIPT\" status/);
   assert.match(liveWindowText, /live-healthcheck-report\.sh/);
   assert.match(liveWindowText, /instance-impact-snapshot\.sh/);

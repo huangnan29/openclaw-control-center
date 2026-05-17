@@ -184,6 +184,8 @@ function writeMarkdown(report) {
   lines.push(`- 操作者：${report.approval.operator}`);
   lines.push(`- 批准人：${report.approval.approvedBy}`);
   lines.push(`- 批准时间：${report.approval.approvedAt}`);
+  lines.push(`- 批准记录已使用：${String(report.approval.consumed)}`);
+  lines.push(`- 使用时间：${report.approval.consumedAt || ""}`);
   lines.push(`- operationRequestId：${report.audit.operationRequestId || ""}`);
   lines.push(`- live outcome：${report.audit.liveOutcome || ""}`);
   lines.push(`- mutatesOpenClawInstance：${String(report.audit.mutatesOpenClawInstance)}`);
@@ -220,6 +222,7 @@ const liveMetadata = asRecord(liveResult?.metadata);
 const resultMetadata = asRecord(liveMetadata.result);
 const statusChecks = [
   approval.approved === true,
+  approval.consumed === true,
   liveResult?.ok === true,
   liveMetadata.outcome === "executed",
   liveMetadata.liveExecution === true,
@@ -236,6 +239,10 @@ const report = {
   approval: {
     approvedBy: approval.approvedBy,
     approvedAt: approval.approvedAt,
+    approvalId: approval.approvalId,
+    consumed: approval.consumed === true,
+    consumedAt: approval.consumedAt,
+    consumedBy: approval.consumedBy,
     instanceId: approval.instanceId,
     action: approval.action,
     operator: approval.operator,
@@ -276,7 +283,7 @@ usage() {
 
 说明：
   只读取 approval、impact snapshots 和 operation-audit.log。
-  报告通过条件包括 live audit executed、dry-run 引用存在、mutatesOpenClawInstance=false，以及 after 快照恢复只读。
+  报告通过条件包括 approval 已批准且已使用、live audit executed、dry-run 引用存在、mutatesOpenClawInstance=false，以及 after 快照恢复只读。
 TEXT
 }
 

@@ -16,7 +16,7 @@
 - `update.sh`：拉取 `multi-instance-readonly-control-center` 分支，重建控制中心容器，随后执行健康检查。
 - `rollback.sh`：回滚到指定提交；如果不传提交，则使用最近一次 `update.sh` 记录的 `previous-good.commit`。
 - `managed-action-healthcheck-rollout.example.json`：只读 healthcheck live 演练的 rollout 样板，不会被默认加载。
-- `live-healthcheck-approval.sh`：生成或校验 live healthcheck 人工批准记录，不调用 live API。
+- `live-healthcheck-approval.sh`：生成、校验或标记 live healthcheck 人工批准记录，不调用 live API。
 - `live-healthcheck-approval.example.json`：批准记录样板，默认未批准。
 - `live-healthcheck-preflight.sh`：只读检查 healthcheck live 演练条件，不调用 live API。
 - `live-healthcheck-smoke.sh`：手动 live healthcheck 演练脚本；只有显式提供本地令牌和确认环境变量才会调用 live API。
@@ -36,6 +36,7 @@ cd /srv/openclaw-control-center-readonly
 repo/ops/tom-readonly/live-healthcheck-approval.sh prepare runtime/live-healthcheck-approval.json
 repo/ops/tom-readonly/live-healthcheck-approval.sh status runtime/live-healthcheck-approval.json
 repo/ops/tom-readonly/live-healthcheck-approval.sh check runtime/live-healthcheck-approval.json
+repo/ops/tom-readonly/live-healthcheck-approval.sh consume runtime/live-healthcheck-approval.json
 repo/ops/tom-readonly/live-healthcheck-window.sh status
 repo/ops/tom-readonly/instance-impact-snapshot.sh snapshot readonly-baseline
 ```
@@ -84,7 +85,7 @@ OPERATOR=Anan \
 repo/ops/tom-readonly/live-healthcheck-window.sh run
 ```
 
-`run` 模式会自动生成 before/after 实例影响快照，位置默认为：
+`run` 模式会在 live healthcheck 调用成功后把 approval 标记为已使用，后续必须重新 `approve` 才能再次演练；它也会自动生成 before/after 实例影响快照，位置默认为：
 
 ```bash
 /srv/openclaw-control-center-readonly/runtime/impact-snapshots/
@@ -98,7 +99,7 @@ repo/ops/tom-readonly/live-healthcheck-window.sh run
 /srv/openclaw-control-center-readonly/runtime/live-healthcheck-reports/
 ```
 
-报告通过条件包括：approval 已批准、dry-run 审计存在、live result 审计为 `executed`、`mutatesOpenClawInstance=false`，以及 after 快照恢复只读。
+报告通过条件包括：approval 已批准且已标记为已使用、dry-run 审计存在、live result 审计为 `executed`、`mutatesOpenClawInstance=false`，以及 after 快照恢复只读。
 
 如果只需要手动打开或关闭演练窗口：
 

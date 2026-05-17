@@ -77,6 +77,13 @@ check_approval_file() {
     "$APPROVAL_SCRIPT" check "$APPROVAL_FILE"
 }
 
+consume_approval_file() {
+  log "标记 live healthcheck 人工批准记录为已使用：${APPROVAL_FILE}"
+  INSTANCE_ID="${INSTANCE_ID:-tom}" \
+    OPERATOR="${OPERATOR:-Anan}" \
+    "$APPROVAL_SCRIPT" consume "$APPROVAL_FILE"
+}
+
 write_rollout_file() {
   mkdir -p "$(dirname "$ROLLOUT_HOST_FILE")"
   install -m 0644 "$ROLLOUT_SOURCE" "$ROLLOUT_HOST_FILE"
@@ -197,6 +204,7 @@ run_once() {
   INSTANCE_ID="${INSTANCE_ID:-tom}" \
     OPERATOR="${OPERATOR:-Anan}" \
     "$SMOKE_SCRIPT"
+  consume_approval_file
   WINDOW_ACTIVE="false"
   stop_live_window
   local impact_after
