@@ -113,6 +113,11 @@
 - 已验证 `npm test -- test/remote-collector-preflight.test.ts test/remote-collector-onboarding.test.ts test/register-remote-collector.test.ts test/remote-collector-pull.test.ts test/collector-node-bootstrap.test.ts test/oss-readiness.test.ts`，21/21 通过。
 - 已验证 `npm test -- test/multi-instance-readonly.test.ts test/readonly-multi-instance-safety.test.ts test/ui-render-smoke.test.ts`，39/39 通过。
 - 已验证 `npm run build`。
+- 已提交并推送 `2d2dfa5 ops: preflight remote collector prerequisites`。
+- 已部署到 Tom，并验证运行提交 `2d2dfa5`。
+- 已在 Tom 对样板接入包执行 `remote-collector-preflight.sh plan`，返回 `connectsSsh=false`、`writesRemoteFiles=false`、`startsContainers=false`、`mutatesOpenClawInstance=false`、`callsLiveApi=false`。
+- 已在 Tom 再次执行 onboarding `verify`，返回 `status=verified`、`bootstrapStartsContainers=false`、`writesActiveRegistry=false`、`connectsSsh=false`。
+- 已验证 Tom `healthcheck.sh` 通过，现有 5 个实例仍只读；live window status 仍为 `needs_manual_approval`、`READONLY_MODE=true`、`readiness.status=blocked`，未调用 live API。
 - 已新增 `ops/tom-readonly/register-remote-collector.sh`，用于把已拉取的远端 collector snapshot 注册到 Tom `config/instances.json`。
 - 已新增 `ops/tom-readonly/register-remote-collector.example.json` 样板。
 - `register-remote-collector.sh plan` 只读取配置、Tom registry 和本机 snapshot，不写文件。
