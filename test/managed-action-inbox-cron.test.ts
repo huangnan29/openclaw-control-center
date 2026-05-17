@@ -81,6 +81,7 @@ test("managed action inbox cron plan 不写 crontab 且只计划 dry-run run-pen
     assert.equal(report.installed, false);
     assert.equal(report.needsUpdate, true);
     assert.match(report.block, /OPENCLAW_MANAGED_ACTION_INBOX_CRON_BEGIN/);
+    assert.match(report.block, /cd '[^']+' && CONFIRM_MANAGED_ACTION_INBOX_RUNNER=/);
     assert.match(report.block, /managed-action-inbox-runner\.sh run-pending/);
     assert.match(report.block, /CONFIRM_MANAGED_ACTION_INBOX_RUNNER/);
     assert.match(report.block, /MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container/);
@@ -133,6 +134,7 @@ test("managed action inbox cron apply 安装受控块且 remove 可移除", asyn
     assert.equal(applied.report.safety.writesOpenClawInstanceDirs, false);
     const afterApply = await readFile(tab, "utf8");
     assert.match(afterApply, /OPENCLAW_MANAGED_ACTION_INBOX_CRON_BEGIN/);
+    assert.match(afterApply, /cd '[^']+' && CONFIRM_MANAGED_ACTION_INBOX_RUNNER=/);
     assert.match(afterApply, /managed-action-inbox-runner\.sh run-pending/);
     assert.match(afterApply, /MANAGED_ACTION_INBOX_MAX_PER_RUN='7'/);
     assert.doesNotMatch(afterApply, /api\/managed-actions\/live/);

@@ -168,7 +168,7 @@ function removeBlock(existing) {
 
 function cronCommand() {
   return [
-    `cd ${shellQuote(deployDir)}`,
+    `cd ${shellQuote(deployDir)} &&`,
     `CONFIRM_MANAGED_ACTION_INBOX_RUNNER=${shellQuote("I_UNDERSTAND_THIS_READS_OPENCLAW_INBOX_AND_RUNS_DRY_RUN_TEXT")}`,
     "MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container",
     "MANAGED_ACTION_INBOX_SOURCE=control-center-container",
