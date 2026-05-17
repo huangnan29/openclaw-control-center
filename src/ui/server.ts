@@ -5858,13 +5858,23 @@ interface MultiInstanceUiMetrics {
   cronJobs: number;
   projects: number;
   tasks: number;
+  agents: number;
+  tokensIn: number;
+  tokensOut: number;
+  totalTokens: number;
+  cost: number;
   lastActivityAt?: string;
 }
 
 function buildInstanceUiMetrics(item: InstanceSnapshot): MultiInstanceUiMetrics {
   const sessions = item.snapshot.sessions;
+  const statusBySession = new Map(item.snapshot.statuses.map((status) => [status.sessionKey, status]));
+  const agentIds = collectAgentIdsForInstance(item);
+  const tokensIn = item.snapshot.statuses.reduce((total, status) => total + (status.tokensIn ?? 0), 0);
+  const tokensOut = item.snapshot.statuses.reduce((total, status) => total + (status.tokensOut ?? 0), 0);
+  const cost = item.snapshot.statuses.reduce((total, status) => total + (status.cost ?? 0), 0);
   const lastActivityAt = sessions
-    .map((session) => session.lastMessageAt)
+    .map((session) => pickLatestTimestamp([session.lastMessageAt, statusBySession.get(session.sessionKey)?.updatedAt]))
     .filter((value): value is string => typeof value === "string" && !Number.isNaN(Date.parse(value)))
     .sort((a, b) => Date.parse(b) - Date.parse(a))[0];
 
@@ -5877,6 +5887,11 @@ function buildInstanceUiMetrics(item: InstanceSnapshot): MultiInstanceUiMetrics 
     cronJobs: item.snapshot.cronJobs.length,
     projects: item.snapshot.projects.projects.length,
     tasks: item.snapshot.tasks.tasks.length,
+    agents: agentIds.size,
+    tokensIn,
+    tokensOut,
+    totalTokens: tokensIn + tokensOut,
+    cost,
     lastActivityAt,
   };
 }
@@ -5991,6 +6006,408 @@ function renderFleetRecentActivity(snapshot: MultiInstanceSnapshot, language: Ui
   </section>`;
 }
 
+interface MultiInstanceAgentRow {
+  instanceId: string;
+  instanceName: string;
+  agentId: string;
+  sessions: number;
+  running: number;
+  blocked: number;
+  errors: number;
+  tasks: number;
+  pendingApprovals: number;
+  tokensIn: number;
+  tokensOut: number;
+  cost: number;
+  lastActivityAt?: string;
+}
+
+interface MultiInstanceTaskRow {
+  instanceId: string;
+  instanceName: string;
+  title: string;
+  status: TaskState;
+  owner: string;
+  updatedAt: string;
+  sessionCount: number;
+}
+
+interface MultiInstanceLogRow {
+  instanceId: string;
+  instanceName: string;
+  timestamp?: string;
+  severity: "info" | "warn" | "error" | "action-required";
+  source: string;
+  message: string;
+}
+
+function collectAgentIdsForInstance(item: InstanceSnapshot): Set<string> {
+  const ids = new Set<string>();
+  for (const session of item.snapshot.sessions) {
+    const id = normalizeAgentId(session.agentId);
+    if (id) ids.add(id);
+  }
+  for (const task of item.snapshot.tasks.tasks) {
+    const id = normalizeAgentId(task.owner);
+    if (id) ids.add(id);
+  }
+  for (const approval of item.snapshot.approvals) {
+    const id = normalizeAgentId(approval.agentId);
+    if (id) ids.add(id);
+  }
+  for (const budget of item.snapshot.budgetSummary.evaluations) {
+    if (budget.scope === "agent") {
+      const id = normalizeAgentId(budget.scopeId);
+      if (id) ids.add(id);
+    }
+  }
+  return ids;
+}
+
+function normalizeAgentId(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function resolveSessionAgentId(session: ReadModelSnapshot["sessions"][number]): string {
+  return normalizeAgentId(session.agentId) ?? "unassigned";
+}
+
+function buildMultiInstanceAgentRows(items: InstanceSnapshot[]): MultiInstanceAgentRow[] {
+  const rows = new Map<string, MultiInstanceAgentRow>();
+
+  const ensureRow = (item: InstanceSnapshot, agentId: string): MultiInstanceAgentRow => {
+    const key = `${item.instance.id}:${agentId}`;
+    const existing = rows.get(key);
+    if (existing) return existing;
+    const next: MultiInstanceAgentRow = {
+      instanceId: item.instance.id,
+      instanceName: item.instance.name,
+      agentId,
+      sessions: 0,
+      running: 0,
+      blocked: 0,
+      errors: 0,
+      tasks: 0,
+      pendingApprovals: 0,
+      tokensIn: 0,
+      tokensOut: 0,
+      cost: 0,
+    };
+    rows.set(key, next);
+    return next;
+  };
+
+  for (const item of items) {
+    const statusBySession = new Map(item.snapshot.statuses.map((status) => [status.sessionKey, status]));
+    for (const agentId of collectAgentIdsForInstance(item)) ensureRow(item, agentId);
+
+    for (const session of item.snapshot.sessions) {
+      const agentId = resolveSessionAgentId(session);
+      const row = ensureRow(item, agentId);
+      const status = statusBySession.get(session.sessionKey);
+      row.sessions += 1;
+      if (session.state === "running") row.running += 1;
+      if (session.state === "blocked" || session.state === "waiting_approval") row.blocked += 1;
+      if (session.state === "error") row.errors += 1;
+      row.tokensIn += status?.tokensIn ?? 0;
+      row.tokensOut += status?.tokensOut ?? 0;
+      row.cost += status?.cost ?? 0;
+      row.lastActivityAt = pickLatestTimestamp([row.lastActivityAt, session.lastMessageAt, status?.updatedAt]);
+    }
+
+    for (const task of item.snapshot.tasks.tasks) {
+      const row = ensureRow(item, normalizeAgentId(task.owner) ?? "unassigned");
+      row.tasks += 1;
+      row.lastActivityAt = pickLatestTimestamp([row.lastActivityAt, task.updatedAt]);
+    }
+
+    for (const approval of item.snapshot.approvals) {
+      if (approval.status !== "pending") continue;
+      const row = ensureRow(item, normalizeAgentId(approval.agentId) ?? "unassigned");
+      row.pendingApprovals += 1;
+      row.lastActivityAt = pickLatestTimestamp([row.lastActivityAt, approval.updatedAt, approval.requestedAt]);
+    }
+  }
+
+  return [...rows.values()].sort((a, b) => {
+    const riskDiff = b.errors + b.blocked + b.pendingApprovals - (a.errors + a.blocked + a.pendingApprovals);
+    if (riskDiff !== 0) return riskDiff;
+    const activeDiff = b.running - a.running;
+    if (activeDiff !== 0) return activeDiff;
+    const timeDiff = toSortableMs(b.lastActivityAt) - toSortableMs(a.lastActivityAt);
+    if (timeDiff !== 0) return timeDiff;
+    return `${a.instanceName}:${a.agentId}`.localeCompare(`${b.instanceName}:${b.agentId}`);
+  });
+}
+
+function buildMultiInstanceTaskRows(items: InstanceSnapshot[]): MultiInstanceTaskRow[] {
+  return items
+    .flatMap((item) =>
+      item.snapshot.tasks.tasks.map((task) => ({
+        instanceId: item.instance.id,
+        instanceName: item.instance.name,
+        title: task.title,
+        status: task.status,
+        owner: task.owner,
+        updatedAt: task.updatedAt,
+        sessionCount: task.sessionKeys.length,
+      })),
+    )
+    .sort((a, b) => toSortableMs(b.updatedAt) - toSortableMs(a.updatedAt));
+}
+
+function buildMultiInstanceLogRows(items: InstanceSnapshot[], generatedAt: string): MultiInstanceLogRow[] {
+  const rows: MultiInstanceLogRow[] = [];
+
+  for (const item of items) {
+    const metrics = buildInstanceUiMetrics(item);
+    rows.push({
+      instanceId: item.instance.id,
+      instanceName: item.instance.name,
+      timestamp: item.snapshot.generatedAt || generatedAt,
+      severity: item.status === "connected" ? "info" : item.status === "partial" ? "warn" : "error",
+      source: "health",
+      message: `${item.instance.name}: ${multiInstanceStatusLabel(item.status, "en")} · ${item.detail}`,
+    });
+
+    for (const session of item.snapshot.sessions) {
+      if (!session.lastMessageAt) continue;
+      rows.push({
+        instanceId: item.instance.id,
+        instanceName: item.instance.name,
+        timestamp: session.lastMessageAt,
+        severity: session.state === "error" ? "error" : session.state === "blocked" || session.state === "waiting_approval" ? "warn" : "info",
+        source: "session",
+        message: `${sessionStateLabel(session.state)} · ${session.label ?? session.agentId ?? session.sessionKey}`,
+      });
+    }
+
+    for (const task of item.snapshot.tasks.tasks) {
+      rows.push({
+        instanceId: item.instance.id,
+        instanceName: item.instance.name,
+        timestamp: task.updatedAt,
+        severity: task.status === "blocked" ? "warn" : "info",
+        source: "task",
+        message: `${task.status} · ${task.title} · ${task.owner}`,
+      });
+    }
+
+    for (const approval of item.snapshot.approvals) {
+      rows.push({
+        instanceId: item.instance.id,
+        instanceName: item.instance.name,
+        timestamp: approval.updatedAt ?? approval.requestedAt,
+        severity: approval.status === "pending" ? "action-required" : approval.status === "denied" ? "warn" : "info",
+        source: "approval",
+        message: `${approval.status} · ${approval.command ?? approval.decision ?? approval.reason ?? approval.approvalId}`,
+      });
+    }
+
+    if (metrics.pendingApprovals > 0 || metrics.blocked > 0 || metrics.errors > 0) {
+      rows.push({
+        instanceId: item.instance.id,
+        instanceName: item.instance.name,
+        timestamp: metrics.lastActivityAt ?? item.snapshot.generatedAt ?? generatedAt,
+        severity: metrics.errors > 0 ? "error" : "action-required",
+        source: "signal",
+        message: `blocked=${metrics.blocked} errors=${metrics.errors} pendingApprovals=${metrics.pendingApprovals}`,
+      });
+    }
+
+    for (const cron of item.snapshot.cronJobs) {
+      if (!cron.nextRunAt) continue;
+      rows.push({
+        instanceId: item.instance.id,
+        instanceName: item.instance.name,
+        timestamp: cron.nextRunAt,
+        severity: cron.enabled ? "info" : "warn",
+        source: "cron",
+        message: `${cron.enabled ? "enabled" : "disabled"} · ${cron.name ?? cron.jobId}`,
+      });
+    }
+  }
+
+  return rows.sort((a, b) => toSortableMs(b.timestamp) - toSortableMs(a.timestamp));
+}
+
+function formatPreciseCost(value: number): string {
+  return value.toFixed(4);
+}
+
+function renderMultiInstanceHealthPanel(items: InstanceSnapshot[], language: UiLanguage, title?: string): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const rows = items
+    .map((item) => {
+      const metrics = buildInstanceUiMetrics(item);
+      const statusTone =
+        item.status === "connected" && metrics.errors === 0 && metrics.blocked === 0 && metrics.pendingApprovals === 0
+          ? "connected"
+          : item.status === "not_connected" || metrics.errors > 0
+            ? "error"
+            : "partial";
+      const statusLabel =
+        item.status === "connected" && metrics.errors === 0 && metrics.blocked === 0 && metrics.pendingApprovals === 0
+          ? t("Healthy", "健康")
+          : item.status === "connected"
+            ? t("Needs attention", "需关注")
+            : multiInstanceStatusLabel(item.status, language);
+      const href = `/?instance=${encodeURIComponent(item.instance.id)}&amp;section=overview&amp;lang=${encodeURIComponent(language)}`;
+      return `<tr>
+        <td><a href="${href}">${escapeHtml(item.instance.name)}</a><div class="meta"><code>${escapeHtml(item.instance.id)}</code></div></td>
+        <td>${badge(statusTone, statusLabel)}</td>
+        <td>${metrics.sessions}</td>
+        <td>${metrics.agents}</td>
+        <td>${metrics.running}</td>
+        <td>${metrics.blocked}</td>
+        <td>${metrics.errors}</td>
+        <td>${metrics.pendingApprovals}</td>
+        <td>${escapeHtml(metrics.lastActivityAt ? formatUiTimestamp(metrics.lastActivityAt, language) : "-")}</td>
+      </tr>`;
+    })
+    .join("");
+  return `<section class="panel">
+    <div class="panel-head">
+      <h2>${escapeHtml(title ?? t("Instance health", "实例健康"))}</h2>
+      <div class="meta">${escapeHtml(t("Connection, runtime risk, and freshness at a glance.", "集中查看连接、运行风险和新鲜度。"))}</div>
+    </div>
+    ${rows ? `<div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Instance", "实例"))}</th><th>${escapeHtml(t("Health", "健康"))}</th><th>${escapeHtml(t("Sessions", "会话"))}</th><th>Agent</th><th>${escapeHtml(t("Running", "运行中"))}</th><th>${escapeHtml(t("Blocked", "阻塞"))}</th><th>${escapeHtml(t("Errors", "错误"))}</th><th>${escapeHtml(t("Pending", "待审"))}</th><th>${escapeHtml(t("Latest", "最近"))}</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-state">${escapeHtml(t("No instances configured.", "尚未配置实例。"))}</div>`}
+  </section>`;
+}
+
+function renderMultiInstanceUsagePanel(items: InstanceSnapshot[], language: UiLanguage, title?: string): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const metrics = items.map((item) => ({ item, metrics: buildInstanceUiMetrics(item) }));
+  const totals = metrics.reduce(
+    (acc, item) => ({
+      tokensIn: acc.tokensIn + item.metrics.tokensIn,
+      tokensOut: acc.tokensOut + item.metrics.tokensOut,
+      totalTokens: acc.totalTokens + item.metrics.totalTokens,
+      cost: acc.cost + item.metrics.cost,
+    }),
+    { tokensIn: 0, tokensOut: 0, totalTokens: 0, cost: 0 },
+  );
+  const modelRows = buildUsageModelRows(items)
+    .slice(0, 8)
+    .map(
+      (row) =>
+        `<tr><td>${escapeHtml(row.model)}</td><td>${formatInt(row.tokensIn + row.tokensOut)}</td><td>${formatInt(row.tokensIn)}</td><td>${formatInt(row.tokensOut)}</td><td>${formatPreciseCost(row.cost)}</td><td>${row.sessions}</td></tr>`,
+    )
+    .join("");
+  const chips = [
+    renderFleetMetricChip(t("Tokens In", "输入用量"), formatInt(totals.tokensIn)),
+    renderFleetMetricChip(t("Tokens Out", "输出用量"), formatInt(totals.tokensOut)),
+    renderFleetMetricChip(t("Total usage", "总用量"), formatInt(totals.totalTokens)),
+    renderFleetMetricChip(t("Estimated cost", "预估费用"), formatPreciseCost(totals.cost)),
+  ].join("");
+  return `<section class="panel">
+    <div class="panel-head">
+      <h2>${escapeHtml(title ?? t("Usage", "用量"))}</h2>
+      <div class="meta">${escapeHtml(t("Read from session status snapshots; no billing write path is used.", "来自会话状态快照，不触碰账单或写接口。"))}</div>
+    </div>
+    <div class="status-strip">${chips}</div>
+    ${modelRows ? `<div class="table-wrap"><table><thead><tr><th>Model</th><th>${escapeHtml(t("Total", "合计"))}</th><th>In</th><th>Out</th><th>Cost</th><th>${escapeHtml(t("Sessions", "会话"))}</th></tr></thead><tbody>${modelRows}</tbody></table></div>` : `<div class="empty-state">${escapeHtml(t("No status usage data yet.", "暂无状态用量数据。"))}</div>`}
+  </section>`;
+}
+
+function buildUsageModelRows(items: InstanceSnapshot[]): Array<{
+  model: string;
+  tokensIn: number;
+  tokensOut: number;
+  cost: number;
+  sessions: number;
+}> {
+  const rows = new Map<string, { model: string; tokensIn: number; tokensOut: number; cost: number; sessions: number }>();
+  for (const item of items) {
+    for (const status of item.snapshot.statuses) {
+      const model = status.model?.trim() || "unknown";
+      const row = rows.get(model) ?? { model, tokensIn: 0, tokensOut: 0, cost: 0, sessions: 0 };
+      row.tokensIn += status.tokensIn ?? 0;
+      row.tokensOut += status.tokensOut ?? 0;
+      row.cost += status.cost ?? 0;
+      row.sessions += 1;
+      rows.set(model, row);
+    }
+  }
+  return [...rows.values()].sort((a, b) => b.tokensIn + b.tokensOut - (a.tokensIn + a.tokensOut));
+}
+
+function renderMultiInstanceAgentRosterPanel(items: InstanceSnapshot[], language: UiLanguage, title?: string): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const rows = buildMultiInstanceAgentRows(items)
+    .slice(0, 16)
+    .map((row) => {
+      const state =
+        row.errors > 0 ? badge("error", t("Error", "错误"))
+        : row.blocked > 0 ? badge("partial", t("Blocked", "阻塞"))
+        : row.running > 0 ? badge("running", t("Running", "运行中"))
+        : badge("connected", t("Visible", "可见"));
+      return `<tr>
+        <td>${escapeHtml(row.instanceName)}</td>
+        <td><code>${escapeHtml(row.agentId)}</code></td>
+        <td>${state}</td>
+        <td>${row.sessions}</td>
+        <td>${row.tasks}</td>
+        <td>${row.pendingApprovals}</td>
+        <td>${formatInt(row.tokensIn + row.tokensOut)}</td>
+        <td>${formatPreciseCost(row.cost)}</td>
+        <td>${escapeHtml(row.lastActivityAt ? formatUiTimestamp(row.lastActivityAt, language) : "-")}</td>
+      </tr>`;
+    })
+    .join("");
+  return `<section class="panel">
+    <div class="panel-head">
+      <h2>${escapeHtml(title ?? t("Agent roster", "Agent 名录"))}</h2>
+      <div class="meta">${escapeHtml(t("Merged from sessions, task owners, approvals, and agent budget scopes.", "由会话、任务负责人、审批和 Agent 预算范围合并。"))}</div>
+    </div>
+    ${rows ? `<div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Instance", "实例"))}</th><th>Agent</th><th>${escapeHtml(t("State", "状态"))}</th><th>${escapeHtml(t("Sessions", "会话"))}</th><th>${escapeHtml(t("Tasks", "任务"))}</th><th>${escapeHtml(t("Pending", "待审"))}</th><th>${escapeHtml(t("Usage", "用量"))}</th><th>Cost</th><th>${escapeHtml(t("Latest", "最近"))}</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-state">${escapeHtml(t("No agents are visible yet.", "暂未看到 Agent。"))}</div>`}
+  </section>`;
+}
+
+function renderMultiInstanceRecentTasksPanel(items: InstanceSnapshot[], language: UiLanguage, title?: string): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const rows = buildMultiInstanceTaskRows(items)
+    .slice(0, 12)
+    .map(
+      (task) =>
+        `<tr><td>${escapeHtml(task.instanceName)}</td><td>${escapeHtml(safeTruncate(task.title, 86))}</td><td>${badge(task.status, task.status)}</td><td>${escapeHtml(task.owner)}</td><td>${task.sessionCount}</td><td>${escapeHtml(formatUiTimestamp(task.updatedAt, language))}</td></tr>`,
+    )
+    .join("");
+  return `<section class="panel">
+    <div class="panel-head">
+      <h2>${escapeHtml(title ?? t("Recent tasks", "最近任务"))}</h2>
+      <div class="meta">${escapeHtml(t("Newest task records across the selected scope.", "当前范围内最近更新的任务记录。"))}</div>
+    </div>
+    ${rows ? `<div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Instance", "实例"))}</th><th>${escapeHtml(t("Task", "任务"))}</th><th>${escapeHtml(t("State", "状态"))}</th><th>${escapeHtml(t("Owner", "负责人"))}</th><th>${escapeHtml(t("Sessions", "会话"))}</th><th>${escapeHtml(t("Updated", "更新时间"))}</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-state">${escapeHtml(t("No tasks reported.", "暂无任务上报。"))}</div>`}
+  </section>`;
+}
+
+function renderMultiInstanceLogPanel(items: InstanceSnapshot[], language: UiLanguage, generatedAt: string, title?: string): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const rows = buildMultiInstanceLogRows(items, generatedAt)
+    .slice(0, 14)
+    .map(
+      (log) =>
+        `<tr><td>${escapeHtml(log.timestamp ? formatUiTimestamp(log.timestamp, language) : "-")}</td><td>${escapeHtml(log.instanceName)}</td><td>${badge(log.severity, logSeverityLabel(log.severity, language))}</td><td>${escapeHtml(log.source)}</td><td>${escapeHtml(safeTruncate(log.message, 120))}</td></tr>`,
+    )
+    .join("");
+  return `<section class="panel">
+    <div class="panel-head">
+      <h2>${escapeHtml(title ?? t("Recent logs", "最近日志"))}</h2>
+      <div class="meta">${escapeHtml(t("Synthetic read-only event stream from snapshots.", "从快照合成的只读事件流。"))}</div>
+    </div>
+    ${rows ? `<div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Time", "时间"))}</th><th>${escapeHtml(t("Instance", "实例"))}</th><th>${escapeHtml(t("Level", "级别"))}</th><th>${escapeHtml(t("Source", "来源"))}</th><th>${escapeHtml(t("Message", "消息"))}</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-state">${escapeHtml(t("No log-like events yet.", "暂无日志事件。"))}</div>`}
+  </section>`;
+}
+
+function logSeverityLabel(severity: MultiInstanceLogRow["severity"], language: UiLanguage): string {
+  if (severity === "error") return pickUiText(language, "Error", "错误");
+  if (severity === "warn") return pickUiText(language, "Warning", "预警");
+  if (severity === "action-required") return pickUiText(language, "Action required", "需要处理");
+  return pickUiText(language, "Info", "信息");
+}
+
 function renderMultiInstanceOverview(
   snapshot: MultiInstanceSnapshot,
   language: UiLanguage = "zh",
@@ -6083,12 +6500,17 @@ function renderMultiInstanceOverview(
     <section class="status-strip">${totalChips}</section>
     <section class="overview-layout">
       <div>
+        ${renderMultiInstanceHealthPanel(snapshot.instances, language)}
         <section class="instance-grid">${cards || `<div class="card">${escapeHtml(t("No instances configured.", "尚未配置实例。"))}</div>`}</section>
         ${renderFleetMatrix(snapshot, language)}
+        ${renderMultiInstanceRecentTasksPanel(snapshot.instances, language)}
       </div>
       <div>
+        ${renderMultiInstanceUsagePanel(snapshot.instances, language)}
+        ${renderMultiInstanceAgentRosterPanel(snapshot.instances, language)}
         ${renderFleetAttention(snapshot, language)}
         ${renderFleetRecentActivity(snapshot, language)}
+        ${renderMultiInstanceLogPanel(snapshot.instances, language, snapshot.generatedAt)}
       </div>
     </section>
   </main>
@@ -6252,14 +6674,16 @@ function renderMultiInstanceDetail(
     .meta { color: var(--muted); font-size: 13px; }
     .notice { border: 1px solid rgba(180, 83, 9, 0.24); background: #fff7ed; color: #92400e; border-radius: 8px; padding: 10px 12px; margin: 14px 0; }
     .status-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 16px 0; }
-    .status-chip, .card { border: 1px solid var(--border); border-radius: 8px; background: #fff; }
+    .status-chip, .card, .panel { border: 1px solid var(--border); border-radius: 8px; background: #fff; }
     .status-chip { padding: 12px; }
     .status-chip span { display: block; color: var(--muted); font-size: 12px; }
     .status-chip strong { display: block; margin-top: 5px; font-size: 24px; line-height: 1.08; }
     .detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; margin-top: 12px; }
-    .card { padding: 14px; margin-top: 12px; }
+    .card, .panel { padding: 14px; margin-top: 12px; }
     .detail-grid .card { margin-top: 0; }
-    .card h2 { margin: 0 0 8px; font-size: 17px; letter-spacing: 0; }
+    .card h2, .panel h2 { margin: 0 0 8px; font-size: 17px; letter-spacing: 0; }
+    .panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 10px; }
+    .empty-state { color: var(--muted); font-size: 13px; border: 1px dashed var(--border); border-radius: 8px; padding: 12px; background: rgba(255, 255, 255, 0.72); }
     .badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 8px; font-size: 12px; border: 1px solid var(--border); color: #344054; background: #f9fafb; }
     .badge.connected { color: #05603a; background: #ecfdf3; border-color: #abefc6; }
     .badge.partial { color: #92400e; background: #fffbeb; border-color: #fde68a; }
@@ -6268,6 +6692,7 @@ function renderMultiInstanceDetail(
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th, td { text-align: left; border-bottom: 1px solid rgba(17, 24, 39, 0.08); padding: 8px 6px; vertical-align: top; }
     th { color: var(--muted); font-weight: 600; }
+    .table-wrap { overflow-x: auto; }
     code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
     .state-line { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 10px; }
     .state-line div { border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
@@ -6293,6 +6718,11 @@ function renderMultiInstanceDetail(
     </section>
     ${notFound}
     <section class="status-strip">${metrics}</section>
+    ${selected ? renderMultiInstanceHealthPanel([selected], language) : ""}
+    ${selected ? renderMultiInstanceUsagePanel([selected], language) : ""}
+    ${selected ? renderMultiInstanceAgentRosterPanel([selected], language) : ""}
+    ${selected ? renderMultiInstanceRecentTasksPanel([selected], language) : ""}
+    ${selected ? renderMultiInstanceLogPanel([selected], language, snapshot.generatedAt) : ""}
     <section class="detail-grid">
       <section class="card">
         <h2>${escapeHtml(t("Instance connection", "实例连接"))}</h2>

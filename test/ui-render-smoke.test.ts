@@ -165,15 +165,33 @@ test("multi-instance overview renders status metrics detail links and selected s
   const { renderMultiInstanceOverviewForSmoke } = await import("../src/ui/server");
   const tomSnapshot = smokeSnapshot();
   tomSnapshot.sessions = [
-    { sessionKey: "sess-running", label: "Running Session", state: "running" },
-    { sessionKey: "sess-error", label: "Broken Session", state: "error" },
+    { sessionKey: "sess-running", label: "Running Session", agentId: "agent-kazik", state: "running", lastMessageAt: "2026-03-03T09:00:00.000Z" },
+    { sessionKey: "sess-error", label: "Broken Session", agentId: "agent-fix", state: "error", lastMessageAt: "2026-03-03T08:58:00.000Z" },
+  ];
+  tomSnapshot.statuses = [
+    { sessionKey: "sess-running", model: "gpt-5.2", tokensIn: 300, tokensOut: 120, cost: 0.045, updatedAt: "2026-03-03T09:00:00.000Z" },
   ];
   tomSnapshot.approvals = [
-    { approvalId: "approval-1", status: "pending", command: "dangerous command" },
+    { approvalId: "approval-1", status: "pending", agentId: "agent-kazik", command: "dangerous command" },
+  ];
+  tomSnapshot.tasks.tasks = [
+    {
+      projectId: "tom-project",
+      taskId: "tom-task",
+      title: "Tom recent task",
+      status: "in_progress",
+      owner: "agent-kazik",
+      definitionOfDone: [],
+      artifacts: [],
+      rollback: { strategy: "manual", steps: [] },
+      sessionKeys: ["sess-running"],
+      budget: {},
+      updatedAt: "2026-03-03T09:00:00.000Z",
+    },
   ];
 
   const jerrySnapshot = smokeSnapshot();
-  jerrySnapshot.sessions = [{ sessionKey: "sess-waiting", label: "Waiting Session", state: "waiting_approval" }];
+  jerrySnapshot.sessions = [{ sessionKey: "sess-waiting", label: "Waiting Session", agentId: "agent-review", state: "waiting_approval", lastMessageAt: "2026-03-03T08:50:00.000Z" }];
 
   const snapshot: MultiInstanceSnapshot = {
     generatedAt: "2026-03-03T09:01:00.000Z",
@@ -218,6 +236,15 @@ test("multi-instance overview renders status metrics detail links and selected s
   assert(html.includes("实例矩阵"));
   assert(html.includes("关注队列"));
   assert(html.includes("最近活动"));
+  assert(html.includes("实例健康"));
+  assert(html.includes("Agent 名录"));
+  assert(html.includes("用量"));
+  assert(html.includes("最近日志"));
+  assert(html.includes("最近任务"));
+  assert(html.includes("agent-kazik"));
+  assert(html.includes("Tom recent task"));
+  assert(html.includes("420"));
+  assert(html.includes("0.0450"));
   assert(html.includes("<strong>2</strong>"));
   assert(html.includes("<strong>1</strong>"));
   assert(html.includes('href="/?instance=tom'));
@@ -267,6 +294,11 @@ test("multi-instance routes render overview detail and invalid-instance fallback
     assert(detailHtml.includes("Tom Workspace"));
     assert(detailHtml.includes("tom-route-session"));
     assert(detailHtml.includes("运行态分布"));
+    assert(detailHtml.includes("实例健康"));
+    assert(detailHtml.includes("Agent 名录"));
+    assert(detailHtml.includes("用量"));
+    assert(detailHtml.includes("最近日志"));
+    assert(detailHtml.includes("最近任务"));
     assert(detailHtml.includes("项目"));
     assert(detailHtml.includes("任务"));
     assert(detailHtml.includes("预算关注"));
