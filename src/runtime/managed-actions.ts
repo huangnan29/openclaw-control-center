@@ -1,6 +1,7 @@
 import type { OpenClawInstanceConfig } from "../types";
 
 export type ManagedActionName = "healthcheck" | "collector_refresh" | "skill_run";
+export const MANAGED_ACTION_DRY_RUN_CONFIRMATION = "DRY-RUN-ONLY";
 
 export interface ManagedActionDefinition {
   action: ManagedActionName;
@@ -12,7 +13,10 @@ export interface ManagedActionDefinition {
 export interface ManagedActionDryRunInput {
   action: ManagedActionName;
   instance: OpenClawInstanceConfig;
-  reason?: string;
+  operationRequestId: string;
+  operator: string;
+  reason: string;
+  confirmedText: string;
   skillName?: string;
 }
 
@@ -35,7 +39,22 @@ export interface ManagedActionDryRunResult {
     requiresConfirmation: true;
     auditRequired: true;
   };
-  reason?: string;
+  review: {
+    operationRequestId: string;
+    createdAt: string;
+    operator: string;
+    reason: string;
+    requiredConfirmationText: typeof MANAGED_ACTION_DRY_RUN_CONFIRMATION;
+    confirmationTextMatched: true;
+    targetConfigSnapshot: {
+      instanceId: string;
+      instanceName: string;
+      gatewayUrl: string;
+      readonly: boolean;
+      serverId?: string;
+      serverName?: string;
+    };
+  };
 }
 
 const ACTIONS: ManagedActionDefinition[] = [
@@ -72,6 +91,9 @@ export function buildManagedActionDryRun(input: ManagedActionDryRunInput): Manag
   if (!definition) {
     throw new Error(`unsupported managed action: ${input.action}`);
   }
+  if (input.confirmedText !== MANAGED_ACTION_DRY_RUN_CONFIRMATION) {
+    throw new Error(`confirmedText must equal ${MANAGED_ACTION_DRY_RUN_CONFIRMATION}`);
+  }
 
   return {
     ok: true,
@@ -92,7 +114,22 @@ export function buildManagedActionDryRun(input: ManagedActionDryRunInput): Manag
       requiresConfirmation: true,
       auditRequired: true,
     },
-    ...(input.reason ? { reason: input.reason } : {}),
+    review: {
+      operationRequestId: input.operationRequestId,
+      createdAt: new Date().toISOString(),
+      operator: input.operator,
+      reason: input.reason,
+      requiredConfirmationText: MANAGED_ACTION_DRY_RUN_CONFIRMATION,
+      confirmationTextMatched: true,
+      targetConfigSnapshot: {
+        instanceId: input.instance.id,
+        instanceName: input.instance.name,
+        gatewayUrl: input.instance.gatewayUrl,
+        readonly: input.instance.readonly ?? true,
+        ...(input.instance.serverId ? { serverId: input.instance.serverId } : {}),
+        ...(input.instance.serverName ? { serverName: input.instance.serverName } : {}),
+      },
+    },
   };
 }
 

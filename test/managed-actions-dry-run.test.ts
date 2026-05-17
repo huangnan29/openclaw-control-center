@@ -52,7 +52,9 @@ test("managed action dry-run previews whitelisted actions without executing in r
       body: JSON.stringify({
         instanceId: "tom",
         action: "healthcheck",
+        operator: "Anan",
         reason: "上线前只读演练",
+        confirmedText: "DRY-RUN-ONLY",
       }),
     });
     assert.equal(response.status, 200);
@@ -64,6 +66,7 @@ test("managed action dry-run previews whitelisted actions without executing in r
       target: { instanceId: string; serverId?: string };
       commandPreview: string[];
       safety: { mutatesOpenClawInstance: boolean; requiresConfirmation: boolean };
+      review: { operationRequestId: string; operator: string; reason: string; confirmationTextMatched: boolean };
     };
 
     assert.equal(body.ok, true);
@@ -74,6 +77,10 @@ test("managed action dry-run previews whitelisted actions without executing in r
     assert.deepEqual(body.commandPreview, ["control-center healthcheck for instance tom"]);
     assert.equal(body.safety.mutatesOpenClawInstance, false);
     assert.equal(body.safety.requiresConfirmation, true);
+    assert.equal(typeof body.review.operationRequestId, "string");
+    assert.equal(body.review.operator, "Anan");
+    assert.equal(body.review.reason, "上线前只读演练");
+    assert.equal(body.review.confirmationTextMatched, true);
 
     const blockedResponse = await fetch(`${baseUrl}/api/managed-actions/dry-run`, {
       method: "POST",
@@ -81,9 +88,25 @@ test("managed action dry-run previews whitelisted actions without executing in r
       body: JSON.stringify({
         instanceId: "missing",
         action: "healthcheck",
+        operator: "Anan",
+        reason: "确认缺失实例不会执行",
+        confirmedText: "DRY-RUN-ONLY",
       }),
     });
     assert.equal(blockedResponse.status, 404);
+
+    const confirmationResponse = await fetch(`${baseUrl}/api/managed-actions/dry-run`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        instanceId: "tom",
+        action: "healthcheck",
+        operator: "Anan",
+        reason: "确认短语错误时阻断",
+        confirmedText: "RUN",
+      }),
+    });
+    assert.equal(confirmationResponse.status, 400);
   } finally {
     if (server.listening) {
       await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));

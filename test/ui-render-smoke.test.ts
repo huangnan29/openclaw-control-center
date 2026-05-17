@@ -294,6 +294,9 @@ test("multi-instance overview renders status metrics detail links and selected s
   assert(html.includes("data-managed-action-form"));
   assert(html.includes("/api/managed-actions/dry-run"));
   assert(html.includes("mutatesOpenClawInstance"));
+  assert(html.includes("操作者"));
+  assert(html.includes("确认短语"));
+  assert(html.includes("DRY-RUN-ONLY"));
   assert(!html.includes("LOCAL_API_TOKEN"));
   assert(html.includes("Tom Oracle"));
   assert(html.includes("Jerry Oracle"));

@@ -42,6 +42,7 @@ import {
   buildManagedActionDryRun,
   isManagedActionName,
   listManagedActions,
+  MANAGED_ACTION_DRY_RUN_CONFIRMATION,
   type ManagedActionName,
 } from "../runtime/managed-actions";
 import {
@@ -1349,11 +1350,23 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
         if (!instance) {
           throw new RequestValidationError(`instance '${instanceId}' was not found.`, 404);
         }
+        const operator = requiredBoundedString(payload.operator, "operator", 120);
+        const reason = requiredBoundedString(payload.reason, "reason", 240);
+        const confirmedText = requiredBoundedString(payload.confirmedText, "confirmedText", 80);
+        if (confirmedText !== MANAGED_ACTION_DRY_RUN_CONFIRMATION) {
+          throw new RequestValidationError(
+            `confirmedText must equal ${MANAGED_ACTION_DRY_RUN_CONFIRMATION}.`,
+            400,
+          );
+        }
 
         const result = buildManagedActionDryRun({
           action,
           instance,
-          reason: optionalBoundedString(payload.reason, "reason", 240),
+          operationRequestId: randomUUID(),
+          operator,
+          reason,
+          confirmedText,
           skillName: optionalBoundedString(payload.skillName, "skillName", 120),
         });
 
@@ -1366,6 +1379,11 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
           metadata: {
             target: result.target,
             commandPreview: result.commandPreview,
+            operationRequestId: result.review.operationRequestId,
+            operator: result.review.operator,
+            reason: result.review.reason,
+            confirmationTextMatched: result.review.confirmationTextMatched,
+            targetConfigSnapshot: result.review.targetConfigSnapshot,
             mutatesOpenClawInstance: result.safety.mutatesOpenClawInstance,
           },
         });
@@ -7003,12 +7021,20 @@ function renderManagedActionDryRunPanel(
           <select id="managed-action-name" name="action" required>${actionOptions}</select>
         </div>
         <div class="control-field">
+          <label for="managed-action-operator">${escapeHtml(t("Operator", "操作者"))}</label>
+          <input id="managed-action-operator" name="operator" type="text" autocomplete="name" required placeholder="${escapeHtml(t("Required", "必填"))}" />
+        </div>
+        <div class="control-field">
           <label for="managed-action-skill">${escapeHtml(t("Skill", "Skill"))}</label>
           <input id="managed-action-skill" name="skillName" type="text" autocomplete="off" placeholder="${escapeHtml(t("Optional", "可选"))}" />
         </div>
         <div class="control-field">
           <label for="managed-action-reason">${escapeHtml(t("Reason", "原因"))}</label>
-          <input id="managed-action-reason" name="reason" type="text" autocomplete="off" placeholder="${escapeHtml(t("Before rollout check", "上线前检查"))}" />
+          <input id="managed-action-reason" name="reason" type="text" autocomplete="off" required placeholder="${escapeHtml(t("Before rollout check", "上线前检查"))}" />
+        </div>
+        <div class="control-field">
+          <label for="managed-action-confirmed">${escapeHtml(t("Confirmation", "确认短语"))}</label>
+          <input id="managed-action-confirmed" name="confirmedText" type="text" autocomplete="off" required placeholder="${escapeHtml(MANAGED_ACTION_DRY_RUN_CONFIRMATION)}" />
         </div>
         <div class="control-field">
           <label for="managed-action-token">${escapeHtml(t("Local token", "本地令牌"))}</label>
@@ -7037,6 +7063,8 @@ function renderManagedActionDryRunScript(language: UiLanguage): string {
     target: pickUiText(language, "Target", "目标"),
     mode: pickUiText(language, "Mode", "模式"),
     safety: pickUiText(language, "Safety", "安全"),
+    request: pickUiText(language, "Request", "申请"),
+    operator: pickUiText(language, "Operator", "操作者"),
     commandPreview: pickUiText(language, "Command preview", "命令预览"),
     dryRun: "dry-run",
     noCommand: pickUiText(language, "No command preview returned.", "没有返回命令预览。"),
@@ -7059,6 +7087,8 @@ function renderManagedActionDryRunScript(language: UiLanguage): string {
         action: String(data.get("action") || ""),
         skillName: String(data.get("skillName") || ""),
         reason: String(data.get("reason") || ""),
+        operator: String(data.get("operator") || ""),
+        confirmedText: String(data.get("confirmedText") || ""),
         localToken: String(data.get("localToken") || ""),
       };
       try {
@@ -7079,6 +7109,8 @@ function renderManagedActionDryRunScript(language: UiLanguage): string {
         resultNode.classList.add("ok");
         resultNode.textContent = [
           copy.status + ": " + String(body.status || "dry_run_ready"),
+          copy.request + ": " + String(body.review?.operationRequestId || "-"),
+          copy.operator + ": " + String(body.review?.operator || payload.operator || "-"),
           copy.target + ": " + String(body.target?.instanceName || body.target?.instanceId || payload.instanceId),
           copy.mode + ": " + copy.dryRun + " / liveExecution=" + String(body.liveExecution === true),
           copy.safety + ": mutatesOpenClawInstance=" + String(body.safety?.mutatesOpenClawInstance === true) + ", requiresConfirmation=" + String(body.safety?.requiresConfirmation !== false),

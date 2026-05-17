@@ -700,7 +700,9 @@ export function buildApiDocs(): ApiDocsPayload {
         body: {
           instanceId: "required configured instance id",
           action: "required healthcheck|collector_refresh|skill_run",
-          reason: "optional string <= 240",
+          operator: "required string <= 120",
+          reason: "required string <= 240",
+          confirmedText: "required DRY-RUN-ONLY",
           skillName: "optional string <= 120 when action=skill_run",
         },
         response: {
@@ -709,6 +711,7 @@ export function buildApiDocs(): ApiDocsPayload {
           dryRun: "true",
           liveExecution: "false",
           commandPreview: "string[]",
+          review: "{ operationRequestId, createdAt, operator, reason, confirmationTextMatched, targetConfigSnapshot }",
           safety: "{ mutatesOpenClawInstance:false, requiresConfirmation:true, auditRequired:true }",
         },
       },
