@@ -9,6 +9,8 @@ BASE_URL="${BASE_URL:-http://127.0.0.1:4311}"
 INSTANCE_IDS="${INSTANCE_IDS:-main tom third deepseek spark}"
 GATEWAY_PORTS="${GATEWAY_PORTS:-18789 18791 18793 18795 18797}"
 INSTANCE_MOUNTS="${INSTANCE_MOUNTS:-/instances/main/config /instances/main/workspace /instances/tom/config /instances/tom/workspace /instances/third/config /instances/third/workspace /instances/deepseek/config /instances/deepseek/workspace /instances/spark/config /instances/spark/workspace}"
+HTTP_RETRY_COUNT="${HTTP_RETRY_COUNT:-20}"
+HTTP_RETRY_DELAY_SECONDS="${HTTP_RETRY_DELAY_SECONDS:-1}"
 TMP_DIR=""
 
 timestamp() {
@@ -35,6 +37,27 @@ require_contains() {
   grep -Fq "$needle" "$file" || fail "${label} 未找到：${needle}"
 }
 
+curl_to_file() {
+  local url="$1"
+  local output_file="$2"
+  local label="$3"
+  local attempt=1
+
+  while true; do
+    if curl -fsS "$url" -o "$output_file"; then
+      return 0
+    fi
+
+    if [ "$attempt" -ge "$HTTP_RETRY_COUNT" ]; then
+      fail "${label} 在 ${HTTP_RETRY_COUNT} 次重试后仍不可用：${url}"
+    fi
+
+    log "${label} 暂不可用，${HTTP_RETRY_DELAY_SECONDS}s 后重试（${attempt}/${HTTP_RETRY_COUNT}）"
+    sleep "$HTTP_RETRY_DELAY_SECONDS"
+    attempt=$((attempt + 1))
+  done
+}
+
 cleanup() {
   if [ -n "$TMP_DIR" ] && [ -d "$TMP_DIR" ]; then
     rm -rf "$TMP_DIR"
@@ -43,10 +66,9 @@ cleanup() {
 
 check_http_pages() {
   local base="${BASE_URL%/}"
-  TMP_DIR="$(mktemp -d)"
 
   log "检查多实例总览页面"
-  curl -fsS "${base}/?section=overview&lang=zh" -o "${TMP_DIR}/overview.html"
+  curl_to_file "${base}/?section=overview&lang=zh" "${TMP_DIR}/overview.html" "多实例总览页面"
   require_contains "${TMP_DIR}/overview.html" "多实例只读总览" "总览标题"
   require_contains "${TMP_DIR}/overview.html" "实例矩阵" "实例矩阵"
   require_contains "${TMP_DIR}/overview.html" "关注队列" "关注队列"
@@ -55,7 +77,7 @@ check_http_pages() {
   local instance_id
   for instance_id in ${INSTANCE_IDS}; do
     log "检查实例详情页：${instance_id}"
-    curl -fsS "${base}/?instance=${instance_id}&section=overview&lang=zh" -o "${TMP_DIR}/detail-${instance_id}.html"
+    curl_to_file "${base}/?instance=${instance_id}&section=overview&lang=zh" "${TMP_DIR}/detail-${instance_id}.html" "${instance_id} 实例详情页"
     require_contains "${TMP_DIR}/detail-${instance_id}.html" "只读实例详情" "${instance_id} 详情标题"
     require_contains "${TMP_DIR}/detail-${instance_id}.html" "运行态分布" "${instance_id} 运行态分布"
     require_contains "${TMP_DIR}/detail-${instance_id}.html" "返回总览" "${instance_id} 返回总览"
@@ -78,7 +100,8 @@ check_gateway_health() {
   local port
   for port in ${GATEWAY_PORTS}; do
     log "检查 OpenClaw gateway 健康端口：${port}"
-    curl -fsS "http://127.0.0.1:${port}/health" | grep -Fq '"ok":true' || fail "gateway ${port} 未返回 ok=true"
+    curl_to_file "http://127.0.0.1:${port}/health" "${TMP_DIR}/gateway-${port}.json" "gateway ${port}"
+    grep -Fq '"ok":true' "${TMP_DIR}/gateway-${port}.json" || fail "gateway ${port} 未返回 ok=true"
   done
 }
 
@@ -125,6 +148,7 @@ check_container_security() {
 
 main() {
   trap cleanup EXIT
+  TMP_DIR="$(mktemp -d)"
 
   require_command curl
   require_command docker
