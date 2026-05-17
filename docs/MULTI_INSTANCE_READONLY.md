@@ -428,6 +428,18 @@ repo/ops/tom-readonly/managed-action-inbox-runner.sh run-next
 
 `managed-action-inbox-runner.sh` 不移动、不删除、不修改 OpenClaw workspace 中的请求文件；它只把处理状态、结果和已处理 key 写入 control-center runtime 的 `managed-action-inbox-runner/`。重复运行时，同一路径同一内容不会重复执行；如果文本被修改，会作为新的请求重新评估。该方式把“Discord 消息 → Tom workspace 文本 → control-center dry-run 审计”串起来，同时保持 OpenClaw 实例目录只读读取、live gate 关闭、真实 skill 不执行。
 
+为了让 Tom 在 Discord 中稳定使用 inbox，可以安装一段受控 `AGENTS.md` 规范：
+
+```bash
+repo/ops/tom-readonly/install-managed-action-agents-instructions.sh status
+repo/ops/tom-readonly/install-managed-action-agents-instructions.sh plan
+CONFIRM_MANAGED_ACTION_AGENTS_INSTALL=I_UNDERSTAND_THIS_UPDATES_TOM_AGENTS_INSTRUCTIONS_ONLY \
+MANAGED_ACTION_AGENTS_TARGET_SOURCE=openclaw-container \
+repo/ops/tom-readonly/install-managed-action-agents-instructions.sh apply
+```
+
+安装器只更新 `/home/node/.openclaw/workspace/AGENTS.md` 中的 `OPENCLAW_CONTROL_CENTER_MANAGED_ACTIONS` 标记块，并在同目录 `.backup/control-center-agents/` 下备份原文件。它不修改 `openclaw.json`，不重启 OpenClaw，不调用 managed action API。规范内容要求 Tom 只写入 inbox 文本请求，不调用 control-center API，不读取或输出 `LOCAL_API_TOKEN`，不删除或移动 inbox 请求文件。
+
 ### 管理动作 dry-run 证据
 
 真实管理动作上线前，先用 dry-run 证据闸门确认最近一次 dry-run 审计可作为人工批准和 live 引用的前置证据：

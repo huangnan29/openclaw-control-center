@@ -149,6 +149,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   const managedActionCommandRunner = path.join(ROOT, "ops", "tom-readonly", "managed-action-command-runner.sh");
   const managedActionTextBridge = path.join(ROOT, "ops", "tom-readonly", "managed-action-text-bridge.sh");
   const managedActionInboxRunner = path.join(ROOT, "ops", "tom-readonly", "managed-action-inbox-runner.sh");
+  const managedActionAgentsInstaller = path.join(ROOT, "ops", "tom-readonly", "install-managed-action-agents-instructions.sh");
   const managedActionDryRunGate = path.join(ROOT, "ops", "tom-readonly", "managed-action-dry-run-gate.sh");
   const discoverRemoteOracleCredentials = path.join(ROOT, "ops", "local", "discover-remote-oracle-credentials.sh");
   const discoverRemoteOracleCredentialsExample = path.join(ROOT, "ops", "local", "discover-remote-oracle-credentials.example.json");
@@ -232,6 +233,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(existsSync(liveHealthcheckRollout));
   assert(existsSync(managedActionTextBridge));
   assert(existsSync(managedActionInboxRunner));
+  assert(existsSync(managedActionAgentsInstaller));
   assert(existsSync(managedActionDryRunGate));
   assert(existsSync(discoverRemoteOracleCredentials));
   assert(existsSync(discoverRemoteOracleCredentialsExample));
@@ -606,6 +608,21 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(managedActionInboxRunnerText, /callsManagedActionsLiveApi: false/);
   assert.match(managedActionInboxRunnerText, /writesOpenClawInstanceDirs: false/);
   assert.doesNotMatch(managedActionInboxRunnerText, /api\/managed-actions\/live/);
+  const managedActionAgentsInstallerText = readFileSync(managedActionAgentsInstaller, "utf8");
+  assert.match(managedActionAgentsInstallerText, /install-managed-action-agents-instructions\.sh status/);
+  assert.match(managedActionAgentsInstallerText, /install-managed-action-agents-instructions\.sh plan/);
+  assert.match(managedActionAgentsInstallerText, /install-managed-action-agents-instructions\.sh apply/);
+  assert.match(managedActionAgentsInstallerText, /CONFIRM_MANAGED_ACTION_AGENTS_INSTALL/);
+  assert.match(managedActionAgentsInstallerText, /I_UNDERSTAND_THIS_UPDATES_TOM_AGENTS_INSTRUCTIONS_ONLY/);
+  assert.match(managedActionAgentsInstallerText, /OPENCLAW_CONTROL_CENTER_MANAGED_ACTIONS_BEGIN/);
+  assert.match(managedActionAgentsInstallerText, /control-center-commands\/inbox/);
+  assert.match(managedActionAgentsInstallerText, /不要调用 control-center API/);
+  assert.match(managedActionAgentsInstallerText, /不要读取或输出 LOCAL_API_TOKEN/);
+  assert.match(managedActionAgentsInstallerText, /writesAgentsMdOnly/);
+  assert.match(managedActionAgentsInstallerText, /writesOpenClawConfig: false/);
+  assert.match(managedActionAgentsInstallerText, /restartsOpenClawInstances: false/);
+  assert.match(managedActionAgentsInstallerText, /callsManagedActionsLiveApi: false/);
+  assert.doesNotMatch(managedActionAgentsInstallerText, /api\/managed-actions\/live/);
   const dryRunGateText = readFileSync(managedActionDryRunGate, "utf8");
   assert.match(dryRunGateText, /managed-action-dry-run-gate\.sh status/);
   assert.match(dryRunGateText, /CONFIRM_MANAGED_ACTION_DRY_RUN/);

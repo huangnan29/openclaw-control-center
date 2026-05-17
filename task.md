@@ -829,4 +829,18 @@ Tom 单 Oracle 上线下一步：
 
 ## 阶段完成后的下一步
 
-下一步把 Tom 的 `AGENTS.md` 增加一小段调用规范，让 Discord 消息可以稳定落到 `control-center-commands/inbox/*.txt`；建议先做可审查的 snippet/installer，并以显式确认方式写入 workspace，避免误改现有 OpenClaw 行为。通过 Discord 真实消息 smoke 后，再进入人工 approval 和一次只读 healthcheck live 演练；仍不得执行 approval `approve`、不得打开 live gate、不得触发真实 skill。
+## 本轮新增（Tom AGENTS inbox 规范安装器）
+
+- 已新增 `ops/tom-readonly/install-managed-action-agents-instructions.sh`。
+- 该脚本支持 `status`、`plan`、`apply`。
+- `status/plan` 只读取目标 `AGENTS.md`，展示 `OPENCLAW_CONTROL_CENTER_MANAGED_ACTIONS` 标记块是否需要安装或更新，不写文件。
+- `apply` 必须设置 `CONFIRM_MANAGED_ACTION_AGENTS_INSTALL=I_UNDERSTAND_THIS_UPDATES_TOM_AGENTS_INSTRUCTIONS_ONLY`。
+- 安装器支持 `MANAGED_ACTION_AGENTS_TARGET_SOURCE=local` 用于测试，也支持 `MANAGED_ACTION_AGENTS_TARGET_SOURCE=openclaw-container` 通过 `openclaw-work-openclaw-gateway-1` 写 Tom workspace。
+- 安装内容要求 Tom 在 Discord 收到 control-center dry-run/预览类请求时，只写入 `control-center-commands/inbox/*.txt`，不调用 control-center API，不读取或输出 `LOCAL_API_TOKEN`，不打开 live gate，不重启实例，不删除或移动 inbox 请求文件。
+- `apply` 会在目标 `AGENTS.md` 同目录 `.backup/control-center-agents/` 下备份原文件，并只更新受控标记块。
+- 已新增 `test/managed-action-agents-instructions.test.ts`，覆盖 plan 不写文件、apply 缺确认阻断、apply 插入并备份、已有标记块幂等更新。
+- 已更新 `ops/tom-readonly/README.md`、`docs/MULTI_INSTANCE_READONLY.md`、`implementation_plan.md` 和 `test/oss-readiness.test.ts`，记录 AGENTS 规范安装器和安全边界。
+
+## 阶段完成后的下一步
+
+下一步部署安装器到 Tom，先运行 `status/plan` 审查 AGENTS 标记块，然后用显式确认执行 `apply`，验证只改 `AGENTS.md` 受控块且备份存在。安装后让 Tom 通过 Discord 真实消息写入 `control-center-commands/inbox/*.txt`，再由 host 侧 runner 做 `status/plan-next/run-next` smoke；仍不得执行 approval `approve`、不得打开 live gate、不得触发真实 skill。
