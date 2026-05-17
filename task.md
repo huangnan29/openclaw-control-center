@@ -912,7 +912,18 @@ Tom 单 Oracle 上线下一步：
 - 已验证 `npm test -- test/managed-action-inbox-runner.test.ts test/managed-action-text-bridge.test.ts test/managed-action-command-runner.test.ts test/oss-readiness.test.ts`，25/25 通过。
 - 已验证 managed-action 安全回归，35/35 通过。
 - 已验证 `npm run build` 与 `git diff --check`。
+- 已提交并推送 `ee4cab2 ops: batch process managed action inbox dry runs`。
+- 已部署到 Tom，并验证 `update.sh` 通过，5 个 OpenClaw gateway 健康端口、只读写接口拦截、容器安全边界和 collector 快照均通过。
+- 已在 Tom 标准 inbox 写入两条 smoke 请求：
+  `/home/node/.openclaw/workspace/control-center-commands/inbox/20260517T165820Z-run-pending-1.txt`
+  与 `/home/node/.openclaw/workspace/control-center-commands/inbox/20260517T165820Z-run-pending-2.txt`。
+- 已验证运行前 `status` 返回 `inbox_status_ready`、`candidateCount=3`、`pendingCount=2`。
+- 已用 `CONFIRM_MANAGED_ACTION_INBOX_RUNNER=I_UNDERSTAND_THIS_READS_OPENCLAW_INBOX_AND_RUNS_DRY_RUN_TEXT`、`MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container`、`MANAGED_ACTION_INBOX_MAX_PER_RUN=10` 执行 `run-pending`。
+- Tom `run-pending` 返回 `inbox_run_pending_completed`、`pendingCountBefore=2`、`processedCount=2`、`pendingCountAfter=0`。
+- 本次 `run-pending` 生成 dry-run 审计 `operationRequestId=f99b7f4a-426e-492d-a4c7-a478ec5e91ec` 和 `operationRequestId=e85e6a59-0178-4930-9fc0-a5cbebe5817b`。
+- 已验证 `run-pending` 安全字段为 `callsManagedActionsDryRunApi=true`、`callsManagedActionsLiveApi=false`、`writesOpenClawInstanceDirs=false`、`restartsOpenClawInstances=false`、`mutatesOpenClawInstance=false`、`opensLiveGate=false`。
+- 已验证重复 `status` 返回 `inbox_empty`、`pendingCount=0`，标准 inbox 文件仍保留为候选文件，不被移动或删除。
 
 ## 阶段完成后的下一步
 
-部署 `run-pending` 到 Tom 后，用标准 inbox 写入两条不同 dry-run 请求，运行 `run-pending` 验证可一次处理多条且不碰 live。部署会改变 Tom commit，部署后必须重新执行 `ops/local/final-go-live-runner.sh prepare`，让 approval packet 与最新 commit 对齐；仍不得执行 approval `approve`、不得打开 live gate。
+部署已完成。下一步重新执行 `ops/local/final-go-live-runner.sh prepare`，让 approval packet 与最新 Tom commit 对齐；然后复核 `live-healthcheck-readiness.sh status` 为 `waiting_human_approval` 且 `issues=[]`。仍不得执行 approval `approve`、不得打开 live gate。
