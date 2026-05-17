@@ -366,6 +366,8 @@ function runApproved() {
   const after = runFinalStatus("check");
   const tomStatus = tomRun.report?.status || "unknown";
   const completed = tomRun.exitCode === 0 && tomStatus === "completed_live_healthcheck";
+  const tomNextCommands = Array.isArray(tomRun.report?.nextCommands) ? tomRun.report.nextCommands : [];
+  const afterNextCommands = Array.isArray(after.report?.nextCommands) ? after.report.nextCommands : [];
   return {
     schemaVersion: 1,
     status: completed ? "completed_final_live_healthcheck" : tomStatus,
@@ -374,11 +376,7 @@ function runApproved() {
     generatedAt: new Date().toISOString(),
     stages: { before, tomRun, after },
     issues: Array.isArray(tomRun.report?.issues) ? tomRun.report.issues : [],
-    nextCommands: Array.isArray(after.report?.nextCommands) && after.report.nextCommands.length > 0
-      ? after.report.nextCommands
-      : Array.isArray(tomRun.report?.nextCommands)
-        ? tomRun.report.nextCommands
-        : [],
+    nextCommands: completed && afterNextCommands.length > 0 ? afterNextCommands : tomNextCommands,
     safety: baseSafety({
       connectsTomSsh: true,
       opensLiveGate: completed,

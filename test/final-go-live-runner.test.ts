@@ -263,6 +263,8 @@ test("final go-live runner run-approved 透传 Tom 阻断并返回非零", async
     assert.equal(report.status, "blocked_not_approved");
     assert.equal(report.safety.opensLiveGate, false);
     assert.equal(report.safety.callsManagedActionsLiveApi, false);
+    assert(report.nextCommands.some((command: string) => command.includes("live-healthcheck-approval.sh approve")));
+    assert.equal(report.nextCommands.some((command: string) => command.includes("live-healthcheck-rollout-runner.sh prepare")), false);
     assert.match(sshLog, /live-healthcheck-rollout-runner\.sh run-approved/);
     assert.doesNotMatch(JSON.stringify(report), /test-token/);
   } finally {
