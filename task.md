@@ -167,6 +167,11 @@ Tom 单 Oracle 上线下一步：
 - 已向 Tom workspace inbox 写入测试指令 `20260517T171415Z-cron-smoke.txt`，cron 自动消费成功：`pendingCountBefore=1`、`pendingCountAfter=0`、`processedCount=1`。
 - 自动消费生成 dry-run 审计 `b8608cf9-aba0-4f8c-9293-f6816b8d673a`，目标为 `tom` 的 `zhihu-human-ops-writing` `skill_run` dry-run。
 - 本次自动消费安全标记：`callsManagedActionsDryRunApi=true`，`callsManagedActionsLiveApi=false`，`writesOpenClawInstanceDirs=false`，`restartsOpenClawInstances=false`，`mutatesOpenClawInstance=false`，`opensLiveGate=false`。
+- 已验证未批准状态下执行本机 `final-go-live-runner.sh run-approved` 会被 Tom readiness 硬阻断，返回 `blocked_not_approved`。
+- 阻断原因明确为 `readiness 不是 approved_ready_for_live_window：waiting_human_approval`。
+- 该阻断测试即使提供 runner 确认短语和测试令牌，也没有打开 live gate、没有调用 managed action live API、没有写 Tom runtime、没有修改 OpenClaw 实例目录、没有重启实例。
+- 阻断测试后再次验证 Tom `healthcheck.sh` 通过，5 个实例健康，readiness 仍为 `waiting_human_approval`，approval packet 仍为 `ready`，approval 仍为 `needs_manual_approval`。
+- 阻断测试后再次验证 dry-run inbox cron 仍为 `inbox_cron_installed` 且 `needsUpdate=false`；空 inbox 下 cron 只记录 `inbox_empty`，安全字段保持不调用 live API、不写实例目录、不重启实例。
 - 已为 `ops/local/remote-oracle-intake.sh` 新增 `doctor` 模式。
 - `remote-oracle-intake.sh doctor` 只读取本机 SSH config、host hint 和 key 文件元数据；如果显式提供 `REMOTE_ORACLE_HOST/REMOTE_ORACLE_KEY_PATH`，只离线渲染配置摘要，不写文件、不联网、不连接 Tom、不连接第二台 Oracle。
 - `doctor` 会输出 `needs_remote_host`、`needs_remote_key`、`candidates_found` 或 `ready_for_apply`，并给出下一步 `plan/apply/run` 命令。
