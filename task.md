@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-只读 healthcheck live approval 准备收口：新增 approval `prepare/status` 模式，并让窗口 `status` 直接显示 approval 状态，方便人工进入最终演练前确认缺口。
+只读 healthcheck live approval 准备收口：已新增 approval `approve` 辅助命令，用环境变量显式记录人工批准，避免手工编辑 JSON 出错；Tom 已部署但仍保持 `needs_manual_approval`。
 
 ## 本轮不做
 
@@ -22,8 +22,11 @@
 - 使用 `repo/ops/tom-readonly/live-healthcheck-window.sh run`。
 - 必须显式提供 `CONFIRM_LIVE_HEALTHCHECK_WINDOW`、`CONFIRM_LIVE_HEALTHCHECK` 和 `LOCAL_API_TOKEN`。
 - 演练窗口会临时启用 control-center live healthcheck 配置，动作仍限制为 `healthcheck`。
-- 必须先生成并人工填写 `runtime/live-healthcheck-approval.json`，通过 `live-healthcheck-approval.sh check` 后才允许打开窗口。
+- 必须先生成并批准 `runtime/live-healthcheck-approval.json`，通过 `live-healthcheck-approval.sh check` 后才允许打开窗口。
+- 推荐批准方式：
+  `CONFIRM_APPROVAL_RECORD=I_APPROVE_LIVE_HEALTHCHECK_RECORD APPROVED_BY=Anan repo/ops/tom-readonly/live-healthcheck-approval.sh approve runtime/live-healthcheck-approval.json`
 - 当前 Tom 已生成 approval 草稿，状态为 `needs_manual_approval`。
+- 当前 Tom 已具备 `approve` 命令，但尚未执行批准命令。
 - 脚本退出前必须恢复只读状态，并重新通过 `healthcheck.sh`。
 - 脚本会自动生成 before/after 实例影响快照并比较。
 - 脚本成功后会自动生成 live healthcheck 演练报告，汇总 approval、dry-run 审计、live result 审计和影响快照。
@@ -32,6 +35,16 @@
 ## 最近完成
 
 - 已新增长期推进计划：`implementation_plan.md`。
+- 已新增 `live-healthcheck-approval.sh approve`，要求 `CONFIRM_APPROVAL_RECORD=I_APPROVE_LIVE_HEALTHCHECK_RECORD` 和 `APPROVED_BY=<批准人>`，只写 approval 文件，不启用 live gate。
+- 已验证 approve 辅助命令本地临时目录流程：缺少确认短语会失败，确认短语和批准人齐全后写入 `approved=true` 并通过 `status/check`。
+- 已验证 `bash -n ops/tom-readonly/live-healthcheck-approval.sh`。
+- 已验证 `npm test -- test/oss-readiness.test.ts test/managed-actions-dry-run.test.ts test/managed-action-live-gate.test.ts`。
+- 已验证 `npm run build`。
+- 已提交并推送 `4467e9a ops: add explicit approval record command`。
+- 已部署到 Tom，并验证运行提交 `4467e9a`。
+- 已验证 Tom `healthcheck.sh` 通过，collector 快照正常，5 个实例仍在只读监控范围内。
+- 已验证 Tom approval 仍为 `needs_manual_approval`，`READONLY_MODE=true`，`MANAGED_ACTIONS_LIVE_ENABLED` 和 `MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED` 均未启用。
+- 已验证 Tom `live-healthcheck-window.sh status` 仍为 `readiness.status=blocked`，未调用 live API。
 - 已新增 Superpowers 执行计划：`docs/superpowers/plans/2026-05-17-control-center-data-trust.md`。
 - 已为总览页和单实例详情页增加数据来源标注。
 - 已验证 `npm test -- test/ui-render-smoke.test.ts`。
