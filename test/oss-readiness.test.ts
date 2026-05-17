@@ -152,6 +152,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   const remoteCollectorPreflight = path.join(ROOT, "ops", "tom-readonly", "remote-collector-preflight.sh");
   const remoteCollectorRollout = path.join(ROOT, "ops", "tom-readonly", "remote-collector-rollout.sh");
   const remoteCollectorRolloutRunner = path.join(ROOT, "ops", "tom-readonly", "remote-collector-rollout-runner.sh");
+  const goLiveGate = path.join(ROOT, "ops", "tom-readonly", "go-live-gate.sh");
   const remoteCollectorPull = path.join(ROOT, "ops", "tom-readonly", "remote-collector-pull.sh");
   const remoteCollectorPullExample = path.join(ROOT, "ops", "tom-readonly", "remote-collector-pull.sources.example.json");
   const registerRemoteCollector = path.join(ROOT, "ops", "tom-readonly", "register-remote-collector.sh");
@@ -203,6 +204,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(existsSync(remoteCollectorPreflight));
   assert(existsSync(remoteCollectorRollout));
   assert(existsSync(remoteCollectorRolloutRunner));
+  assert(existsSync(goLiveGate));
   assert(existsSync(remoteCollectorPull));
   assert(existsSync(remoteCollectorPullExample));
   assert(existsSync(registerRemoteCollector));
@@ -286,6 +288,14 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(remoteCollectorRolloutRunnerText, /register-remote-collector\.sh/);
   assert.match(remoteCollectorRolloutRunnerText, /mutatesOpenClawInstance/);
   assert.doesNotMatch(remoteCollectorRolloutRunnerText, /api\/managed-actions\/live/);
+  const goLiveGateText = readFileSync(goLiveGate, "utf8");
+  assert.match(goLiveGateText, /go-live-gate\.sh status/);
+  assert.match(goLiveGateText, /go-live-gate\.sh check/);
+  assert.match(goLiveGateText, /remote-collector-rollout-runner\.sh/);
+  assert.match(goLiveGateText, /live-healthcheck-window\.sh/);
+  assert.match(goLiveGateText, /callsManagedActionsLiveApi: false/);
+  assert.match(goLiveGateText, /writesOpenClawInstanceDirs: false/);
+  assert.doesNotMatch(goLiveGateText, /api\/managed-actions\/live/);
   const remoteCollectorPullText = readFileSync(remoteCollectorPull, "utf8");
   assert.match(remoteCollectorPullText, /CONFIRM_REMOTE_COLLECTOR_PULL/);
   assert.match(remoteCollectorPullText, /I_UNDERSTAND_THIS_ONLY_READS_REMOTE_COLLECTOR_SNAPSHOTS/);

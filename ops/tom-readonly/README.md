@@ -20,6 +20,7 @@
 - `remote-collector-preflight.sh`：对已生成的远端 collector 接入包执行 SSH 只读预检，检查 docker、目录和 gateway 前置条件。
 - `remote-collector-rollout.sh`：只读取 Tom 本地接入包、preflight、pull 和 registry 状态，输出跨服务器只读接入下一步。
 - `remote-collector-rollout-runner.sh`：按 rollout gate 当前阶段自动执行下一步安全脚本；缺凭据、远端 snapshot 未就绪或检查失败时停止。
+- `go-live-gate.sh`：最终上线总闸门，汇总 Tom 本体 healthcheck、跨服务器只读监控和 live 管理动作 readiness。
 - `remote-collector-pull.sh`：从其他 Oracle 服务器只读拉取已经生成好的 collector JSON，校验后写入本机 `runtime/collectors`。
 - `remote-collector-pull.sources.example.json`：远端 collector 拉取配置样板，默认 `enabled=false`。
 - `register-remote-collector.sh`：把已经拉取并校验过的远端 collector snapshot 注册到 Tom `config/instances.json`，默认 `plan` 不写入。
@@ -58,6 +59,8 @@ repo/ops/tom-readonly/remote-collector-rollout.sh status runtime/remote-onboardi
 repo/ops/tom-readonly/remote-collector-rollout-runner.sh status runtime/remote-onboarding/<serverId>
 CONFIRM_REMOTE_COLLECTOR_ROLLOUT_RUNNER=I_UNDERSTAND_THIS_RUNS_SAFE_REMOTE_COLLECTOR_ROLLOUT_STEPS \
 repo/ops/tom-readonly/remote-collector-rollout-runner.sh run runtime/remote-onboarding/<serverId>
+repo/ops/tom-readonly/go-live-gate.sh status runtime/remote-onboarding/<serverId>
+repo/ops/tom-readonly/go-live-gate.sh check runtime/remote-onboarding/<serverId>
 repo/ops/tom-readonly/remote-collector-pull.sh plan runtime/remote-collector-pull.sources.json
 CONFIRM_REMOTE_COLLECTOR_PULL=I_UNDERSTAND_THIS_ONLY_READS_REMOTE_COLLECTOR_SNAPSHOTS \
 repo/ops/tom-readonly/remote-collector-pull.sh pull runtime/remote-collector-pull.sources.json
@@ -121,6 +124,15 @@ repo/ops/tom-readonly/remote-collector-rollout-runner.sh run runtime/remote-onbo
 ```
 
 拉取成功后，用 `register-remote-collector.sh plan` 审查将要加入 `config/instances.json` 的 server 和实例；`apply` 会先备份原 registry，再原子写入新 registry。该脚本只更新 control-center registry，不修改 OpenClaw 实例目录。
+
+最终上线前优先看总闸门：
+
+```bash
+repo/ops/tom-readonly/go-live-gate.sh status runtime/remote-onboarding/<serverId>
+repo/ops/tom-readonly/go-live-gate.sh check runtime/remote-onboarding/<serverId>
+```
+
+`status` 只汇总 rollout 和 live readiness；`check` 会额外运行 `./healthcheck.sh` 验证 Tom 现有实例仍正常、只读边界仍有效。总闸门只输出下一步命令，不会调用 live API，不会修改实例目录。
 
 只读 healthcheck live 演练必须先人工准备 live gate、executor 和 rollout 配置；默认 Tom 不启用。确认后才可手动运行：
 

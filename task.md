@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-跨服务器只读 collector 接入总控增强：在已有 `remote-collector-rollout.sh status/plan` 闸门、Tom 端 `remote-collector-credentials.sh` 和本机侧 `push-remote-collector-credentials.sh` 的基础上，新增 `remote-collector-rollout-runner.sh`，让 Tom 在显式确认后按当前阶段自动执行下一步安全脚本，避免手工串步骤时跑偏。
+最终上线总闸门增强：在已有 `remote-collector-rollout.sh status/plan`、`remote-collector-rollout-runner.sh`、Tom 端 `remote-collector-credentials.sh` 和本机侧 `push-remote-collector-credentials.sh` 的基础上，新增 `go-live-gate.sh`，把 Tom 本体健康、跨服务器只读监控阶段和 live 管理动作 readiness 汇总成一个 JSON 状态报告。
 
 ## 本轮不做
 
@@ -25,6 +25,10 @@
   `repo/ops/tom-readonly/remote-collector-rollout.sh status runtime/remote-onboarding/<serverId>`
 - 如果已经准备好真实远端凭据、onboarding、远端 snapshot 等前置条件，优先让 Tom 自动推进安全阶段：
   `CONFIRM_REMOTE_COLLECTOR_ROLLOUT_RUNNER=I_UNDERSTAND_THIS_RUNS_SAFE_REMOTE_COLLECTOR_ROLLOUT_STEPS repo/ops/tom-readonly/remote-collector-rollout-runner.sh run runtime/remote-onboarding/<serverId>`
+- 每次判断最终上线距离时，先看总闸门：
+  `repo/ops/tom-readonly/go-live-gate.sh status runtime/remote-onboarding/<serverId>`
+- 需要同时验证 Tom 现有实例只读安全边界时，运行：
+  `repo/ops/tom-readonly/go-live-gate.sh check runtime/remote-onboarding/<serverId>`
 - 如果 rollout gate 返回 `needs_remote_credentials`，必须先补齐真实远端 host/user/port 和 Tom 上可读的只读 SSH key，不能用样板 `10.0.0.12` 硬跑 preflight。
 - 如果远端只读 SSH key 还在本机，推荐先复制 `ops/local/push-remote-collector-credentials.example.json` 到 `runtime/push-remote-collector-credentials.json`，填入真实 `remote.sourceSshKeyPath` 后运行：
   `ops/local/push-remote-collector-credentials.sh plan runtime/push-remote-collector-credentials.json`
@@ -84,6 +88,15 @@
 
 ## 最近完成
 
+- 已新增 `ops/tom-readonly/go-live-gate.sh`，作为最终上线总闸门。
+- `go-live-gate.sh status` 只汇总跨服务器 rollout runner 状态与 live healthcheck window readiness，不运行 healthcheck、不写文件、不调用 live API。
+- `go-live-gate.sh check` 会额外运行 `./healthcheck.sh`，用于验证 Tom 现有实例仍正常、只读边界仍有效。
+- 总闸门会输出 `blocked_existing_instances`、`blocked_cross_server_readonly`、`ready_for_existing_instance_healthcheck`、`blocked_managed_actions` 或 `ready_for_live_healthcheck`，并附带下一步命令。
+- 已新增 `test/go-live-gate.test.ts`，覆盖缺远端凭据、只读监控通过后进入管理动作阻塞、现有实例 healthcheck 失败时优先阻塞。
+- 已验证 `bash -n ops/tom-readonly/go-live-gate.sh`。
+- 已验证 `npm test -- test/go-live-gate.test.ts test/remote-collector-rollout-runner.test.ts test/oss-readiness.test.ts`，13/13 通过。
+- 已验证 `npm test -- test/go-live-gate.test.ts test/remote-collector-rollout-runner.test.ts test/push-remote-collector-credentials.test.ts test/remote-collector-credentials.test.ts test/remote-collector-rollout.test.ts test/remote-collector-preflight.test.ts test/remote-collector-onboarding.test.ts test/remote-collector-pull.test.ts test/register-remote-collector.test.ts test/collector-node-bootstrap.test.ts test/oss-readiness.test.ts`，35/35 通过。
+- 已验证 `npm run build`。
 - 已新增 `ops/tom-readonly/remote-collector-rollout-runner.sh`，按 rollout gate 当前阶段自动调用 onboarding refresh、只读 preflight、只读 pull、registry register 和 healthcheck。
 - `remote-collector-rollout-runner.sh status/plan` 只读取 rollout gate；`step/run` 必须设置 `CONFIRM_REMOTE_COLLECTOR_ROLLOUT_RUNNER=I_UNDERSTAND_THIS_RUNS_SAFE_REMOTE_COLLECTOR_ROLLOUT_STEPS`。
 - runner 缺少 Tom 本地 `runtime/remote-collector-onboarding.json` 或真实远端 SSH key 时会停在 `needs_remote_credentials`，不会硬跑 SSH。
