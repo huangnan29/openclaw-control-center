@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-只读 healthcheck live 演练准备：新增一次性演练窗口脚本，支持临时启用 control-center 的 `healthcheck` live 配置、执行 preflight、运行 smoke，并在结束或失败后恢复只读状态。
+只读 healthcheck live 演练留证增强：新增实例影响快照脚本，并接入一次性演练窗口，确保后续真实演练会自动生成 before/after 证据并比较控制中心是否回到只读状态、gateway 是否稳定、实例挂载是否仍只读。
 
 ## 本轮不做
 
@@ -23,6 +23,7 @@
 - 必须显式提供 `CONFIRM_LIVE_HEALTHCHECK_WINDOW`、`CONFIRM_LIVE_HEALTHCHECK` 和 `LOCAL_API_TOKEN`。
 - 演练窗口会临时启用 control-center live healthcheck 配置，动作仍限制为 `healthcheck`。
 - 脚本退出前必须恢复只读状态，并重新通过 `healthcheck.sh`。
+- 脚本会自动生成 before/after 实例影响快照并比较。
 - 未获得人工批准前，不执行 `/api/managed-actions/live`。
 
 ## 最近完成
@@ -268,6 +269,20 @@
 - 已验证 Tom `repo/ops/tom-readonly/live-healthcheck-window.sh status` 通过，未检测到临时 override。
 - 已验证 Tom 当前仍为 `READONLY_MODE=true`，live gate 与 executor 均未启用，readiness 仍为 `blocked`。
 - 本轮未执行 `enable` 或 `run`，未调用 live API。
+- 已新增实例影响快照脚本：`ops/tom-readonly/instance-impact-snapshot.sh`。
+- 快照内容包括 gateway health、监听端口、control-center 容器特权状态、实例挂载只读状态、docker.sock 挂载状态、live 相关环境变量和 readiness。
+- 已让 `live-healthcheck-window.sh run` 在演练前自动生成 before 快照，在成功或失败恢复只读后生成 after 快照，并调用 `instance-impact-snapshot.sh compare`。
+- 已让 compare 要求 after 状态满足：gateway 健康、监听行稳定、实例挂载仍只读、无 docker.sock、`READONLY_MODE=true`、live gate 与 executor 关闭、readiness 不允许 live execution。
+- 已更新 `ops/tom-readonly/README.md`，记录快照目录和比较标准。
+- 已增强 `test/oss-readiness.test.ts`，覆盖实例影响快照脚本和窗口脚本接入。
+- 已验证 `bash -n ops/tom-readonly/instance-impact-snapshot.sh && bash -n ops/tom-readonly/live-healthcheck-window.sh`。
+- 已验证 `npm test -- test/oss-readiness.test.ts test/managed-actions-dry-run.test.ts test/managed-action-live-gate.test.ts`。
+- 已验证 `npm run build`。
+- 已提交并推送 `12f6c8a ops: capture live healthcheck impact evidence`。
+- 已部署到 Tom，并验证运行提交 `12f6c8a`。
+- 已在 Tom 只读状态下生成 before/after 快照，并验证 `instance-impact-snapshot.sh compare` 通过。
+- 已验证 Tom `live-healthcheck-window.sh status` 仍显示未检测到临时 override，`READONLY_MODE=true`，live gate 与 executor 未启用，readiness 仍为 `blocked`。
+- 本轮仍未执行 `/api/managed-actions/live`。
 
 ## 阶段完成后的下一步
 
