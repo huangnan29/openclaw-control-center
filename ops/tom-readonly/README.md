@@ -18,6 +18,7 @@
 - `remote-collector-credentials.sh`：把 Tom 本地可读的远端只读 SSH key 安装到 control-center runtime，并生成 onboarding 配置。
 - `remote-collector-credentials.example.json`：远端凭据准备配置样板，不包含真实密钥内容。
 - `remote-collector-preflight.sh`：对已生成的远端 collector 接入包执行 SSH 只读预检，检查 docker、目录和 gateway 前置条件。
+- `remote-collector-node-sync.sh`：把已验证的 onboarding 接入包同步到远端 collector 节点目录，并可显式确认后执行远端 bootstrap plan/write。
 - `remote-collector-rollout.sh`：只读取 Tom 本地接入包、preflight、pull 和 registry 状态，输出跨服务器只读接入下一步。
 - `remote-collector-rollout-runner.sh`：按 rollout gate 当前阶段自动执行下一步安全脚本；缺凭据、远端 snapshot 未就绪或检查失败时停止。
 - `go-live-gate.sh`：最终上线总闸门，汇总 Tom 本体 healthcheck、跨服务器只读监控、dry-run 证据和 live 管理动作 readiness。
@@ -59,6 +60,13 @@ repo/ops/tom-readonly/remote-collector-preflight.sh plan runtime/remote-onboardi
 CONFIRM_REMOTE_COLLECTOR_PREFLIGHT=I_UNDERSTAND_THIS_ONLY_READS_REMOTE_PREREQUISITES \
 repo/ops/tom-readonly/remote-collector-preflight.sh check runtime/remote-onboarding/<serverId>
 repo/ops/tom-readonly/remote-collector-preflight.sh status runtime/remote-onboarding/<serverId>
+repo/ops/tom-readonly/remote-collector-node-sync.sh plan runtime/remote-onboarding/<serverId>
+CONFIRM_REMOTE_COLLECTOR_NODE_SYNC=I_UNDERSTAND_THIS_ONLY_COPIES_COLLECTOR_BUNDLE_TO_REMOTE \
+repo/ops/tom-readonly/remote-collector-node-sync.sh sync runtime/remote-onboarding/<serverId>
+CONFIRM_REMOTE_COLLECTOR_NODE_BOOTSTRAP_PLAN=I_UNDERSTAND_THIS_ONLY_RUNS_REMOTE_BOOTSTRAP_PLAN \
+repo/ops/tom-readonly/remote-collector-node-sync.sh bootstrap-plan runtime/remote-onboarding/<serverId>
+CONFIRM_REMOTE_COLLECTOR_NODE_BOOTSTRAP_WRITE=I_UNDERSTAND_THIS_ONLY_WRITES_REMOTE_COLLECTOR_NODE_FILES \
+repo/ops/tom-readonly/remote-collector-node-sync.sh bootstrap-write runtime/remote-onboarding/<serverId>
 repo/ops/tom-readonly/remote-collector-rollout.sh status runtime/remote-onboarding/<serverId>
 repo/ops/tom-readonly/remote-collector-rollout-runner.sh status runtime/remote-onboarding/<serverId>
 CONFIRM_REMOTE_COLLECTOR_ROLLOUT_RUNNER=I_UNDERSTAND_THIS_RUNS_SAFE_REMOTE_COLLECTOR_ROLLOUT_STEPS \
@@ -131,12 +139,19 @@ repo/ops/tom-readonly/remote-collector-onboarding.sh verify runtime/remote-onboa
 repo/ops/tom-readonly/remote-collector-preflight.sh plan runtime/remote-onboarding/<serverId>
 CONFIRM_REMOTE_COLLECTOR_PREFLIGHT=I_UNDERSTAND_THIS_ONLY_READS_REMOTE_PREREQUISITES \
 repo/ops/tom-readonly/remote-collector-preflight.sh check runtime/remote-onboarding/<serverId>
+repo/ops/tom-readonly/remote-collector-node-sync.sh plan runtime/remote-onboarding/<serverId>
+CONFIRM_REMOTE_COLLECTOR_NODE_SYNC=I_UNDERSTAND_THIS_ONLY_COPIES_COLLECTOR_BUNDLE_TO_REMOTE \
+repo/ops/tom-readonly/remote-collector-node-sync.sh sync runtime/remote-onboarding/<serverId>
+CONFIRM_REMOTE_COLLECTOR_NODE_BOOTSTRAP_PLAN=I_UNDERSTAND_THIS_ONLY_RUNS_REMOTE_BOOTSTRAP_PLAN \
+repo/ops/tom-readonly/remote-collector-node-sync.sh bootstrap-plan runtime/remote-onboarding/<serverId>
+CONFIRM_REMOTE_COLLECTOR_NODE_BOOTSTRAP_WRITE=I_UNDERSTAND_THIS_ONLY_WRITES_REMOTE_COLLECTOR_NODE_FILES \
+repo/ops/tom-readonly/remote-collector-node-sync.sh bootstrap-write runtime/remote-onboarding/<serverId>
 repo/ops/tom-readonly/remote-collector-rollout.sh status runtime/remote-onboarding/<serverId>
 CONFIRM_REMOTE_COLLECTOR_ROLLOUT_RUNNER=I_UNDERSTAND_THIS_RUNS_SAFE_REMOTE_COLLECTOR_ROLLOUT_STEPS \
 repo/ops/tom-readonly/remote-collector-rollout-runner.sh run runtime/remote-onboarding/<serverId>
 ```
 
-本机侧 `remote-oracle-intake.sh plan` 只渲染将要推送到 Tom 的配置摘要，不写文件、不联网；`apply` 必须显式确认，只串联本机 `write-push-config`、本机 `push-remote-collector-credentials.sh plan` 和推送 Tom runtime，不连接第二台 Oracle、不写 registry、不修改任何实例目录；`run` 还必须显式确认，会在 `apply` 后 SSH 到 Tom 触发 `remote-collector-rollout-runner.sh run`，继续推进已满足安全门禁的阶段，期间可能通过 Tom 对第二台 Oracle 做只读 preflight/pull，并可能更新 Tom control-center registry，但不会写远端实例目录、不会启动容器、不会调用 live API。本机侧 `discover-remote-oracle-credentials.sh scan` 只读取本机 SSH config、候选 key 文件元数据和显式 host hint 文件，不联网、不写文件、不输出私钥内容；`probe` 必须显式确认，只对候选 host/key 执行 `id -un`、`uname -n`、`uname -s` 这类只读 SSH 探测，并使用 `/dev/null` 作为 known hosts 文件，避免悄悄写本机状态；`render-push-config` 只按显式 `REMOTE_ORACLE_HOST` 和 `REMOTE_ORACLE_KEY_PATH` 输出本机 push 配置 JSON；`write-push-config` 必须显式确认，只把同一份 push 配置写到本机 `runtime/` 下。本机侧 `push-remote-collector-credentials.sh apply` 只通过 SSH 写 Tom control-center runtime 下的远端只读 SSH key 和 onboarding 配置；它不会连接第二台 Oracle，不会写 registry，不会修改任何实例目录。Tom 侧 `remote-collector-credentials.sh apply` 只复制 Tom 本地已有的远端只读 SSH key 到 `runtime/ssh/`，并生成 `runtime/remote-collector-onboarding.json`；它不会联网，不会写远端文件，不会写 registry。接入包默认写入 `runtime/remote-onboarding/<serverId>/`，包含远端 `collector-node.json`、远端 bootstrap 脚本、Tom 拉取配置、Tom 注册配置和 `RUNBOOK.md`。如果没有配置 `collectorNode.buildContext`，脚本会默认把构建 collector image 所需的最小 `build-context/` 一并放进接入包，远端不需要预先克隆完整仓库。`verify` 只读取接入包并离线校验，不 SSH、不写 registry。`preflight check` 会 SSH 到远端执行只读检查命令，只检查 docker、目录可读性、deploy 目录权限和 gateway 端口，不写远端文件、不启动容器、不调用 live API，并把结果写入 Tom 本地 `runtime/remote-preflight-state/<serverId>.json`。`remote-collector-rollout.sh status` 不联网、不写文件，用来确认下一步是补远端凭据、preflight、pull、register 还是 healthcheck。`remote-collector-rollout-runner.sh run` 会按这个阶段顺序自动调用对应安全脚本，但必须显式提供确认令牌；它不会跳过缺凭据、缺远端 snapshot 或失败检查。
+本机侧 `remote-oracle-intake.sh plan` 只渲染将要推送到 Tom 的配置摘要，不写文件、不联网；`apply` 必须显式确认，只串联本机 `write-push-config`、本机 `push-remote-collector-credentials.sh plan` 和推送 Tom runtime，不连接第二台 Oracle、不写 registry、不修改任何实例目录；`run` 还必须显式确认，会在 `apply` 后 SSH 到 Tom 触发 `remote-collector-rollout-runner.sh run`，继续推进已满足安全门禁的阶段，期间可能通过 Tom 对第二台 Oracle 做只读 preflight/pull，并可能更新 Tom control-center registry，但不会写远端实例目录、不会启动容器、不会调用 live API。本机侧 `discover-remote-oracle-credentials.sh scan` 只读取本机 SSH config、候选 key 文件元数据和显式 host hint 文件，不联网、不写文件、不输出私钥内容；`probe` 必须显式确认，只对候选 host/key 执行 `id -un`、`uname -n`、`uname -s` 这类只读 SSH 探测，并使用 `/dev/null` 作为 known hosts 文件，避免悄悄写本机状态；`render-push-config` 只按显式 `REMOTE_ORACLE_HOST` 和 `REMOTE_ORACLE_KEY_PATH` 输出本机 push 配置 JSON；`write-push-config` 必须显式确认，只把同一份 push 配置写到本机 `runtime/` 下。本机侧 `push-remote-collector-credentials.sh apply` 只通过 SSH 写 Tom control-center runtime 下的远端只读 SSH key 和 onboarding 配置；它不会连接第二台 Oracle，不会写 registry，不会修改任何实例目录。Tom 侧 `remote-collector-credentials.sh apply` 只复制 Tom 本地已有的远端只读 SSH key 到 `runtime/ssh/`，并生成 `runtime/remote-collector-onboarding.json`；它不会联网，不会写远端文件，不会写 registry。接入包默认写入 `runtime/remote-onboarding/<serverId>/`，包含远端 `collector-node.json`、远端 bootstrap 脚本、Tom 拉取配置、Tom 注册配置和 `RUNBOOK.md`。如果没有配置 `collectorNode.buildContext`，脚本会默认把构建 collector image 所需的最小 `build-context/` 一并放进接入包，远端不需要预先克隆完整仓库。`verify` 只读取接入包并离线校验，不 SSH、不写 registry。`preflight check` 会 SSH 到远端执行只读检查命令，只检查 docker、目录可读性、deploy 目录权限和 gateway 端口，不写远端文件、不启动容器、不调用 live API，并把结果写入 Tom 本地 `runtime/remote-preflight-state/<serverId>.json`。`remote-collector-node-sync.sh plan` 只读取 Tom 本地接入包；`sync` 必须显式确认，只把接入包复制到远端 collector deploy 目录；`bootstrap-plan/bootstrap-write` 必须分别显式确认，只在远端 collector deploy 目录执行 bootstrap 计划或写入 collector-only 部署文件，不启动容器、不安装 cron、不修改 OpenClaw 实例目录。`remote-collector-rollout.sh status` 不联网、不写文件，用来确认下一步是补远端凭据、preflight、同步远端 collector 节点、pull、register 还是 healthcheck。`remote-collector-rollout-runner.sh run` 会按这个阶段顺序自动调用对应安全脚本，但必须显式提供确认令牌；它不会跳过缺凭据、缺远端 snapshot 或失败检查。
 
 远端 collector 拉取只读取远端 snapshot 文件，远端服务器必须先自行生成 collector JSON。拉取命令不会执行远端 collector、不会修改远端实例目录，也不会调用 `/api/managed-actions/live`。本地写入路径必须位于：
 

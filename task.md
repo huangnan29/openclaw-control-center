@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-跨服务器只读接入收口：在第二台 Oracle host 暂缺的情况下，继续压缩显式 host/key 接入步骤，新增本机安全写入 push 配置路径，减少拿到真实公网地址后的人为 JSON 编辑风险。
+跨服务器只读接入收口：在第二台 Oracle host 暂缺的情况下，继续压缩拿到真实凭据后的手工步骤，新增 Tom 到远端 collector 节点的安全同步和 bootstrap 入口。
 
 ## 本轮不做
 
@@ -64,10 +64,14 @@
 - preflight 通过后执行 rollout gate，确认阶段进入 `needs_remote_collector_pull`：
   `repo/ops/tom-readonly/remote-collector-rollout.sh status runtime/remote-onboarding/<serverId>`
 - 审查 `runtime/remote-onboarding/<serverId>/RUNBOOK.md`、`collector-node.json`、`remote-collector-pull.sources.json`、`register-remote-collector.json`、`build-context-manifest.json` 和 `safety.json`。
-- 将接入包里的 `collector-node.json` 和 `bootstrap-collector-node.sh` 复制到第二台 Oracle。
-- 在第二台 Oracle 上先执行 `./bootstrap-collector-node.sh plan collector-node.json`，确认只写文件、不启动容器、不修改实例。
-- 确认后执行：
-  `CONFIRM_COLLECTOR_NODE_WRITE=I_UNDERSTAND_THIS_ONLY_WRITES_COLLECTOR_NODE_FILES ./bootstrap-collector-node.sh write collector-node.json`
+- 先用 Tom 侧同步器审查远端 collector 节点同步计划：
+  `repo/ops/tom-readonly/remote-collector-node-sync.sh plan runtime/remote-onboarding/<serverId>`
+- 确认后只把接入包复制到远端 collector deploy 目录：
+  `CONFIRM_REMOTE_COLLECTOR_NODE_SYNC=I_UNDERSTAND_THIS_ONLY_COPIES_COLLECTOR_BUNDLE_TO_REMOTE repo/ops/tom-readonly/remote-collector-node-sync.sh sync runtime/remote-onboarding/<serverId>`
+- 在远端 collector deploy 目录内先执行 bootstrap plan：
+  `CONFIRM_REMOTE_COLLECTOR_NODE_BOOTSTRAP_PLAN=I_UNDERSTAND_THIS_ONLY_RUNS_REMOTE_BOOTSTRAP_PLAN repo/ops/tom-readonly/remote-collector-node-sync.sh bootstrap-plan runtime/remote-onboarding/<serverId>`
+- 确认后只写远端 collector-only 部署文件：
+  `CONFIRM_REMOTE_COLLECTOR_NODE_BOOTSTRAP_WRITE=I_UNDERSTAND_THIS_ONLY_WRITES_REMOTE_COLLECTOR_NODE_FILES repo/ops/tom-readonly/remote-collector-node-sync.sh bootstrap-write runtime/remote-onboarding/<serverId>`
 - 然后在远端执行 `./collector-snapshot.sh` 生成 snapshot，确认 JSON 存在。
 - 使用接入包里的 `remote-collector-pull.sources.json`，只配置远端 snapshot 路径和本地 `runtime/collectors/<serverId>/snapshot.json`。
 - 先执行 `repo/ops/tom-readonly/remote-collector-pull.sh plan runtime/remote-onboarding/<serverId>/remote-collector-pull.sources.json` 审查来源。
@@ -105,6 +109,16 @@
 
 ## 最近完成
 
+- 已新增 `ops/tom-readonly/remote-collector-node-sync.sh`，用于把 Tom 已生成并校验过的 onboarding 接入包同步到第二台 Oracle 的 collector deploy 目录。
+- `remote-collector-node-sync.sh plan` 只读取 Tom 本地接入包，不联网、不写文件。
+- `remote-collector-node-sync.sh sync` 必须设置 `CONFIRM_REMOTE_COLLECTOR_NODE_SYNC=I_UNDERSTAND_THIS_ONLY_COPIES_COLLECTOR_BUNDLE_TO_REMOTE`，只通过 SSH+tar 写远端 collector deploy 目录，不写 OpenClaw 实例目录。
+- `bootstrap-plan/bootstrap-write` 分别需要显式确认；`bootstrap-write` 只执行远端接入包里的 `bootstrap-collector-node.sh write`，写 collector-only 部署文件，不启动容器、不安装 cron、不调用 live API。
+- 已让 `remote-collector-rollout.sh` 在 `needs_remote_collector_pull` 阶段输出 `remote-collector-node-sync.sh` 的 plan/sync/bootstrap 命令，减少后续手工复制接入包的风险。
+- 已新增 `test/remote-collector-node-sync.test.ts`，覆盖 plan 不联网、sync 必须确认、bootstrap plan/write 仍保持 collector-only 边界。
+- 已验证 `bash -n ops/tom-readonly/remote-collector-node-sync.sh` 和 `bash -n ops/tom-readonly/remote-collector-rollout.sh`。
+- 已验证 `npm test -- test/remote-collector-node-sync.test.ts test/oss-readiness.test.ts`，10/10 通过。
+- 已验证跨服务器只读、总闸门、dry-run 和凭据接入回归集，54/54 通过。
+- 已验证 `npm run build`。
 - 已新增 `ops/local/remote-oracle-intake.sh`，作为本机侧第二台 Oracle 凭据接入编排器。
 - `remote-oracle-intake.sh plan` 只渲染 push 配置摘要，不写文件、不联网、不连接 Tom、不连接第二台 Oracle。
 - `remote-oracle-intake.sh apply` 必须设置 `CONFIRM_REMOTE_ORACLE_INTAKE=I_UNDERSTAND_THIS_WRITES_LOCAL_PUSH_CONFIG_AND_TOM_RUNTIME_ONLY`，只串联本机 push 配置写入和 Tom runtime 凭据推送。

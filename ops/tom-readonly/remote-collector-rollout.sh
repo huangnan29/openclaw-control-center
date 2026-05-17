@@ -406,7 +406,12 @@ function buildCommands(bundle, stage) {
   if (stage === "needs_remote_collector_pull") {
     const pullConfig = relativeControlPath(bundle.source.configFile);
     return [
-      `# 先按 ${bundlePath}/RUNBOOK.md 在远端生成 collector snapshot`,
+      `# 先把接入包同步到远端 collector 节点；该步骤只写远端 collector deploy 目录，不写 OpenClaw 实例目录`,
+      `repo/ops/tom-readonly/remote-collector-node-sync.sh plan ${bundlePath}`,
+      `CONFIRM_REMOTE_COLLECTOR_NODE_SYNC=I_UNDERSTAND_THIS_ONLY_COPIES_COLLECTOR_BUNDLE_TO_REMOTE repo/ops/tom-readonly/remote-collector-node-sync.sh sync ${bundlePath}`,
+      `CONFIRM_REMOTE_COLLECTOR_NODE_BOOTSTRAP_PLAN=I_UNDERSTAND_THIS_ONLY_RUNS_REMOTE_BOOTSTRAP_PLAN repo/ops/tom-readonly/remote-collector-node-sync.sh bootstrap-plan ${bundlePath}`,
+      `CONFIRM_REMOTE_COLLECTOR_NODE_BOOTSTRAP_WRITE=I_UNDERSTAND_THIS_ONLY_WRITES_REMOTE_COLLECTOR_NODE_FILES repo/ops/tom-readonly/remote-collector-node-sync.sh bootstrap-write ${bundlePath}`,
+      `# 然后按 ${bundlePath}/RUNBOOK.md 在远端人工执行 ./collector-snapshot.sh 生成 collector snapshot`,
       `repo/ops/tom-readonly/remote-collector-pull.sh plan ${pullConfig}`,
       `CONFIRM_REMOTE_COLLECTOR_PULL=I_UNDERSTAND_THIS_ONLY_READS_REMOTE_COLLECTOR_SNAPSHOTS repo/ops/tom-readonly/remote-collector-pull.sh pull ${pullConfig}`,
     ];

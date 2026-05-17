@@ -154,6 +154,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   const pushRemoteCollectorCredentials = path.join(ROOT, "ops", "local", "push-remote-collector-credentials.sh");
   const pushRemoteCollectorCredentialsExample = path.join(ROOT, "ops", "local", "push-remote-collector-credentials.example.json");
   const remoteCollectorPreflight = path.join(ROOT, "ops", "tom-readonly", "remote-collector-preflight.sh");
+  const remoteCollectorNodeSync = path.join(ROOT, "ops", "tom-readonly", "remote-collector-node-sync.sh");
   const remoteCollectorRollout = path.join(ROOT, "ops", "tom-readonly", "remote-collector-rollout.sh");
   const remoteCollectorRolloutRunner = path.join(ROOT, "ops", "tom-readonly", "remote-collector-rollout-runner.sh");
   const goLiveGate = path.join(ROOT, "ops", "tom-readonly", "go-live-gate.sh");
@@ -184,6 +185,10 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(doc.includes("I_UNDERSTAND_THIS_ONLY_WRITES_CONTROL_CENTER_REMOTE_CREDENTIALS"));
   assert(doc.includes("I_UNDERSTAND_THIS_ONLY_WRITES_REMOTE_ONBOARDING_BUNDLE"));
   assert(doc.includes("remote-collector-preflight.sh"));
+  assert(doc.includes("remote-collector-node-sync.sh"));
+  assert(doc.includes("I_UNDERSTAND_THIS_ONLY_COPIES_COLLECTOR_BUNDLE_TO_REMOTE"));
+  assert(doc.includes("I_UNDERSTAND_THIS_ONLY_RUNS_REMOTE_BOOTSTRAP_PLAN"));
+  assert(doc.includes("I_UNDERSTAND_THIS_ONLY_WRITES_REMOTE_COLLECTOR_NODE_FILES"));
   assert(doc.includes("remote-collector-rollout.sh"));
   assert(doc.includes("I_UNDERSTAND_THIS_ONLY_READS_REMOTE_PREREQUISITES"));
   assert(doc.includes("remote-collector-pull.sh"));
@@ -216,6 +221,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(existsSync(pushRemoteCollectorCredentials));
   assert(existsSync(pushRemoteCollectorCredentialsExample));
   assert(existsSync(remoteCollectorPreflight));
+  assert(existsSync(remoteCollectorNodeSync));
   assert(existsSync(remoteCollectorRollout));
   assert(existsSync(remoteCollectorRolloutRunner));
   assert(existsSync(goLiveGate));
@@ -312,6 +318,19 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(remoteCollectorPreflightText, /mutatesOpenClawInstance: false/);
   assert.match(remoteCollectorPreflightText, /callsLiveApi: false/);
   assert.doesNotMatch(remoteCollectorPreflightText, /api\/managed-actions\/live/);
+  const remoteCollectorNodeSyncText = readFileSync(remoteCollectorNodeSync, "utf8");
+  assert.match(remoteCollectorNodeSyncText, /remote-collector-node-sync\.sh plan/);
+  assert.match(remoteCollectorNodeSyncText, /CONFIRM_REMOTE_COLLECTOR_NODE_SYNC/);
+  assert.match(remoteCollectorNodeSyncText, /I_UNDERSTAND_THIS_ONLY_COPIES_COLLECTOR_BUNDLE_TO_REMOTE/);
+  assert.match(remoteCollectorNodeSyncText, /CONFIRM_REMOTE_COLLECTOR_NODE_BOOTSTRAP_PLAN/);
+  assert.match(remoteCollectorNodeSyncText, /I_UNDERSTAND_THIS_ONLY_RUNS_REMOTE_BOOTSTRAP_PLAN/);
+  assert.match(remoteCollectorNodeSyncText, /CONFIRM_REMOTE_COLLECTOR_NODE_BOOTSTRAP_WRITE/);
+  assert.match(remoteCollectorNodeSyncText, /I_UNDERSTAND_THIS_ONLY_WRITES_REMOTE_COLLECTOR_NODE_FILES/);
+  assert.match(remoteCollectorNodeSyncText, /writesRemoteCollectorNode/);
+  assert.match(remoteCollectorNodeSyncText, /writesOpenClawInstanceDirs: false/);
+  assert.match(remoteCollectorNodeSyncText, /startsContainers: false/);
+  assert.match(remoteCollectorNodeSyncText, /callsLiveApi: false/);
+  assert.doesNotMatch(remoteCollectorNodeSyncText, /api\/managed-actions\/live/);
   const remoteCollectorRolloutText = readFileSync(remoteCollectorRollout, "utf8");
   assert.match(remoteCollectorRolloutText, /remote-collector-rollout\.sh status/);
   assert.match(remoteCollectorRolloutText, /needs_remote_credentials/);
@@ -319,6 +338,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(remoteCollectorRolloutText, /write-push-config/);
   assert.match(remoteCollectorRolloutText, /needs_remote_preflight/);
   assert.match(remoteCollectorRolloutText, /needs_remote_collector_pull/);
+  assert.match(remoteCollectorRolloutText, /remote-collector-node-sync\.sh/);
   assert.match(remoteCollectorRolloutText, /needs_registry_register/);
   assert.match(remoteCollectorRolloutText, /ready_for_healthcheck/);
   assert.match(remoteCollectorRolloutText, /connectsSsh: false/);
