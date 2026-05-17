@@ -4,6 +4,7 @@ import {
   createMockHealthcheckExecutor,
   runManagedActionExecutor,
 } from "../src/runtime/managed-action-executor";
+import { createProductionManagedActionExecutor } from "../src/runtime/managed-action-production-executor";
 
 const instance = {
   id: "tom",
@@ -76,4 +77,29 @@ test("managed action executor reports missing executors without live execution",
   assert.equal(result.ok, false);
   assert.equal(result.status, "executor_missing");
   assert.equal(result.liveExecution, false);
+});
+
+test("production managed action executor exposes only readonly healthcheck skeleton", async () => {
+  const executor = createProductionManagedActionExecutor();
+  assert.equal(typeof executor.healthcheck, "function");
+  assert.equal(executor.collector_refresh, undefined);
+  assert.equal(executor.skill_run, undefined);
+
+  const result = await runManagedActionExecutor(
+    {
+      action: "healthcheck",
+      instance,
+      operationRequestId: "dry-run-4",
+      operator: "Anan",
+      reason: "测试生产执行器骨架",
+      gateReady: true,
+    },
+    executor,
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.status, "executed_readonly_healthcheck");
+  assert.equal(result.liveExecution, true);
+  assert.equal(result.targetInstanceId, "tom");
+  assert.match(result.detail, /readonly healthcheck/i);
 });

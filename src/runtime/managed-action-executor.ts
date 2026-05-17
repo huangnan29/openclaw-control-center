@@ -12,7 +12,7 @@ export interface ManagedActionExecutionInput {
 
 export interface ManagedActionExecutionResult {
   ok: boolean;
-  status: "executed_mock" | "blocked_by_gate" | "executor_missing";
+  status: "executed_mock" | "executed_readonly_healthcheck" | "blocked_by_gate" | "executor_missing";
   liveExecution: boolean;
   action: ManagedActionName;
   targetInstanceId: string;

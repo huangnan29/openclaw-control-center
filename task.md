@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-只读 live readiness 诊断卡：页面和 API 只读展示真实执行前置条件，包括 live gate、dry-run 审计、rollout 灰度配置和生产执行器接入状态；当前仍不接真实执行器。
+生产执行器最小骨架：新增可测试的只读 `healthcheck` 生产执行器模块，但当前仍不接入 `/api/managed-actions/live`，Tom 上继续显示 `productionWired=false`。
 
 ## 本轮不做
 
@@ -17,15 +17,16 @@
 
 ## 当前下一步
 
-部署只读 live readiness 诊断卡到 Tom 并验证行为不变：
+部署生产执行器最小骨架到 Tom 并验证行为不变：
 
 - Tom 继续保持 `MANAGED_ACTIONS_LIVE_ENABLED=false`。
 - Tom 继续保持 `READONLY_MODE=true`。
 - Tom 不配置生产执行器。
 - `/api/managed-actions/readiness` 返回 `liveExecutionAttempted=false`。
+- `/api/managed-actions/readiness` 继续返回 `executor.productionWired=false`。
 - 页面出现 `真实执行上线条件`，但不出现真实执行入口。
-- 不提供执行按钮。
-- 不触发 live API。
+- 页面不提供执行按钮。
+- 页面不触发 live API。
 
 ## 最近完成
 
@@ -194,7 +195,19 @@
 - 已验证页面卡片不调用 `/api/managed-actions/live`，不提供真实执行按钮。
 - 已验证 `npm test -- test/managed-action-live-readiness.test.ts test/managed-action-live-gate.test.ts test/managed-action-live-rollout.test.ts test/managed-actions-dry-run.test.ts test/managed-action-live-audit.test.ts test/managed-action-executor.test.ts test/phase9-routes-commands.test.ts test/readonly-multi-instance-safety.test.ts test/multi-instance-readonly.test.ts test/ui-render-smoke.test.ts`。
 - 已验证 `npm run build`。
+- 已提交并推送 `0fc5fbe feat: add managed action live readiness diagnostics`。
+- 已部署到 Tom，并验证运行提交 `0fc5fbe`。
+- 已验证 Tom `healthcheck.sh` 通过，5 个 gateway 健康端口通过。
+- 已验证 Tom readiness 返回 `status=blocked`、`liveExecutionAvailable=false`、`liveExecutionAttempted=false`、`mutatesOpenClawInstance=false`。
+- 已验证 Tom readiness 返回 `gate.enabled=false`、`gate.readonlyMode=true`、`rollout.enabled=false`、`executor.productionWired=false`。
+- 已验证 Tom 总览页和实例详情页都出现 `真实执行上线条件`。
+- 已验证 Tom 总览页不包含 `/api/managed-actions/live` 前端调用，也不包含真实执行确认短语。
+- 已新增生产执行器骨架：`src/runtime/managed-action-production-executor.ts`。
+- 已验证生产执行器骨架只注册只读 `healthcheck`，不注册 `collector_refresh` 和 `skill_run`。
+- 已验证该骨架当前仅被测试引用，未接入 live 路由。
+- 已验证 `npm test -- test/managed-action-executor.test.ts test/managed-action-live-readiness.test.ts test/managed-actions-dry-run.test.ts test/phase9-routes-commands.test.ts test/readonly-multi-instance-safety.test.ts test/multi-instance-readonly.test.ts test/ui-render-smoke.test.ts`。
+- 已验证 `npm run build`。
 
 ## 阶段完成后的下一步
 
-部署 Tom 验证 readiness 卡片不改变运行行为；通过后，进入生产执行器最小骨架设计，仍保持默认禁用、无页面执行入口。
+部署 Tom 验证生产执行器骨架不改变运行行为；通过后，进入 live 执行器挂载开关设计，仍保持默认禁用、无页面执行入口。
