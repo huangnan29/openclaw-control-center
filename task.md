@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-最终上线总闸门增强：在已有 `remote-collector-rollout.sh status/plan`、`remote-collector-rollout-runner.sh`、Tom 端 `remote-collector-credentials.sh` 和本机侧 `push-remote-collector-credentials.sh` 的基础上，新增 `go-live-gate.sh`，把 Tom 本体健康、跨服务器只读监控阶段和 live 管理动作 readiness 汇总成一个 JSON 状态报告。
+远端凭据发现增强：在已有 `go-live-gate.sh`、`remote-collector-rollout-runner.sh`、Tom 端 `remote-collector-credentials.sh` 和本机侧 `push-remote-collector-credentials.sh` 的基础上，新增本机侧 `discover-remote-oracle-credentials.sh`，只读发现第二台 Oracle 的候选 SSH host/key，缩短 `needs_remote_credentials` 阻塞。
 
 ## 本轮不做
 
@@ -20,6 +20,10 @@
 跨服务器只读监控下一步：
 
 - 为第二台 Oracle 服务器准备本地 collector exporter，让该服务器自行生成 collector JSON。
+- 先在本机只读发现候选 SSH host/key：
+  `ops/local/discover-remote-oracle-credentials.sh scan ops/local/discover-remote-oracle-credentials.example.json`
+- 如果 scan 找到候选 host/key，可以显式确认后做只读 SSH 探测：
+  `CONFIRM_REMOTE_ORACLE_DISCOVERY=I_UNDERSTAND_THIS_ONLY_PROBES_SSH_READONLY ops/local/discover-remote-oracle-credentials.sh probe ops/local/discover-remote-oracle-credentials.example.json`
 - 在 Tom 先复制 `repo/ops/tom-readonly/remote-collector-onboarding.example.json` 到 `runtime/remote-collector-onboarding.json`，填入第二台 Oracle 的 SSH 信息和实例路径。
 - 任何阶段不确定下一步时，先运行：
   `repo/ops/tom-readonly/remote-collector-rollout.sh status runtime/remote-onboarding/<serverId>`
@@ -88,6 +92,15 @@
 
 ## 最近完成
 
+- 已新增 `ops/local/discover-remote-oracle-credentials.sh` 和 `discover-remote-oracle-credentials.example.json`，用于本机只读发现第二台 Oracle 候选 SSH host/key。
+- `discover-remote-oracle-credentials.sh scan` 只读取本机 SSH config 和候选 key 文件元数据，不联网、不写文件、不输出私钥内容。
+- `discover-remote-oracle-credentials.sh probe` 必须设置 `CONFIRM_REMOTE_ORACLE_DISCOVERY=I_UNDERSTAND_THIS_ONLY_PROBES_SSH_READONLY`，只执行 `id -un`、`uname -n`、`uname -s` 这类只读 SSH 探测，不写远端文件、不写 Tom runtime。
+- 已新增 `test/discover-remote-oracle-credentials.test.ts`，覆盖 scan 不泄露 key 内容、probe 必须确认、probe 使用只读 SSH 参数。
+- 已验证 `bash -n ops/local/discover-remote-oracle-credentials.sh`。
+- 已验证 `npm test -- test/discover-remote-oracle-credentials.test.ts test/push-remote-collector-credentials.test.ts test/oss-readiness.test.ts`，13/13 通过。
+- 已验证 `npm test -- test/discover-remote-oracle-credentials.test.ts test/go-live-gate.test.ts test/remote-collector-rollout-runner.test.ts test/push-remote-collector-credentials.test.ts test/remote-collector-credentials.test.ts test/remote-collector-rollout.test.ts test/remote-collector-preflight.test.ts test/remote-collector-onboarding.test.ts test/remote-collector-pull.test.ts test/register-remote-collector.test.ts test/collector-node-bootstrap.test.ts test/oss-readiness.test.ts`，38/38 通过。
+- 已验证 `npm run build`。
+- 本机执行 `ops/local/discover-remote-oracle-credentials.sh scan ops/local/discover-remote-oracle-credentials.example.json`，当前发现 3 个候选 key，但没有发现 Tom 以外的候选 host，状态为 `needs_remote_host`。
 - 已新增 `ops/tom-readonly/go-live-gate.sh`，作为最终上线总闸门。
 - `go-live-gate.sh status` 只汇总跨服务器 rollout runner 状态与 live healthcheck window readiness，不运行 healthcheck、不写文件、不调用 live API。
 - `go-live-gate.sh check` 会额外运行 `./healthcheck.sh`，用于验证 Tom 现有实例仍正常、只读边界仍有效。
