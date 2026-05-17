@@ -33,10 +33,11 @@ usage() {
 
 阶段顺序：
   1. onboarding bundle 离线校验
-  2. SSH 只读 preflight 状态
-  3. 远端 collector snapshot 只读 pull 状态
-  4. Tom registry 注册状态
-  5. Tom healthcheck 验收
+  2. Tom 本地远端 SSH 凭据就绪检查
+  3. SSH 只读 preflight 状态
+  4. 远端 collector snapshot 只读 pull 状态
+  5. Tom registry 注册状态
+  6. Tom healthcheck 验收
 TEXT
 }
 
@@ -213,6 +214,9 @@ function loadBundle() {
       host: source.host,
       user: source.user || "ubuntu",
       port: source.port || 22,
+      enabled: source.enabled !== false,
+      sshKey: readString(source.sshKey),
+      knownHostsFile: readString(source.knownHostsFile),
       remoteSnapshotPath: source.remoteSnapshotPath,
       localSnapshotPath,
       configFile: requiredFiles.pullConfigFile,
@@ -236,6 +240,48 @@ function loadBundle() {
       callsLiveApi: safety.callsLiveApi,
       bundlesBuildContext: safety.bundlesBuildContext === true,
     },
+  };
+}
+
+function readRemoteAccess(bundle) {
+  const issues = [];
+  const source = bundle.source || {};
+  const sshKey = readString(source.sshKey);
+  if (source.enabled !== true) {
+    issues.push("remote-collector-pull.sources.json 中 source.enabled 必须为 true");
+  }
+  if (!readString(source.host)) {
+    issues.push("远端 host 必须填写真实 Oracle 地址");
+  }
+  if (!readString(source.user)) {
+    issues.push("远端 user 必须填写");
+  }
+  if (sshKey) {
+    if (!path.isAbsolute(sshKey)) {
+      issues.push("sshKey 必须是 Tom 上的绝对路径");
+    } else if (!fs.existsSync(sshKey)) {
+      issues.push(`Tom 上缺少远端只读 SSH key：${sshKey}`);
+    } else {
+      try {
+        fs.accessSync(sshKey, fs.constants.R_OK);
+      } catch {
+        issues.push(`Tom 无法读取远端只读 SSH key：${sshKey}`);
+      }
+    }
+  }
+  const knownHostsFile = readString(source.knownHostsFile);
+  if (knownHostsFile && !path.isAbsolute(knownHostsFile)) {
+    issues.push("knownHostsFile 必须是 Tom 上的绝对路径");
+  }
+  return {
+    status: issues.length > 0 ? "blocked" : "ready",
+    acceptable: issues.length === 0,
+    host: source.host,
+    user: source.user,
+    port: source.port,
+    sshKey: sshKey ? { path: sshKey, exists: fs.existsSync(sshKey) } : { path: "", exists: false, optional: true },
+    knownHostsFile: knownHostsFile || "",
+    issues,
   };
 }
 
@@ -339,6 +385,15 @@ function buildCommands(bundle, stage) {
       `CONFIRM_REMOTE_COLLECTOR_PREFLIGHT=I_UNDERSTAND_THIS_ONLY_READS_REMOTE_PREREQUISITES repo/ops/tom-readonly/remote-collector-preflight.sh check ${bundlePath}`,
     ];
   }
+  if (stage === "needs_remote_credentials") {
+    return [
+      "# 先把真实第二台 Oracle 的 host/user/port/sshKey 写入 onboarding 配置并重新生成接入包",
+      "# Tom 上的 sshKey 必须存在且可读，建议权限 600",
+      `repo/ops/tom-readonly/remote-collector-onboarding.sh plan runtime/remote-collector-onboarding.json`,
+      `CONFIRM_REMOTE_COLLECTOR_ONBOARDING=I_UNDERSTAND_THIS_ONLY_WRITES_REMOTE_ONBOARDING_BUNDLE repo/ops/tom-readonly/remote-collector-onboarding.sh write runtime/remote-collector-onboarding.json`,
+      `repo/ops/tom-readonly/remote-collector-onboarding.sh verify ${bundlePath}`,
+    ];
+  }
   if (stage === "needs_remote_collector_pull") {
     const pullConfig = relativeControlPath(bundle.source.configFile);
     return [
@@ -360,8 +415,9 @@ function buildCommands(bundle, stage) {
   return [];
 }
 
-function decide(bundle, preflight, pull, snapshot, registry) {
+function decide(bundle, remoteAccess, preflight, pull, snapshot, registry) {
   if (bundle.status !== "valid") return "needs_onboarding_verify";
+  if (!remoteAccess.acceptable) return "needs_remote_credentials";
   if (!preflight.acceptable) return "needs_remote_preflight";
   if (!pull.acceptable || snapshot.status !== "valid") return "needs_remote_collector_pull";
   if (registry.status !== "registered") return "needs_registry_register";
@@ -392,11 +448,12 @@ try {
   fail(formatError(error));
 }
 
+const remoteAccess = bundle.status === "valid" ? readRemoteAccess(bundle) : { status: "skipped_invalid_bundle" };
 const preflight = bundle.status === "valid" ? readPreflight(bundle) : { status: "skipped_invalid_bundle" };
 const pull = bundle.status === "valid" ? readPull(bundle) : { status: "skipped_invalid_bundle" };
 const snapshot = bundle.status === "valid" ? readSnapshot(bundle) : { status: "skipped_invalid_bundle" };
 const registry = bundle.status === "valid" ? readRegistry(bundle) : { status: "skipped_invalid_bundle" };
-const stage = decide(bundle, preflight, pull, snapshot, registry);
+const stage = decide(bundle, remoteAccess, preflight, pull, snapshot, registry);
 const outputStatus = stage === "ready_for_healthcheck" ? "ready" : "blocked";
 
 console.log(JSON.stringify({
@@ -413,6 +470,7 @@ console.log(JSON.stringify({
       files: bundle.requiredFiles ? Object.fromEntries(Object.entries(bundle.requiredFiles).map(([key, file]) => [key, relativeControlPath(file)])) : undefined,
       safety: bundle.safety,
     },
+    remoteAccess,
     preflight,
     pull,
     snapshot,

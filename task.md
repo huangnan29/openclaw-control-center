@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-跨服务器只读 collector 接入总控增强：让 `remote-collector-preflight.sh check` 在 Tom 本地留下 `runtime/remote-preflight-state/<serverId>.json`，并新增 `remote-collector-rollout.sh status/plan` 作为跨服务器只读接入闸门，统一判断下一步是 preflight、pull、register 还是 healthcheck。
+跨服务器只读 collector 接入总控增强：让 `remote-collector-preflight.sh check` 在 Tom 本地留下 `runtime/remote-preflight-state/<serverId>.json`，并新增 `remote-collector-rollout.sh status/plan` 作为跨服务器只读接入闸门，统一判断下一步是补远端凭据、preflight、pull、register 还是 healthcheck。
 
 ## 本轮不做
 
@@ -23,6 +23,7 @@
 - 在 Tom 先复制 `repo/ops/tom-readonly/remote-collector-onboarding.example.json` 到 `runtime/remote-collector-onboarding.json`，填入第二台 Oracle 的 SSH 信息和实例路径。
 - 任何阶段不确定下一步时，先运行：
   `repo/ops/tom-readonly/remote-collector-rollout.sh status runtime/remote-onboarding/<serverId>`
+- 如果 rollout gate 返回 `needs_remote_credentials`，必须先补齐真实远端 host/user/port 和 Tom 上可读的只读 SSH key，不能用样板 `10.0.0.12` 硬跑 preflight。
 - 如果远端已经有可用的 control-center 源码目录，可以设置 `collectorNode.buildContext`；否则保持默认 `collectorNode.bundleBuildContext=true`，让接入包携带最小构建上下文。
 - 先执行 `repo/ops/tom-readonly/remote-collector-onboarding.sh plan runtime/remote-collector-onboarding.json`，确认只生成接入包计划、不写文件。
 - 确认后执行：
@@ -75,7 +76,8 @@
 
 - 已新增 `ops/tom-readonly/remote-collector-rollout.sh`，作为跨服务器只读 collector 接入总控闸门。
 - `remote-collector-rollout.sh status/plan` 只读取 Tom 本地 onboarding bundle、preflight 状态、pull 状态、snapshot 和 registry，不 SSH、不写 registry、不写远端文件、不启动容器、不调用 live API。
-- rollout gate 会输出 `needs_remote_preflight`、`needs_remote_collector_pull`、`needs_registry_register` 或 `ready_for_healthcheck`，并给出下一步命令。
+- 已让 rollout gate 在 SSH key 缺失、source 未启用、host/user 缺失或 known_hosts 路径异常时停在 `needs_remote_credentials`，避免直接运行会失败的 SSH preflight。
+- rollout gate 会输出 `needs_remote_credentials`、`needs_remote_preflight`、`needs_remote_collector_pull`、`needs_registry_register` 或 `ready_for_healthcheck`，并给出下一步命令。
 - 已让 `remote-collector-preflight.sh check` 把结果写入 Tom 本地 `runtime/remote-preflight-state/<serverId>.json`，同时新增 `status` 模式用于只读查看。
 - 已新增 `test/remote-collector-rollout.test.ts`，覆盖从缺 preflight 到 ready for healthcheck 的阶段推进。
 - 已更新 `test/remote-collector-preflight.test.ts`，覆盖 preflight 状态文件与只读 status。

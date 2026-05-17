@@ -228,6 +228,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.doesNotMatch(remoteCollectorPreflightText, /api\/managed-actions\/live/);
   const remoteCollectorRolloutText = readFileSync(remoteCollectorRollout, "utf8");
   assert.match(remoteCollectorRolloutText, /remote-collector-rollout\.sh status/);
+  assert.match(remoteCollectorRolloutText, /needs_remote_credentials/);
   assert.match(remoteCollectorRolloutText, /needs_remote_preflight/);
   assert.match(remoteCollectorRolloutText, /needs_remote_collector_pull/);
   assert.match(remoteCollectorRolloutText, /needs_registry_register/);

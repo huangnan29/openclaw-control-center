@@ -89,6 +89,11 @@ async function writeBaseRegistry(deployDir: string): Promise<void> {
   );
 }
 
+async function writeRemoteSshKey(deployDir: string): Promise<void> {
+  await mkdir(join(deployDir, "runtime", "ssh"), { recursive: true });
+  await writeFile(join(deployDir, "runtime", "ssh", "remote-oracle-readonly.key"), "fake readonly key\n", "utf8");
+}
+
 async function writePreflightState(deployDir: string, bundleDir: string): Promise<void> {
   const stateDir = join(deployDir, "runtime", "remote-preflight-state");
   await mkdir(stateDir, { recursive: true });
@@ -224,9 +229,18 @@ test("remote collector rollout gate reports the next safe stage", async () => {
     await writeBaseRegistry(deployDir);
     const env = { ...process.env, DEPLOY_DIR: deployDir };
 
+    const needsCredentials = JSON.parse(execFileSync(ROLLOUT, ["status", bundleDir], { env, encoding: "utf8" }));
+    assert.equal(needsCredentials.status, "blocked");
+    assert.equal(needsCredentials.stage, "needs_remote_credentials");
+    assert.equal(needsCredentials.evidence.remoteAccess.status, "blocked");
+    assert(needsCredentials.evidence.remoteAccess.issues.some((issue: string) => issue.includes("SSH key")));
+    assert(needsCredentials.nextCommands.some((command: string) => command.includes("remote-collector-onboarding.sh write")));
+
+    await writeRemoteSshKey(deployDir);
     const needsPreflight = JSON.parse(execFileSync(ROLLOUT, ["status", bundleDir], { env, encoding: "utf8" }));
     assert.equal(needsPreflight.status, "blocked");
     assert.equal(needsPreflight.stage, "needs_remote_preflight");
+    assert.equal(needsPreflight.evidence.remoteAccess.status, "ready");
     assert.equal(needsPreflight.safety.connectsSsh, false);
     assert.equal(needsPreflight.safety.writesActiveRegistry, false);
     assert.equal(needsPreflight.safety.mutatesOpenClawInstance, false);
