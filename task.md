@@ -85,6 +85,10 @@
 - 已验证 `npm test -- test/remote-collector-onboarding.test.ts test/register-remote-collector.test.ts test/remote-collector-pull.test.ts test/collector-node-bootstrap.test.ts test/oss-readiness.test.ts`，17/17 通过。
 - 已验证 `npm test -- test/multi-instance-readonly.test.ts test/readonly-multi-instance-safety.test.ts test/ui-render-smoke.test.ts`，39/39 通过。
 - 已验证 `npm run build`。
+- 已提交并推送 `1e9adcb ops: bundle remote collector build context`。
+- 已部署到 Tom，并验证运行提交 `1e9adcb`。
+- 已在 Tom 验证 onboarding 样板 `plan` 返回 `warnings=[]`、`bundlesBuildContext=true`、`remoteBuildContext=/srv/openclaw-collector-node/build-context`、`buildContextFiles=88`，未执行 write，未生成真实接入包。
+- 已验证 Tom `healthcheck.sh` 通过，现有 5 个实例仍只读；live window status 仍为 `needs_manual_approval`、`READONLY_MODE=true`、`readiness.status=blocked`，未调用 live API。
 - 已新增 `ops/tom-readonly/register-remote-collector.sh`，用于把已拉取的远端 collector snapshot 注册到 Tom `config/instances.json`。
 - 已新增 `ops/tom-readonly/register-remote-collector.example.json` 样板。
 - `register-remote-collector.sh plan` 只读取配置、Tom registry 和本机 snapshot，不写文件。
