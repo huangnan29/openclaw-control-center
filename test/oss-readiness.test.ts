@@ -173,8 +173,11 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(impactText, /READONLY_MODE/);
   const approvalText = readFileSync(liveHealthcheckApproval, "utf8");
   assert.match(approvalText, /live-healthcheck-approval\.sh prepare/);
+  assert.match(approvalText, /live-healthcheck-approval\.sh approve/);
   assert.match(approvalText, /live-healthcheck-approval\.sh template/);
   assert.match(approvalText, /live-healthcheck-approval\.sh status/);
+  assert.match(approvalText, /I_APPROVE_LIVE_HEALTHCHECK_RECORD/);
+  assert.match(approvalText, /APPROVED_BY/);
   assert.match(approvalText, /needs_manual_approval/);
   assert.match(approvalText, /approved 必须为 true/);
   assert.match(approvalText, /I_UNDERSTAND_THIS_TEMPORARILY_ENABLES_LIVE_GATE/);

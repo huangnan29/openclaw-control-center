@@ -70,11 +70,9 @@ OPERATOR=Anan \
 
 ```bash
 repo/ops/tom-readonly/live-healthcheck-approval.sh prepare runtime/live-healthcheck-approval.json
-# 人工编辑 runtime/live-healthcheck-approval.json：
-# - approved=true
-# - approvedAt=<当前 ISO 时间>
-# - approvedBy=<批准人>
-# - checklist 全部为 true
+CONFIRM_APPROVAL_RECORD=I_APPROVE_LIVE_HEALTHCHECK_RECORD \
+APPROVED_BY=Anan \
+repo/ops/tom-readonly/live-healthcheck-approval.sh approve runtime/live-healthcheck-approval.json
 repo/ops/tom-readonly/live-healthcheck-approval.sh status runtime/live-healthcheck-approval.json
 repo/ops/tom-readonly/live-healthcheck-approval.sh check runtime/live-healthcheck-approval.json
 

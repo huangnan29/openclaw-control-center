@@ -10,6 +10,8 @@ APPROVAL_FILE="${APPROVAL_FILE:-${DEPLOY_DIR}/runtime/live-healthcheck-approval.
 INSTANCE_ID="${INSTANCE_ID:-tom}"
 OPERATOR="${OPERATOR:-Anan}"
 APPROVAL_MAX_AGE_HOURS="${APPROVAL_MAX_AGE_HOURS:-24}"
+CONFIRM_APPROVAL_RECORD="${CONFIRM_APPROVAL_RECORD:-}"
+APPROVED_BY="${APPROVED_BY:-}"
 
 timestamp() {
   date +"%Y-%m-%dT%H:%M:%S%z"
@@ -76,6 +78,67 @@ prepare_template() {
     write_template "$output" >/dev/null
   fi
   show_status "$output"
+}
+
+approve_record() {
+  local output="${1:-$APPROVAL_FILE}"
+  [ "$CONFIRM_APPROVAL_RECORD" = "I_APPROVE_LIVE_HEALTHCHECK_RECORD" ] || \
+    fail "必须设置 CONFIRM_APPROVAL_RECORD=I_APPROVE_LIVE_HEALTHCHECK_RECORD"
+  [ -n "$APPROVED_BY" ] || fail "必须设置 APPROVED_BY=<批准人>"
+
+  mkdir -p "$(dirname "$output")"
+  APPROVAL_FILE="$output" \
+    INSTANCE_ID="$INSTANCE_ID" \
+    OPERATOR="$OPERATOR" \
+    APPROVED_BY="$APPROVED_BY" \
+    node <<'NODE'
+const fs = require("node:fs");
+
+const file = process.env.APPROVAL_FILE;
+const expectedInstanceId = process.env.INSTANCE_ID || "tom";
+const expectedOperator = process.env.OPERATOR || "Anan";
+const approvedBy = String(process.env.APPROVED_BY || "").trim();
+
+let approval = {};
+if (fs.existsSync(file)) {
+  try {
+    approval = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    approval = {};
+  }
+}
+
+const next = {
+  ...approval,
+  schemaVersion: 1,
+  approved: true,
+  approvedAt: new Date().toISOString(),
+  approvedBy,
+  instanceId: expectedInstanceId,
+  action: "healthcheck",
+  operator: expectedOperator,
+  risk: "low",
+  confirmationText: "I_UNDERSTAND_THIS_TEMPORARILY_ENABLES_LIVE_GATE",
+  liveConfirmationText: "I_UNDERSTAND_THIS_CALLS_LIVE_API",
+  scope: {
+    ...(approval.scope && typeof approval.scope === "object" && !Array.isArray(approval.scope) ? approval.scope : {}),
+    service: "openclaw-control-center",
+    mutatesOpenClawInstance: false,
+    allowedAction: "healthcheck",
+  },
+  checklist: {
+    understandsTemporaryLiveGate: true,
+    understandsLocalTokenRequired: true,
+    understandsAutoRollback: true,
+    understandsImpactSnapshot: true,
+  },
+  notes: "已通过 live-healthcheck-approval.sh approve 记录人工批准；该动作只写批准文件，不会启用 live gate。",
+};
+
+fs.writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+NODE
+  log "已写入人工批准记录：${output}"
+  check_approval "$output"
 }
 
 check_approval() {
@@ -241,12 +304,14 @@ usage() {
   cat <<'TEXT'
 用法：
   live-healthcheck-approval.sh prepare [approval.json]
+  live-healthcheck-approval.sh approve [approval.json]
   live-healthcheck-approval.sh template [approval.json]
   live-healthcheck-approval.sh check [approval.json]
   live-healthcheck-approval.sh status [approval.json]
 
 说明：
   prepare 只在文件不存在时生成模板，并输出当前状态。
+  approve 需要 CONFIRM_APPROVAL_RECORD 和 APPROVED_BY，只写批准文件，不会启用 live gate。
   template 只生成批准文件模板，不会启用 live gate。
   check 只校验批准文件，不会调用 live API。
   status 只读取批准文件状态，不会失败，也不会调用 live API。
@@ -258,6 +323,9 @@ main() {
   case "${1:-check}" in
     prepare)
       prepare_template "${2:-$APPROVAL_FILE}"
+      ;;
+    approve)
+      approve_record "${2:-$APPROVAL_FILE}"
       ;;
     template)
       write_template "${2:-$APPROVAL_FILE}"
