@@ -2,29 +2,19 @@ import { join } from "node:path";
 import { readdir } from "node:fs/promises";
 import {
   loadCurrentAgentCatalog,
+  type CurrentAgentCatalogInput,
   resolveOpenClawConfigPath,
   resolveOpenClawHomePath,
 } from "./current-agent-catalog";
+import type { AgentRosterEntry, AgentRosterSnapshot, AgentRosterStatus } from "../types";
 
-export type AgentRosterStatus = "connected" | "partial" | "not_connected";
+export type { AgentRosterEntry, AgentRosterSnapshot, AgentRosterStatus } from "../types";
 
-export interface AgentRosterEntry {
-  agentId: string;
-  displayName: string;
-}
-
-export interface AgentRosterSnapshot {
-  status: AgentRosterStatus;
-  sourcePath: string;
-  detail: string;
-  entries: AgentRosterEntry[];
-}
-
-export async function loadBestEffortAgentRoster(): Promise<AgentRosterSnapshot> {
-  const homePath = resolveOpenClawHomePath();
-  const sourcePath = resolveOpenClawConfigPath();
+export async function loadBestEffortAgentRoster(input: CurrentAgentCatalogInput = {}): Promise<AgentRosterSnapshot> {
+  const homePath = resolveOpenClawHomePath(input);
+  const sourcePath = resolveOpenClawConfigPath(input);
   const runtimeAgentsPath = join(homePath, "agents");
-  const fromConfig = await loadCurrentAgentCatalog();
+  const fromConfig = await loadCurrentAgentCatalog(input);
   if (fromConfig.entries.length > 0) {
     return {
       status: "connected",

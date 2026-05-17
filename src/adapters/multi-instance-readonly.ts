@@ -21,7 +21,7 @@ export class MultiInstanceReadonlyAdapter {
   ) {
     this.createSnapshot =
       options.createSnapshot ??
-      ((instance) => new OpenClawReadonlyAdapter(createScopedToolClient(instance)).snapshot());
+      ((instance) => new OpenClawReadonlyAdapter(createScopedToolClient(instance), instance).snapshot());
   }
 
   async snapshot(selectedInstanceId = this.instances[0]?.id ?? ""): Promise<MultiInstanceSnapshot> {
@@ -82,6 +82,12 @@ export function emptySnapshot(): ReadModelSnapshot {
       warn: 0,
       over: 0,
       evaluations: [],
+    },
+    agentRoster: {
+      status: "not_connected",
+      sourcePath: "",
+      detail: "snapshot unavailable.",
+      entries: [],
     },
     generatedAt,
   };

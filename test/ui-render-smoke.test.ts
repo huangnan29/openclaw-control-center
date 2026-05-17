@@ -171,6 +171,15 @@ test("multi-instance overview renders status metrics detail links and selected s
   tomSnapshot.statuses = [
     { sessionKey: "sess-running", model: "gpt-5.2", tokensIn: 300, tokensOut: 120, cost: 0.045, updatedAt: "2026-03-03T09:00:00.000Z" },
   ];
+  tomSnapshot.agentRoster = {
+    status: "connected",
+    sourcePath: "/instances/tom/config/openclaw.json",
+    detail: "loaded 2 current agents from openclaw.json.",
+    entries: [
+      { agentId: "agent-kazik", displayName: "卡兹克写作 Agent" },
+      { agentId: "config-only", displayName: "配置但未运行 Agent" },
+    ],
+  };
   tomSnapshot.approvals = [
     { approvalId: "approval-1", status: "pending", agentId: "agent-kazik", command: "dangerous command" },
   ];
@@ -242,12 +251,14 @@ test("multi-instance overview renders status metrics detail links and selected s
   assert(html.includes("最近日志"));
   assert(html.includes("最近任务"));
   assert(html.includes("数据来源"));
+  assert(html.includes("实例配置优先"));
   assert(html.includes("gateway 连接状态 + 会话状态推导"));
   assert(html.includes("会话、任务负责人、审批和预算范围合并推导"));
   assert(html.includes("session status token 字段"));
   assert(html.includes("只读任务存储"));
   assert(html.includes("快照合成事件流"));
   assert(html.includes("agent-kazik"));
+  assert(html.includes("配置但未运行 Agent"));
   assert(html.includes("Tom recent task"));
   assert(html.includes("420"));
   assert(html.includes("0.0450"));
@@ -306,6 +317,7 @@ test("multi-instance routes render overview detail and invalid-instance fallback
     assert(detailHtml.includes("最近日志"));
     assert(detailHtml.includes("最近任务"));
     assert(detailHtml.includes("数据来源"));
+    assert(detailHtml.includes("实例配置优先"));
     assert(detailHtml.includes("gateway 连接状态 + 会话状态推导"));
     assert(detailHtml.includes("会话、任务负责人、审批和预算范围合并推导"));
     assert(detailHtml.includes("session status token 字段"));

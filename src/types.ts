@@ -507,6 +507,20 @@ export interface BudgetSummary {
   evaluations: BudgetEvaluation[];
 }
 
+export type AgentRosterStatus = "connected" | "partial" | "not_connected";
+
+export interface AgentRosterEntry {
+  agentId: string;
+  displayName: string;
+}
+
+export interface AgentRosterSnapshot {
+  status: AgentRosterStatus;
+  sourcePath: string;
+  detail: string;
+  entries: AgentRosterEntry[];
+}
+
 export interface BudgetPolicyConfig {
   defaults: BudgetThresholds;
   agent: Record<string, BudgetThresholds>;
@@ -524,6 +538,7 @@ export interface ReadModelSnapshot {
   tasks: TaskStoreSnapshot;
   tasksSummary: TasksSummary;
   budgetSummary: BudgetSummary;
+  agentRoster?: AgentRosterSnapshot;
   generatedAt: string;
 }
 

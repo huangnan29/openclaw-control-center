@@ -6014,6 +6014,8 @@ interface MultiInstanceAgentRow {
   instanceId: string;
   instanceName: string;
   agentId: string;
+  displayName: string;
+  fromConfig: boolean;
   sessions: number;
   running: number;
   blocked: number;
@@ -6047,6 +6049,10 @@ interface MultiInstanceLogRow {
 
 function collectAgentIdsForInstance(item: InstanceSnapshot): Set<string> {
   const ids = new Set<string>();
+  for (const entry of item.snapshot.agentRoster?.entries ?? []) {
+    const id = normalizeAgentId(entry.agentId);
+    if (id) ids.add(id);
+  }
   for (const session of item.snapshot.sessions) {
     const id = normalizeAgentId(session.agentId);
     if (id) ids.add(id);
@@ -6080,14 +6086,20 @@ function resolveSessionAgentId(session: ReadModelSnapshot["sessions"][number]): 
 function buildMultiInstanceAgentRows(items: InstanceSnapshot[]): MultiInstanceAgentRow[] {
   const rows = new Map<string, MultiInstanceAgentRow>();
 
-  const ensureRow = (item: InstanceSnapshot, agentId: string): MultiInstanceAgentRow => {
+  const ensureRow = (item: InstanceSnapshot, agentId: string, displayName?: string, fromConfig = false): MultiInstanceAgentRow => {
     const key = `${item.instance.id}:${agentId}`;
     const existing = rows.get(key);
-    if (existing) return existing;
+    if (existing) {
+      if (displayName && existing.displayName === existing.agentId) existing.displayName = displayName;
+      if (fromConfig) existing.fromConfig = true;
+      return existing;
+    }
     const next: MultiInstanceAgentRow = {
       instanceId: item.instance.id,
       instanceName: item.instance.name,
       agentId,
+      displayName: displayName || agentId,
+      fromConfig,
       sessions: 0,
       running: 0,
       blocked: 0,
@@ -6104,6 +6116,10 @@ function buildMultiInstanceAgentRows(items: InstanceSnapshot[]): MultiInstanceAg
 
   for (const item of items) {
     const statusBySession = new Map(item.snapshot.statuses.map((status) => [status.sessionKey, status]));
+    for (const entry of item.snapshot.agentRoster?.entries ?? []) {
+      const agentId = normalizeAgentId(entry.agentId);
+      if (agentId) ensureRow(item, agentId, entry.displayName, true);
+    }
     for (const agentId of collectAgentIdsForInstance(item)) ensureRow(item, agentId);
 
     for (const session of item.snapshot.sessions) {
@@ -6348,10 +6364,11 @@ function renderMultiInstanceAgentRosterPanel(items: InstanceSnapshot[], language
         row.errors > 0 ? badge("error", t("Error", "错误"))
         : row.blocked > 0 ? badge("partial", t("Blocked", "阻塞"))
         : row.running > 0 ? badge("running", t("Running", "运行中"))
+        : row.fromConfig ? badge("connected", t("Configured", "配置"))
         : badge("connected", t("Visible", "可见"));
       return `<tr>
         <td>${escapeHtml(row.instanceName)}</td>
-        <td><code>${escapeHtml(row.agentId)}</code></td>
+        <td><strong>${escapeHtml(row.displayName)}</strong><div class="meta"><code>${escapeHtml(row.agentId)}</code>${row.fromConfig ? ` · ${escapeHtml(t("Configured", "配置"))}` : ` · ${escapeHtml(t("Derived", "推导"))}`}</div></td>
         <td>${state}</td>
         <td>${row.sessions}</td>
         <td>${row.tasks}</td>
@@ -6365,9 +6382,9 @@ function renderMultiInstanceAgentRosterPanel(items: InstanceSnapshot[], language
   return `<section class="panel">
     <div class="panel-head">
       <h2>${escapeHtml(title ?? t("Agent roster", "Agent 名录"))}</h2>
-      <div class="meta">${escapeHtml(t("Merged from sessions, task owners, approvals, and agent budget scopes.", "由会话、任务负责人、审批和 Agent 预算范围合并。"))}</div>
+      <div class="meta">${escapeHtml(t("Configured agents first; derived signals fill the gaps.", "实例配置优先，推导信号只做补充。"))}</div>
     </div>
-    ${renderDataSourceNote(language, t("Merged from sessions, task owners, approvals, and budget scopes.", "会话、任务负责人、审批和预算范围合并推导"))}
+    ${renderDataSourceNote(language, t("Instance config first; sessions, task owners, approvals, and budget scopes are derived supplements.", "实例配置优先；会话、任务负责人、审批和预算范围合并推导作为补充"))}
     ${rows ? `<div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Instance", "实例"))}</th><th>Agent</th><th>${escapeHtml(t("State", "状态"))}</th><th>${escapeHtml(t("Sessions", "会话"))}</th><th>${escapeHtml(t("Tasks", "任务"))}</th><th>${escapeHtml(t("Pending", "待审"))}</th><th>${escapeHtml(t("Usage", "用量"))}</th><th>Cost</th><th>${escapeHtml(t("Latest", "最近"))}</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-state">${escapeHtml(t("No agents are visible yet.", "暂未看到 Agent。"))}</div>`}
   </section>`;
 }

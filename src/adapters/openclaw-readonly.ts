@@ -18,6 +18,8 @@ import { loadProjectStore } from "../runtime/project-store";
 import { computeProjectSummaries } from "../runtime/project-summary";
 import { loadTaskStore } from "../runtime/task-store";
 import { computeTasksSummary } from "../runtime/task-summary";
+import { loadBestEffortAgentRoster } from "../runtime/agent-roster";
+import type { OpenClawInstanceConfig } from "../types";
 
 /**
  * Official-first adapter (read path only).
@@ -36,7 +38,10 @@ export class OpenClawReadonlyAdapter {
   /** Session keys that were in an active state during the previous snapshot. */
   private previousActiveKeys = new Set<string>();
 
-  constructor(private readonly client: ToolClient) {}
+  constructor(
+    private readonly client: ToolClient,
+    private readonly instance?: OpenClawInstanceConfig,
+  ) {}
 
   async listSessions(): Promise<SessionSummary[]> {
     const raw = await this.client.sessionsList();
@@ -104,7 +109,14 @@ export class OpenClawReadonlyAdapter {
     const statuses = Array.from(this.cachedStatuses.values());
     const cronJobs = await this.listCronJobs();
     const approvals = await this.listApprovals();
-    const [projects, tasks] = await Promise.all([loadProjectStore(), loadTaskStore()]);
+    const [projects, tasks, agentRoster] = await Promise.all([
+      loadProjectStore(),
+      loadTaskStore(),
+      loadBestEffortAgentRoster({
+        openclawHome: this.instance?.openclawHome,
+        configPath: this.instance?.openclawConfigPath,
+      }),
+    ]);
     const budgetPolicy = await loadBudgetPolicy();
     const tasksSummary = computeTasksSummary(tasks, projects.projects.length);
     const projectSummaries = computeProjectSummaries(projects, tasks);
@@ -127,6 +139,7 @@ export class OpenClawReadonlyAdapter {
       tasks,
       tasksSummary,
       budgetSummary,
+      agentRoster,
       generatedAt: new Date().toISOString(),
     };
   }
