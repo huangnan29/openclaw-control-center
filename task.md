@@ -696,6 +696,13 @@ Tom 单 Oracle 上线下一步：
 - 已验证 `npm test -- test/final-go-live-runner.test.ts test/final-go-live-status.test.ts test/live-healthcheck-rollout-runner.test.ts test/go-live-gate.test.ts test/oss-readiness.test.ts`。
 - 已验证 `npm run build`。
 - 已验证 `git diff --check`。
+- 部署后真实复核发现 Tom 总闸门会同时输出 `live-healthcheck-rollout-runner.sh prepare` 与 approval 命令；已修正 final runner 语义：只要仍存在 `prepare` 下一步，就必须先执行 Tom runner prepare，不能因为同一列表里出现 approval 命令而提前幂等返回。
+- 已新增测试覆盖“prepare 与 approval 同时出现时仍先执行 prepare”，验证会 SSH 调用 Tom `live-healthcheck-rollout-runner.sh prepare`，且不会调用 `run-approved`。
+- 已重新验证 `bash -n ops/local/final-go-live-runner.sh`。
+- 已重新验证 `npm test -- test/final-go-live-runner.test.ts`。
+- 已重新验证 `npm test -- test/final-go-live-runner.test.ts test/final-go-live-status.test.ts test/live-healthcheck-rollout-runner.test.ts test/go-live-gate.test.ts test/oss-readiness.test.ts`。
+- 已重新验证 `npm run build`。
+- 已重新验证 `git diff --check`。
 - 本轮仍未执行 approval `approve`、未打开 live gate、未调用 `/api/managed-actions/live`、未修改或重启任何 OpenClaw 实例。
 
 ## 阶段完成后的下一步

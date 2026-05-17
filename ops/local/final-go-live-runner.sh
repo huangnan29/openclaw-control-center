@@ -288,7 +288,8 @@ function prepare() {
     };
   }
 
-  if (hasCommand(before.report, "live-healthcheck-approval.sh approve")) {
+  const hasPrepareStep = hasCommand(before.report, "live-healthcheck-rollout-runner.sh prepare");
+  if (!hasPrepareStep && hasCommand(before.report, "live-healthcheck-approval.sh approve")) {
     return {
       schemaVersion: 1,
       status: "prepared_waiting_human_approval",
@@ -310,7 +311,7 @@ function prepare() {
     };
   }
 
-  if (hasCommand(before.report, "final-go-live-runner.sh run-approved") || hasCommand(before.report, "live-healthcheck-rollout-runner.sh run-approved")) {
+  if (!hasPrepareStep && (hasCommand(before.report, "final-go-live-runner.sh run-approved") || hasCommand(before.report, "live-healthcheck-rollout-runner.sh run-approved"))) {
     return {
       schemaVersion: 1,
       status: "prepared_approved_ready_for_live_window",
@@ -332,7 +333,7 @@ function prepare() {
     };
   }
 
-  if (!hasCommand(before.report, "live-healthcheck-rollout-runner.sh prepare")) {
+  if (!hasPrepareStep) {
     return {
       schemaVersion: 1,
       status: "blocked_no_prepare_step",

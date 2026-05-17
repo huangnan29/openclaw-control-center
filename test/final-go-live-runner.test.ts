@@ -13,7 +13,14 @@ async function writeExecutable(file: string, content: string): Promise<void> {
   await chmod(file, 0o755);
 }
 
-async function writeHarness(dir: string, options: { hasPrepareStep?: boolean; tomRunStatus?: "blocked_not_approved" | "completed_live_healthcheck" } = {}) {
+async function writeHarness(
+  dir: string,
+  options: {
+    hasPrepareStep?: boolean;
+    includeApprovalWithPrepare?: boolean;
+    tomRunStatus?: "blocked_not_approved" | "completed_live_healthcheck";
+  } = {},
+) {
   const binDir = join(dir, "bin");
   const stateFile = join(dir, "state.txt");
   const statusScript = join(binDir, "final-go-live-status.sh");
@@ -22,6 +29,7 @@ async function writeHarness(dir: string, options: { hasPrepareStep?: boolean; to
   const discoveryConfig = join(dir, "discover-remote-oracle.json");
   const key = join(dir, "tom.key");
   const hasPrepareStep = options.hasPrepareStep !== false;
+  const includeApprovalWithPrepare = options.includeApprovalWithPrepare === true;
   const tomRunStatus = options.tomRunStatus || "blocked_not_approved";
 
   await mkdir(binDir, { recursive: true });
@@ -57,7 +65,11 @@ if [ "$prepared" = "true" ]; then
   next='["CONFIRM_APPROVAL_RECORD=I_APPROVE_LIVE_HEALTHCHECK_RECORD APPROVED_BY=Anan repo/ops/tom-readonly/live-healthcheck-approval.sh approve runtime/live-healthcheck-approval.json"]'
 else
   if [ "${hasPrepareStep ? "1" : "0"}" = "1" ]; then
-    next='["repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh prepare"]'
+    if [ "${includeApprovalWithPrepare ? "1" : "0"}" = "1" ]; then
+      next='["repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh prepare","CONFIRM_APPROVAL_RECORD=I_APPROVE_LIVE_HEALTHCHECK_RECORD APPROVED_BY=Anan repo/ops/tom-readonly/live-healthcheck-approval.sh approve runtime/live-healthcheck-approval.json"]'
+    else
+      next='["repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh prepare"]'
+    fi
   else
     next='["repo/ops/tom-readonly/managed-action-dry-run-gate.sh status"]'
   fi
@@ -211,6 +223,25 @@ test("final go-live runner prepare 自动推进到人工批准前", async () => 
     assert.equal(report.safety.callsManagedActionsLiveApi, false);
     assert(report.nextCommands.some((command: string) => command.includes("live-healthcheck-approval.sh approve")));
     assert.equal(report.nextCommands.some((command: string) => command.includes("live-healthcheck-rollout-runner.sh prepare")), false);
+    assert.match(sshLog, /live-healthcheck-rollout-runner\.sh prepare/);
+    assert.doesNotMatch(sshLog, /run-approved/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("final go-live runner prepare 同时看到 prepare 和 approval 时仍先执行 prepare", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-final-go-live-runner-prepare-first-"));
+  try {
+    const harness = await writeHarness(dir, { includeApprovalWithPrepare: true });
+    const { exitCode, report } = runRunner(harness, "prepare");
+    const sshLog = await readFile(harness.sshCalls, "utf8");
+
+    assert.equal(exitCode, 0);
+    assert.equal(report.status, "prepared_waiting_human_approval");
+    assert.equal(report.safety.writesTomRuntime, true);
+    assert.equal(report.safety.opensLiveGate, false);
+    assert.equal(report.safety.callsManagedActionsLiveApi, false);
     assert.match(sshLog, /live-healthcheck-rollout-runner\.sh prepare/);
     assert.doesNotMatch(sshLog, /run-approved/);
   } finally {
