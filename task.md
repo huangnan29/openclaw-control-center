@@ -872,3 +872,24 @@ Tom 单 Oracle 上线下一步：
 ## 阶段完成后的下一步
 
 下一步让 Anan 从 Discord 发一条同类测试指令，验证“Discord/OpenClaw 消息 → Tom inbox → control-center dry-run 审计”的真实链路。建议指令为：“控制中心 dry-run：对 tom 运行 zhihu-human-ops-writing dry-run”。Tom 应只回报 inbox 文件路径；随后在 host 侧运行 `managed-action-inbox-runner.sh status/plan-next/run-next` 完成 dry-run 审计。仍不得执行 approval `approve`、不得打开 live gate、不得触发真实 skill。
+
+## 本轮继续（最终上线 runner prepare）
+
+- 已核对本地仓库：`multi-instance-readonly-control-center` 与 origin 同步，工作树干净。
+- 已核对 Tom repo：运行提交 `4fc0a4a`，工作树干净。
+- 已检查标准 inbox：`MANAGED_ACTION_INBOX_SOURCE=control-center-container`、`MANAGED_ACTION_INBOX_DIR=/instances/tom/workspace/control-center-commands/inbox` 返回 `inbox_empty`、`candidateCount=1`、`pendingCount=0`，说明还没有新的 Discord 真实请求。
+- 已执行本机总状态入口 `ops/local/final-go-live-status.sh status`，返回 `ready_for_existing_instance_healthcheck`；当前拓扑为 `local-only`，第二台 Oracle host/key 被跳过，跨服务器接入不是当前上线阻塞。
+- 已执行本机总检查入口 `ops/local/final-go-live-status.sh check`，现有 5 个 OpenClaw gateway 端口、总览页、实例详情页、只读写接口闸门、容器安全边界和 collector 快照均通过；状态阻塞在 `blocked_managed_actions`，原因是 approval 仍为 `needs_manual_approval`，live gate 未打开。
+- 已执行 `ops/local/final-go-live-runner.sh prepare`，返回 `prepared_waiting_human_approval`。
+- `prepare` 的安全字段显示：`writesTomRuntime=true`、`writesControlCenterRuntimeOnly=true`、`approvesLiveHealthcheck=false`、`opensLiveGate=false`、`callsManagedActionsLiveApi=false`、`writesOpenClawInstanceDirs=false`、`restartsOpenClawInstances=false`。
+- `prepare` 后再次自动执行最终 check，现有实例健康仍通过，collector 快照正常，仍阻塞在人工 approval，不进入 live。
+- 已验证 Tom `live-healthcheck-readiness.sh status` 返回 `waiting_human_approval`。
+- 已验证 Tom `live-healthcheck-approval.sh status runtime/live-healthcheck-approval.json` 返回 `needs_manual_approval`，`approved=false`，`approvedBy` 和 `approvedAt` 仍为空，所有人工 checklist 仍未勾选。
+- 已验证最新证据包 `runtime/live-healthcheck-approval-packets/live-healthcheck-approval-packet-20260517T164512+0000.json`，`live-healthcheck-approval-packet.sh check` 返回 `ready`，commit 与当前 `4fc0a4a` 一致，`issues=[]`。
+- 证据包安全字段显示：`callsManagedActionsLiveApi=false`、`writesOpenClawInstanceDirs=false`、`restartsOpenClawInstances=false`、`bypassesApproval=false`。
+- 已再次验证 Tom `healthcheck.sh` 通过，当前实例数量为 5。
+- 本轮仍未执行 approval `approve`、未打开 live gate、未调用 managed action live API、未修改 `openclaw.json`、未重启任何 OpenClaw 实例。
+
+## 阶段完成后的下一步
+
+当前已经停在人工批准前。下一步有两个可选路径：优先让 Anan 从 Discord 发“控制中心 dry-run：对 tom 运行 zhihu-human-ops-writing dry-run”，完成真实 Discord/OpenClaw inbox smoke；如果要继续 live healthcheck 演练，则必须由 Anan 审查证据包后显式运行 `CONFIRM_APPROVAL_RECORD=I_APPROVE_LIVE_HEALTHCHECK_RECORD APPROVED_BY=Anan repo/ops/tom-readonly/live-healthcheck-approval.sh approve runtime/live-healthcheck-approval.json`，之后才允许执行一次性 `run-approved`。仍不得绕过人工 approval。
