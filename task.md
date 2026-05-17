@@ -150,6 +150,14 @@ Tom 单 Oracle 上线下一步：
 
 ## 最近完成
 
+- 已新增并部署 `ops/tom-readonly/install-managed-action-inbox-cron.sh`，作为 Tom 上自动消费 OpenClaw workspace inbox 的 dry-run cron 安装器。
+- 本地已验证 `bash -n ops/tom-readonly/install-managed-action-inbox-cron.sh`。
+- 本地已验证 `npm test -- test/managed-action-inbox-cron.test.ts test/managed-action-inbox-runner.test.ts test/managed-action-text-bridge.test.ts test/managed-action-command-runner.test.ts test/managed-actions-dry-run.test.ts test/managed-action-live-readiness.test.ts test/managed-action-live-gate.test.ts test/oss-readiness.test.ts test/readonly-multi-instance-safety.test.ts`，39/39 通过。
+- 本地已验证 `npm run build`。
+- 已推送提交 `3d49deda3e0c6626638a3e7499ce57ced12ba59d` 并同步到 Tom `/srv/openclaw-control-center-readonly/repo`。
+- Tom `update.sh` 已完成，只读 healthcheck 通过：5 个实例快照正常，写接口继续被只读闸门拦截。
+- Tom 已执行 `repo/ops/tom-readonly/install-managed-action-inbox-cron.sh status`，当前状态为 `inbox_cron_not_installed`；cron 尚未安装。
+- Tom 已执行 `repo/ops/tom-readonly/install-managed-action-inbox-cron.sh plan`，状态为 `inbox_cron_plan_ready`；计划只安装 `managed-action-inbox-runner.sh run-pending` dry-run 受控块，不调用 live API、不修改实例目录、不重启实例。
 - 已为 `ops/local/remote-oracle-intake.sh` 新增 `doctor` 模式。
 - `remote-oracle-intake.sh doctor` 只读取本机 SSH config、host hint 和 key 文件元数据；如果显式提供 `REMOTE_ORACLE_HOST/REMOTE_ORACLE_KEY_PATH`，只离线渲染配置摘要，不写文件、不联网、不连接 Tom、不连接第二台 Oracle。
 - `doctor` 会输出 `needs_remote_host`、`needs_remote_key`、`candidates_found` 或 `ready_for_apply`，并给出下一步 `plan/apply/run` 命令。
