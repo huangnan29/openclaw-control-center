@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-只读 healthcheck live approval 准备收口：已新增 approval `approve` 辅助命令，用环境变量显式记录人工批准，避免手工编辑 JSON 出错；Tom 已部署但仍保持 `needs_manual_approval`。
+只读 healthcheck live approval 准备收口：已新增 approval `approve/consume` 生命周期，用环境变量显式记录人工批准，并在 live healthcheck 调用成功后自动标记为已使用，避免同一批准记录被重复使用；Tom 已部署但仍保持 `needs_manual_approval`。
 
 ## 本轮不做
 
@@ -29,12 +29,24 @@
 - 当前 Tom 已具备 `approve` 命令，但尚未执行批准命令。
 - 脚本退出前必须恢复只读状态，并重新通过 `healthcheck.sh`。
 - 脚本会自动生成 before/after 实例影响快照并比较。
-- 脚本成功后会自动生成 live healthcheck 演练报告，汇总 approval、dry-run 审计、live result 审计和影响快照。
+- live 调用成功后会自动将 approval 标记为 `consumed=true`，再次演练必须重新 approve。
+- 脚本成功后会自动生成 live healthcheck 演练报告，汇总 approval、dry-run 审计、live result 审计和影响快照；报告要求 approval 已批准且已使用。
 - 未获得人工批准前，不执行 `/api/managed-actions/live`。
 
 ## 最近完成
 
 - 已新增长期推进计划：`implementation_plan.md`。
+- 已新增 `live-healthcheck-approval.sh consume`，让批准记录在 live healthcheck 调用成功后变为一次性已使用状态，后续 `check` 会要求重新 approve。
+- 已让 `live-healthcheck-window.sh run` 在 smoke 成功后自动调用 `consume`，再恢复只读并生成影响快照和报告。
+- 已让演练报告要求 `approval.consumed === true`，确保报告证明批准记录不会被复用。
+- 已验证 approval 本地临时目录生命周期：未批准时 `check` 失败，approve 后 `check` 通过，consume 后 `status=consumed` 且 `check` 再次失败。
+- 已验证 `bash -n ops/tom-readonly/live-healthcheck-approval.sh`、`live-healthcheck-window.sh`、`live-healthcheck-report.sh`。
+- 已验证 `npm test -- test/oss-readiness.test.ts test/managed-actions-dry-run.test.ts test/managed-action-live-gate.test.ts test/managed-action-live-audit.test.ts`。
+- 已验证 `npm run build`。
+- 已提交并推送 `6644cfb ops: consume live healthcheck approvals after use`。
+- 已部署到 Tom，并验证运行提交 `6644cfb`。
+- 已在 Tom 临时目录验证 approval 生命周期，未改真实 runtime approval。
+- 已验证 Tom 真实 approval 仍为 `needs_manual_approval`、`consumed=false`，`READONLY_MODE=true`，live gate/executor 未启用，`readiness.status=blocked`，未调用 live API。
 - 已新增 `live-healthcheck-approval.sh approve`，要求 `CONFIRM_APPROVAL_RECORD=I_APPROVE_LIVE_HEALTHCHECK_RECORD` 和 `APPROVED_BY=<批准人>`，只写 approval 文件，不启用 live gate。
 - 已验证 approve 辅助命令本地临时目录流程：缺少确认短语会失败，确认短语和批准人齐全后写入 `approved=true` 并通过 `status/check`。
 - 已验证 `bash -n ops/tom-readonly/live-healthcheck-approval.sh`。
