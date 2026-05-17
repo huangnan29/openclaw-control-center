@@ -24,6 +24,8 @@
   `ops/local/discover-remote-oracle-credentials.sh scan ops/local/discover-remote-oracle-credentials.example.json`
 - 如果 scan 找到候选 host/key，可以显式确认后做只读 SSH 探测：
   `CONFIRM_REMOTE_ORACLE_DISCOVERY=I_UNDERSTAND_THIS_ONLY_PROBES_SSH_READONLY ops/local/discover-remote-oracle-credentials.sh probe ops/local/discover-remote-oracle-credentials.example.json`
+- 找到可达候选后，直接生成本机 push 配置：
+  `REMOTE_ORACLE_HOST=<可达候选 host> REMOTE_ORACLE_KEY_PATH=<可达候选 keyPath> ops/local/discover-remote-oracle-credentials.sh render-push-config ops/local/discover-remote-oracle-credentials.example.json > runtime/push-remote-collector-credentials.json`
 - 在 Tom 先复制 `repo/ops/tom-readonly/remote-collector-onboarding.example.json` 到 `runtime/remote-collector-onboarding.json`，填入第二台 Oracle 的 SSH 信息和实例路径。
 - 任何阶段不确定下一步时，先运行：
   `repo/ops/tom-readonly/remote-collector-rollout.sh status runtime/remote-onboarding/<serverId>`
@@ -95,10 +97,11 @@
 - 已新增 `ops/local/discover-remote-oracle-credentials.sh` 和 `discover-remote-oracle-credentials.example.json`，用于本机只读发现第二台 Oracle 候选 SSH host/key。
 - `discover-remote-oracle-credentials.sh scan` 只读取本机 SSH config 和候选 key 文件元数据，不联网、不写文件、不输出私钥内容。
 - `discover-remote-oracle-credentials.sh probe` 必须设置 `CONFIRM_REMOTE_ORACLE_DISCOVERY=I_UNDERSTAND_THIS_ONLY_PROBES_SSH_READONLY`，只执行 `id -un`、`uname -n`、`uname -s` 这类只读 SSH 探测，不写远端文件、不写 Tom runtime。
-- 已新增 `test/discover-remote-oracle-credentials.test.ts`，覆盖 scan 不泄露 key 内容、probe 必须确认、probe 使用只读 SSH 参数。
+- `discover-remote-oracle-credentials.sh render-push-config` 只根据显式 `REMOTE_ORACLE_HOST` 和 `REMOTE_ORACLE_KEY_PATH` 输出本机 push 配置 JSON，不联网、不写文件。
+- 已增强 `test/discover-remote-oracle-credentials.test.ts`，覆盖 scan 不泄露 key 内容、host hint 文件抽取、probe 必须确认、probe 使用只读 SSH 参数、render-push-config 不泄露 key 内容。
 - 已验证 `bash -n ops/local/discover-remote-oracle-credentials.sh`。
-- 已验证 `npm test -- test/discover-remote-oracle-credentials.test.ts test/push-remote-collector-credentials.test.ts test/oss-readiness.test.ts`，13/13 通过。
-- 已验证 `npm test -- test/discover-remote-oracle-credentials.test.ts test/go-live-gate.test.ts test/remote-collector-rollout-runner.test.ts test/push-remote-collector-credentials.test.ts test/remote-collector-credentials.test.ts test/remote-collector-rollout.test.ts test/remote-collector-preflight.test.ts test/remote-collector-onboarding.test.ts test/remote-collector-pull.test.ts test/register-remote-collector.test.ts test/collector-node-bootstrap.test.ts test/oss-readiness.test.ts`，38/38 通过。
+- 已验证 `npm test -- test/discover-remote-oracle-credentials.test.ts test/push-remote-collector-credentials.test.ts test/oss-readiness.test.ts`，15/15 通过。
+- 已验证 `npm test -- test/discover-remote-oracle-credentials.test.ts test/go-live-gate.test.ts test/remote-collector-rollout-runner.test.ts test/push-remote-collector-credentials.test.ts test/remote-collector-credentials.test.ts test/remote-collector-rollout.test.ts test/remote-collector-preflight.test.ts test/remote-collector-onboarding.test.ts test/remote-collector-pull.test.ts test/register-remote-collector.test.ts test/collector-node-bootstrap.test.ts test/oss-readiness.test.ts`，40/40 通过。
 - 已验证 `npm run build`。
 - 本机执行 `ops/local/discover-remote-oracle-credentials.sh scan ops/local/discover-remote-oracle-credentials.example.json`，当前发现 3 个候选 key，但没有发现 Tom 以外的候选 host，状态为 `needs_remote_host`。
 - 已新增 `ops/tom-readonly/go-live-gate.sh`，作为最终上线总闸门。

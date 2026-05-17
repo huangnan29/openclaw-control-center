@@ -23,11 +23,13 @@ usage() {
 用法：
   discover-remote-oracle-credentials.sh scan [config.json]
   discover-remote-oracle-credentials.sh probe [config.json]
+  discover-remote-oracle-credentials.sh render-push-config [config.json]
 
 说明：
   scan 只读取本机 SSH config 和候选 key 文件元数据，不联网、不写文件、不输出私钥内容。
   probe 会对候选 host/key 组合执行 SSH 只读探测命令：
     id -un / uname -n / uname -s
+  render-push-config 只根据 REMOTE_ORACLE_HOST 和 REMOTE_ORACLE_KEY_PATH 输出 push 配置 JSON，不写文件、不联网。
 
 安全确认：
   probe 必须设置：
@@ -53,6 +55,10 @@ const { spawnSync } = require("node:child_process");
 const mode = process.env.MODE || "scan";
 const configFile = path.resolve(process.env.CONFIG_FILE || "ops/local/discover-remote-oracle-credentials.example.json");
 const confirm = process.env.CONFIRM_REMOTE_ORACLE_DISCOVERY || "";
+const selectedHostFromEnv = readString(process.env.REMOTE_ORACLE_HOST);
+const selectedKeyFromEnv = readString(process.env.REMOTE_ORACLE_KEY_PATH);
+const selectedUserFromEnv = readString(process.env.REMOTE_ORACLE_USER);
+const selectedPortFromEnv = readString(process.env.REMOTE_ORACLE_PORT);
 
 function fail(message) {
   console.error(`[失败] ${message}`);
@@ -78,6 +84,11 @@ function readInt(value, fallback, label) {
   return parsed;
 }
 
+function readOptionalInt(value, label) {
+  if (value === undefined || value === "") return undefined;
+  return readInt(value, 0, label);
+}
+
 function readJsonFile(file) {
   try {
     return JSON.parse(fs.readFileSync(file, "utf8"));
@@ -100,6 +111,10 @@ function normalizeConfig(raw) {
   if (config.schemaVersion !== 1) throw new Error("schemaVersion 必须为 1");
   const tom = asRecord(config.tom) || {};
   const scan = asRecord(config.scan) || {};
+  const server = asRecord(config.server) || {};
+  const remote = asRecord(config.remote) || {};
+  const collectorNode = asRecord(config.collectorNode) || {};
+  const render = asRecord(config.render) || {};
   const excludeHosts = new Set([
     "127.0.0.1",
     "localhost",
@@ -111,18 +126,57 @@ function normalizeConfig(raw) {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+  const envHintFiles = (process.env.REMOTE_ORACLE_HOST_HINT_FILES || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
   const hostHints = [
     ...readArray(scan.hostHints).map(readString).filter(Boolean),
     ...envHosts,
   ];
+  const tomDeployDir = readString(tom.deployDir) || "/srv/openclaw-control-center-readonly";
+  const serverId = readString(server.id) || "remote-oracle";
   return {
     tom: {
       host: readString(tom.host) || "",
       user: readString(tom.user) || "ubuntu",
       port: readInt(tom.port, 22, "tom.port"),
+      sshKey: expandHome(tom.sshKey),
+      deployDir: tomDeployDir,
+      strictHostKeyChecking: readString(tom.strictHostKeyChecking) || "accept-new",
+    },
+    server: {
+      id: serverId,
+      name: readString(server.name) || "Remote Oracle",
+      region: readString(server.region) || "oracle-us",
+      description: readString(server.description) || "第二台 Oracle 只读 collector 节点",
+    },
+    remote: {
+      targetSshKeyPath: readString(remote.targetSshKeyPath) || path.join(tomDeployDir, "runtime", "ssh", `${serverId}-readonly.key`),
+      knownHostsFile: readString(remote.knownHostsFile) || path.join(tomDeployDir, "runtime", "ssh", "known_hosts"),
+      strictHostKeyChecking: readString(remote.strictHostKeyChecking) || "accept-new",
+      connectTimeoutSeconds: readInt(remote.connectTimeoutSeconds, 10, "remote.connectTimeoutSeconds"),
+      deployDir: readString(remote.deployDir) || "/srv/openclaw-collector-node",
+    },
+    collectorNode: {
+      image: readString(collectorNode.image) || "openclaw-control-center:collector-node",
+      bundleBuildContext: collectorNode.bundleBuildContext !== false,
+      collectorContainerName: readString(collectorNode.collectorContainerName) || `openclaw-collector-${serverId}`,
+      cronSchedule: readString(collectorNode.cronSchedule) || "*/2 * * * *",
+    },
+    instances: normalizeInstances(config.instances),
+    render: {
+      host: readString(render.host),
+      user: readString(render.user),
+      port: readOptionalInt(render.port, "render.port"),
+      sourceSshKeyPath: expandHome(render.sourceSshKeyPath),
     },
     scan: {
       sshConfigFiles: readArray(scan.sshConfigFiles).map(expandHome).filter(Boolean),
+      hostHintFiles: [
+        ...readArray(scan.hostHintFiles).map(expandHome).filter(Boolean),
+        ...envHintFiles.map(expandHome).filter(Boolean),
+      ],
       keyGlobs: readArray(scan.keyGlobs).map(expandHome).filter(Boolean),
       excludeHosts,
       hostHints,
@@ -132,6 +186,30 @@ function normalizeConfig(raw) {
       maxProbeCombinations: readInt(scan.maxProbeCombinations, 20, "scan.maxProbeCombinations"),
     },
   };
+}
+
+function normalizeInstances(value) {
+  const entries = Array.isArray(value) && value.length > 0 ? value : [
+    {
+      id: "remote-main",
+      name: "Remote Main",
+      gatewayUrl: "ws://host.docker.internal:18789",
+      configDir: "/srv/openclaw/config",
+      workspaceDir: "/srv/openclaw/workspace",
+    },
+  ];
+  return entries.map((entry, index) => {
+    const item = asRecord(entry);
+    if (!item) throw new Error(`instances[${index}] 必须是 object`);
+    return {
+      id: readString(item.id) || `remote-${index + 1}`,
+      name: readString(item.name) || readString(item.id) || `Remote ${index + 1}`,
+      gatewayUrl: readString(item.gatewayUrl) || "ws://host.docker.internal:18789",
+      configDir: readString(item.configDir) || "/srv/openclaw/config",
+      workspaceDir: readString(item.workspaceDir) || "/srv/openclaw/workspace",
+      ...(readString(item.codexDir) ? { codexDir: readString(item.codexDir) } : {}),
+    };
+  });
 }
 
 function parseSshConfigFile(file) {
@@ -204,6 +282,7 @@ function keyMetadata(file, sources) {
 
 function discover(config) {
   const sshEntries = config.scan.sshConfigFiles.flatMap(parseSshConfigFile);
+  const fileHostHints = config.scan.hostHintFiles.flatMap(readHostHintsFromFile);
   const hostMap = new Map();
   for (const hint of config.scan.hostHints) {
     addHost(hostMap, {
@@ -211,6 +290,16 @@ function discover(config) {
       user: config.scan.defaultUser,
       port: config.scan.defaultPort,
       source: "hostHint",
+      identityFiles: [],
+      aliases: [],
+    }, config);
+  }
+  for (const hint of fileHostHints) {
+    addHost(hostMap, {
+      host: hint.host,
+      user: config.scan.defaultUser,
+      port: config.scan.defaultPort,
+      source: `hostHintFile:${hint.file}`,
       identityFiles: [],
       aliases: [],
     }, config);
@@ -248,6 +337,52 @@ function discover(config) {
     .sort((a, b) => a.path.localeCompare(b.path));
   const probePlan = buildProbePlan(hosts, keys, config.scan.maxProbeCombinations);
   return { sshEntries, hosts, keys, probePlan };
+}
+
+function readHostHintsFromFile(filePattern) {
+  const files = expandSimpleGlob(filePattern);
+  const hints = [];
+  for (const file of files) {
+    try {
+      const stat = fs.statSync(file);
+      if (!stat.isFile() || stat.size > 2 * 1024 * 1024) continue;
+      const text = fs.readFileSync(file, "utf8");
+      const matches = text.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g) || [];
+      for (const host of matches) {
+        if (isPublicIpv4(host)) hints.push({ host, file });
+      }
+    } catch {
+      // 忽略无法读取的候选文件，scan 保持只读且不中断。
+    }
+  }
+  return uniqueBy(hints, (item) => `${item.host}|${item.file}`);
+}
+
+function isPublicIpv4(value) {
+  const parts = value.split(".").map((item) => Number.parseInt(item, 10));
+  if (parts.length !== 4 || parts.some((part) => !Number.isFinite(part) || part < 0 || part > 255)) return false;
+  const [a, b] = parts;
+  if (a === 0 || a === 10 || a === 127 || a >= 224) return false;
+  if (a === 169 && b === 254) return false;
+  if (a === 172 && b >= 16 && b <= 31) return false;
+  if (a === 192 && b === 168) return false;
+  if (a === 100 && b >= 64 && b <= 127) return false;
+  if (a === 192 && b === 0 && parts[2] === 2) return false;
+  if (a === 198 && b === 51 && parts[2] === 100) return false;
+  if (a === 203 && b === 0 && parts[2] === 113) return false;
+  return true;
+}
+
+function uniqueBy(items, keyFn) {
+  const seen = new Set();
+  const result = [];
+  for (const item of items) {
+    const key = keyFn(item);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(item);
+  }
+  return result;
 }
 
 function addHost(hostMap, raw, config) {
@@ -329,16 +464,71 @@ function probeCandidates(plan, timeoutSeconds) {
 }
 
 function nextCommands(discovery, mode) {
-  const commands = [
-    "cp ops/local/push-remote-collector-credentials.example.json runtime/push-remote-collector-credentials.json",
-    "# 将可达候选的 host/user/port/keyPath 填入 runtime/push-remote-collector-credentials.json 的 remote.host、remote.user、remote.port、remote.sourceSshKeyPath",
-    "ops/local/push-remote-collector-credentials.sh plan runtime/push-remote-collector-credentials.json",
-    "CONFIRM_PUSH_REMOTE_COLLECTOR_CREDENTIALS=I_UNDERSTAND_THIS_ONLY_PUSHES_REMOTE_COLLECTOR_CREDENTIALS_TO_TOM_RUNTIME ops/local/push-remote-collector-credentials.sh apply runtime/push-remote-collector-credentials.json",
-  ];
+  const commands = [];
   if (mode === "scan" && discovery.hosts.length > 0 && discovery.keys.length > 0) {
-    commands.unshift("CONFIRM_REMOTE_ORACLE_DISCOVERY=I_UNDERSTAND_THIS_ONLY_PROBES_SSH_READONLY ops/local/discover-remote-oracle-credentials.sh probe ops/local/discover-remote-oracle-credentials.example.json");
+    commands.push("CONFIRM_REMOTE_ORACLE_DISCOVERY=I_UNDERSTAND_THIS_ONLY_PROBES_SSH_READONLY ops/local/discover-remote-oracle-credentials.sh probe ops/local/discover-remote-oracle-credentials.example.json");
+    commands.push("REMOTE_ORACLE_HOST=<可达候选 host> REMOTE_ORACLE_KEY_PATH=<可达候选 keyPath> ops/local/discover-remote-oracle-credentials.sh render-push-config ops/local/discover-remote-oracle-credentials.example.json > runtime/push-remote-collector-credentials.json");
+  } else {
+    commands.push("cp ops/local/push-remote-collector-credentials.example.json runtime/push-remote-collector-credentials.json");
+    commands.push("# 将可达候选的 host/user/port/keyPath 填入 runtime/push-remote-collector-credentials.json 的 remote.host、remote.user、remote.port、remote.sourceSshKeyPath");
   }
+  commands.push("ops/local/push-remote-collector-credentials.sh plan runtime/push-remote-collector-credentials.json");
+  commands.push("CONFIRM_PUSH_REMOTE_COLLECTOR_CREDENTIALS=I_UNDERSTAND_THIS_ONLY_PUSHES_REMOTE_COLLECTOR_CREDENTIALS_TO_TOM_RUNTIME ops/local/push-remote-collector-credentials.sh apply runtime/push-remote-collector-credentials.json");
   return commands;
+}
+
+function selectForRender(config, discovery) {
+  const envHosts = (process.env.REMOTE_ORACLE_HOSTS || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const host = selectedHostFromEnv || config.render.host || (envHosts.length === 1 ? envHosts[0] : undefined);
+  const keyPath = selectedKeyFromEnv || config.render.sourceSshKeyPath;
+  const user = selectedUserFromEnv || config.render.user || config.scan.defaultUser;
+  const port = readOptionalInt(selectedPortFromEnv, "REMOTE_ORACLE_PORT") || config.render.port || config.scan.defaultPort;
+  if (!host) throw new Error("render-push-config 必须通过 REMOTE_ORACLE_HOST 或 render.host 指定 host");
+  if (!keyPath) {
+    if (discovery.keys.length === 1) {
+      return { host, user, port, keyPath: discovery.keys[0].path };
+    }
+    throw new Error("render-push-config 必须通过 REMOTE_ORACLE_KEY_PATH 或 render.sourceSshKeyPath 指定 key；当前候选 key 不唯一");
+  }
+  const resolvedKey = path.resolve(expandHome(keyPath));
+  if (!fs.existsSync(resolvedKey)) throw new Error(`REMOTE_ORACLE_KEY_PATH 不存在：${resolvedKey}`);
+  return { host, user, port, keyPath: resolvedKey };
+}
+
+function buildPushConfig(config, selected) {
+  return {
+    schemaVersion: 1,
+    tom: {
+      host: config.tom.host,
+      user: config.tom.user,
+      port: config.tom.port,
+      ...(config.tom.sshKey ? { sshKey: config.tom.sshKey } : {}),
+      deployDir: config.tom.deployDir,
+      strictHostKeyChecking: config.tom.strictHostKeyChecking,
+    },
+    server: {
+      ...config.server,
+      host: selected.host,
+    },
+    remote: {
+      host: selected.host,
+      user: selected.user,
+      port: selected.port,
+      sourceSshKeyPath: selected.keyPath,
+      targetSshKeyPath: config.remote.targetSshKeyPath,
+      knownHostsFile: config.remote.knownHostsFile,
+      strictHostKeyChecking: config.remote.strictHostKeyChecking,
+      connectTimeoutSeconds: config.remote.connectTimeoutSeconds,
+      deployDir: config.remote.deployDir,
+    },
+    collectorNode: config.collectorNode,
+    instances: config.instances,
+    outputConfigFile: path.join(config.tom.deployDir, "runtime", "remote-collector-onboarding.json"),
+    overwrite: false,
+  };
 }
 
 function statusFor(discovery, probes) {
@@ -368,6 +558,14 @@ if (mode === "probe") {
     fail("必须设置 CONFIRM_REMOTE_ORACLE_DISCOVERY=I_UNDERSTAND_THIS_ONLY_PROBES_SSH_READONLY");
   }
   probes = probeCandidates(discovery.probePlan, config.scan.connectTimeoutSeconds);
+} else if (mode === "render-push-config") {
+  try {
+    const selected = selectForRender(config, discovery);
+    console.log(JSON.stringify(buildPushConfig(config, selected), null, 2));
+    process.exit(0);
+  } catch (error) {
+    fail(formatError(error));
+  }
 } else if (mode !== "scan") {
   fail(`未知模式：${mode}`);
 }
@@ -415,6 +613,9 @@ main() {
     probe)
       require_command ssh
       run_node "probe" "${2:-$CONFIG_FILE}"
+      ;;
+    render-push-config)
+      run_node "render-push-config" "${2:-$CONFIG_FILE}"
       ;;
     -h|--help|help)
       usage

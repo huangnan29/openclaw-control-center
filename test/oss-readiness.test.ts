@@ -172,6 +172,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(doc.includes("remote-collector-onboarding.sh"));
   assert(doc.includes("push-remote-collector-credentials.sh"));
   assert(doc.includes("discover-remote-oracle-credentials.sh"));
+  assert(doc.includes("render-push-config"));
   assert(doc.includes("I_UNDERSTAND_THIS_ONLY_PROBES_SSH_READONLY"));
   assert(doc.includes("I_UNDERSTAND_THIS_ONLY_PUSHES_REMOTE_COLLECTOR_CREDENTIALS_TO_TOM_RUNTIME"));
   assert(doc.includes("remote-collector-credentials.sh"));
@@ -256,6 +257,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   const discoverRemoteOracleCredentialsText = readFileSync(discoverRemoteOracleCredentials, "utf8");
   assert.match(discoverRemoteOracleCredentialsText, /CONFIRM_REMOTE_ORACLE_DISCOVERY/);
   assert.match(discoverRemoteOracleCredentialsText, /I_UNDERSTAND_THIS_ONLY_PROBES_SSH_READONLY/);
+  assert.match(discoverRemoteOracleCredentialsText, /render-push-config/);
   assert.match(discoverRemoteOracleCredentialsText, /outputsPrivateKeyContent: false/);
   assert.match(discoverRemoteOracleCredentialsText, /writesTomRuntime: false/);
   assert.match(discoverRemoteOracleCredentialsText, /writesRemoteFiles: false/);

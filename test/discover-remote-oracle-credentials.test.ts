@@ -65,6 +65,44 @@ Host second-oracle
   return { configFile, keyFile };
 }
 
+async function writeHintFileFixture(dir: string) {
+  const desktopDir = join(dir, "Desktop");
+  await mkdir(desktopDir, { recursive: true });
+  const configFile = join(dir, "discovery-hints.json");
+  const hintFile = join(dir, "hosts.txt");
+  const keyFile = join(desktopDir, "ssh-key-2026-remote.key");
+  await writeFile(hintFile, "tom=146.235.226.66\nremote=129.146.10.20\nsample=203.0.113.88\n", "utf8");
+  await writeFile(keyFile, "-----BEGIN OPENSSH PRIVATE KEY-----\nsecret-hint-key\n-----END OPENSSH PRIVATE KEY-----\n", "utf8");
+  await chmod(keyFile, 0o600);
+  await writeFile(
+    configFile,
+    `${JSON.stringify(
+      {
+        schemaVersion: 1,
+        tom: {
+          host: "146.235.226.66",
+          user: "ubuntu",
+          port: 22,
+          sshKey: keyFile,
+          deployDir: "/srv/openclaw-control-center-readonly",
+        },
+        scan: {
+          sshConfigFiles: [],
+          hostHintFiles: [hintFile],
+          keyGlobs: [join(desktopDir, "ssh-key*.key")],
+          excludeHosts: ["146.235.226.66"],
+          defaultUser: "ubuntu",
+          defaultPort: 22,
+        },
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+  return { configFile, keyFile };
+}
+
 async function writeFakeSsh(dir: string) {
   const fakeBin = join(dir, "bin");
   const argsFile = join(dir, "ssh-args.txt");
@@ -99,6 +137,23 @@ test("remote Oracle discovery scan finds non-Tom host and key without leaking ke
     assert.equal(report.safety.outputsPrivateKeyContent, false);
     assert.doesNotMatch(output, /secret-second-key/);
     assert.doesNotMatch(output, /secret-tom-key/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("remote Oracle discovery scan can extract public hosts from explicit hint files", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-discover-remote-oracle-"));
+  try {
+    const { configFile } = await writeHintFileFixture(dir);
+    const output = execFileSync(SCRIPT, ["scan", configFile], { encoding: "utf8" });
+    const report = JSON.parse(output);
+
+    assert.equal(report.status, "candidates_found");
+    assert.deepEqual(report.hosts.map((item: { host: string }) => item.host), ["129.146.10.20"]);
+    assert.equal(report.hosts[0]?.sources[0]?.startsWith("hostHintFile:"), true);
+    assert.doesNotMatch(output, /secret-hint-key/);
+    assert.doesNotMatch(output, /203\.0\.113\.88/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -142,6 +197,34 @@ test("remote Oracle discovery probe uses readonly ssh options and records reacha
     assert.match(args, /UserKnownHostsFile=\/dev\/null/);
     assert.match(args, /StrictHostKeyChecking=no/);
     assert.match(args, /id -un/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("remote Oracle discovery renders a push config from explicit host and key without writing files", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-discover-remote-oracle-"));
+  try {
+    const { configFile, keyFile } = await writeDiscoveryFixture(dir);
+    const output = execFileSync(SCRIPT, ["render-push-config", configFile], {
+      env: {
+        ...process.env,
+        REMOTE_ORACLE_HOST: "129.146.10.20",
+        REMOTE_ORACLE_KEY_PATH: keyFile,
+        REMOTE_ORACLE_USER: "ubuntu",
+        REMOTE_ORACLE_PORT: "22",
+      },
+      encoding: "utf8",
+    });
+    const rendered = JSON.parse(output);
+
+    assert.equal(rendered.schemaVersion, 1);
+    assert.equal(rendered.server.host, "129.146.10.20");
+    assert.equal(rendered.remote.host, "129.146.10.20");
+    assert.equal(rendered.remote.sourceSshKeyPath, keyFile);
+    assert.equal(rendered.remote.targetSshKeyPath, "/srv/openclaw-control-center-readonly/runtime/ssh/remote-oracle-readonly.key");
+    assert.equal(rendered.outputConfigFile, "/srv/openclaw-control-center-readonly/runtime/remote-collector-onboarding.json");
+    assert.doesNotMatch(output, /secret-second-key/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
