@@ -129,6 +129,40 @@ if printf '%s\\n' "$*" | grep -q 'live-healthcheck-rollout-runner.sh prepare'; t
 JSON
   exit 0
 fi
+if printf '%s\\n' "$*" | grep -q 'live-healthcheck-rollout-runner.sh status'; then
+  if [ -f "${stateFile}" ]; then
+    cat <<'JSON'
+{
+  "schemaVersion": 1,
+  "status": "waiting_human_approval",
+  "nextCommands": [
+    "CONFIRM_APPROVAL_RECORD=I_APPROVE_LIVE_HEALTHCHECK_RECORD APPROVED_BY=Anan repo/ops/tom-readonly/live-healthcheck-approval.sh approve runtime/live-healthcheck-approval.json"
+  ],
+  "safety": {
+    "opensLiveGate": false,
+    "callsManagedActionsLiveApi": false,
+    "writesOpenClawInstanceDirs": false
+  }
+}
+JSON
+    exit 0
+  fi
+  cat <<'JSON'
+{
+  "schemaVersion": 1,
+  "status": "blocked_preconditions",
+  "nextCommands": [
+    "repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh prepare"
+  ],
+  "safety": {
+    "opensLiveGate": false,
+    "callsManagedActionsLiveApi": false,
+    "writesOpenClawInstanceDirs": false
+  }
+}
+JSON
+  exit 0
+fi
 if printf '%s\\n' "$*" | grep -q 'live-healthcheck-rollout-runner.sh run-approved'; then
   if [ "${tomRunStatus}" = "completed_live_healthcheck" ]; then
     cat <<'JSON'

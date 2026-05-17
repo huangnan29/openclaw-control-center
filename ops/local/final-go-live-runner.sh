@@ -347,6 +347,52 @@ function prepare() {
     };
   }
 
+  const tomStatusBefore = runTomRunner("status");
+  const tomReadinessStatus = tomStatusBefore.report?.status || "unknown";
+  if (tomStatusBefore.exitCode === 0 && tomReadinessStatus === "waiting_human_approval") {
+    return {
+      schemaVersion: 1,
+      status: "prepared_waiting_human_approval",
+      mode,
+      topologyMode,
+      generatedAt: new Date().toISOString(),
+      stages: { before, tomStatusBefore },
+      issues: [],
+      nextCommands: Array.isArray(tomStatusBefore.report?.nextCommands) ? tomStatusBefore.report.nextCommands : [],
+      safety: baseSafety({
+        connectsTomSsh: true,
+        writesTomRuntime: false,
+        writesControlCenterRuntimeOnly: false,
+        opensLiveGate: false,
+        callsManagedActionsLiveApi: false,
+        alreadyAtHumanApprovalBoundary: true,
+        observedTomReadinessStatus: tomReadinessStatus,
+      }),
+    };
+  }
+
+  if (tomStatusBefore.exitCode === 0 && tomReadinessStatus === "approved_ready_for_live_window") {
+    return {
+      schemaVersion: 1,
+      status: "prepared_approved_ready_for_live_window",
+      mode,
+      topologyMode,
+      generatedAt: new Date().toISOString(),
+      stages: { before, tomStatusBefore },
+      issues: [],
+      nextCommands: Array.isArray(tomStatusBefore.report?.nextCommands) ? tomStatusBefore.report.nextCommands : [],
+      safety: baseSafety({
+        connectsTomSsh: true,
+        writesTomRuntime: false,
+        writesControlCenterRuntimeOnly: false,
+        opensLiveGate: false,
+        callsManagedActionsLiveApi: false,
+        alreadyApprovedReadyForLiveWindow: true,
+        observedTomReadinessStatus: tomReadinessStatus,
+      }),
+    };
+  }
+
   const tomPrepare = runTomRunner("prepare");
   const after = runFinalStatus("check");
   const tomStatus = tomPrepare.report?.status || "unknown";
@@ -361,7 +407,7 @@ function prepare() {
     mode,
     topologyMode,
     generatedAt: new Date().toISOString(),
-    stages: { before, tomPrepare, after },
+    stages: { before, tomStatusBefore, tomPrepare, after },
     issues: prepared ? [] : [`Tom runner prepare 未完成：${tomStatus}`],
     nextCommands: prepared && tomNextCommands.length > 0 ? tomNextCommands : afterNextCommands,
     safety: baseSafety({

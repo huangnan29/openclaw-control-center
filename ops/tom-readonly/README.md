@@ -131,7 +131,7 @@ COLLECTOR_SNAPSHOT_MAX_AGE_SECONDS=300 ./healthcheck.sh
 BRANCH=multi-instance-readonly-control-center ./update.sh
 ```
 
-`ops/local/final-go-live-runner.sh prepare` 是给 openclaw 调用的本机侧总 runner：它先执行 `final-go-live-status.sh check`，只有当总闸门下一步是 Tom `live-healthcheck-rollout-runner.sh prepare` 时，才 SSH 到 Tom 准备 approval 模板和批准前证据包，然后重新检查最终状态并停在人工批准前。如果已经处在人工批准边界或已批准待执行边界，重复执行 `prepare` 会幂等返回当前边界，不会再次写 Tom runtime。它不会批准 approval、不会打开 live gate、不会调用 managed action live API。`run-approved` 还必须显式设置 `CONFIRM_FINAL_GO_LIVE_RUNNER` 和 `LOCAL_API_TOKEN`，并会继续交给 Tom runner 再校验 approval/readiness。
+`ops/local/final-go-live-runner.sh prepare` 是给 openclaw 调用的本机侧总 runner：它先执行 `final-go-live-status.sh check`，只有当总闸门下一步是 Tom `live-healthcheck-rollout-runner.sh prepare` 时，才 SSH 到 Tom 准备 approval 模板和批准前证据包，然后重新检查最终状态并停在人工批准前。如果总闸门仍提示 `prepare`，本机 runner 会先只读询问 Tom runner 当前 readiness；已经处在人工批准边界或已批准待执行边界时，重复执行 `prepare` 会幂等返回当前边界，不会再次写 Tom runtime。它不会批准 approval、不会打开 live gate、不会调用 managed action live API。`run-approved` 还必须显式设置 `CONFIRM_FINAL_GO_LIVE_RUNNER` 和 `LOCAL_API_TOKEN`，并会继续交给 Tom runner 再校验 approval/readiness。
 
 当前只有一台 Oracle 时，新增实例优先走本机注册入口：
 
