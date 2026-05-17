@@ -27,6 +27,8 @@ export const TASK_ROOM_BRIDGE_TELEGRAM_CHAT_ID = readOptionalStringEnv(
 export const READONLY_MODE = process.env.READONLY_MODE !== "false";
 export const APPROVAL_ACTIONS_ENABLED = process.env.APPROVAL_ACTIONS_ENABLED === "true";
 export const APPROVAL_ACTIONS_DRY_RUN = process.env.APPROVAL_ACTIONS_DRY_RUN !== "false";
+export const MANAGED_ACTIONS_LIVE_ENABLED = process.env.MANAGED_ACTIONS_LIVE_ENABLED === "true";
+export const MANAGED_ACTIONS_LIVE_ALLOWED_ACTIONS = readCsvEnv(process.env.MANAGED_ACTIONS_LIVE_ALLOWED_ACTIONS);
 export const IMPORT_MUTATION_ENABLED = process.env.IMPORT_MUTATION_ENABLED === "true";
 export const IMPORT_MUTATION_DRY_RUN = process.env.IMPORT_MUTATION_DRY_RUN === "true";
 export const LOCAL_TOKEN_AUTH_REQUIRED = process.env.LOCAL_TOKEN_AUTH_REQUIRED !== "false";
@@ -87,6 +89,13 @@ function readStringEnv(input: string | undefined, fallback: string): string {
 function readOptionalStringEnv(input: string | undefined): string | undefined {
   const value = (input ?? "").trim();
   return value === "" ? undefined : value;
+}
+
+function readCsvEnv(input: string | undefined): string[] {
+  return (input ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => value !== "");
 }
 
 function readTimeZoneEnv(input: string | undefined, fallback: string): string {

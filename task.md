@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-受控管理动作审计检索视图：在总览页展示最近的 dry-run 操作申请与审计结果，并提供只读审计 API。
+真实执行白名单闸门设计：新增默认关闭的 live gate API 和配置项，用于未来灰度真实执行前的安全校验；当前不实现执行器。
 
 ## 本轮不做
 
@@ -19,10 +19,9 @@
 
 下一步进入真实执行前的最后安全层设计：
 
-- 设计真实执行白名单，但默认关闭。
-- 每个真实动作必须先经过 dry-run 申请。
-- 每个真实动作必须二次确认，并写入审计。
-- 不增加真实执行按钮。
+- 部署 Tom 并验证 `/api/managed-actions/live` 默认返回阻断。
+- 验证 Tom `MANAGED_ACTIONS_LIVE_ENABLED` 未开启。
+- 验证页面不出现真实执行按钮。
 - Tom `healthcheck.sh` 继续通过。
 
 ## 最近完成
@@ -108,7 +107,14 @@
 - 已让审计记录包含动作名、目标实例、操作者、原因、确认结果、命令预览和申请 ID。
 - 已验证 `npm test -- test/managed-actions-dry-run.test.ts test/ui-render-smoke.test.ts test/phase9-routes-commands.test.ts test/readonly-multi-instance-safety.test.ts test/multi-instance-readonly.test.ts`。
 - 已验证 `npm run build`。
+- 已新增配置项：`MANAGED_ACTIONS_LIVE_ENABLED=false` 默认关闭，`MANAGED_ACTIONS_LIVE_ALLOWED_ACTIONS` 默认为空。
+- 已新增真实执行确认短语：`LIVE-ACTION-APPROVED`。
+- 已新增 `/api/managed-actions/live`，当前只做闸门判断，不实现执行器。
+- 已确保 live gate 默认返回 `blocked_disabled`、`liveExecution=false`。
+- 已让 live gate 阻断记录写入 `managed_action_live_blocked` 审计。
+- 已验证 `npm test -- test/managed-actions-dry-run.test.ts test/phase9-routes-commands.test.ts test/readonly-multi-instance-safety.test.ts test/multi-instance-readonly.test.ts test/ui-render-smoke.test.ts`。
+- 已验证 `npm run build`。
 
 ## 阶段完成后的下一步
 
-真实执行白名单设计：先只设计配置、闸门和测试，不在 Tom 开启真实执行；继续保证不影响当前所有 OpenClaw 实例。
+部署 Tom 验证真实执行白名单闸门默认关闭；通过后，下一步才考虑设计单个低风险动作的 mock executor 测试，不在 Tom 开启真实执行。

@@ -54,6 +54,7 @@ test("done-checklist route logic builds readiness payload", async () => {
   assert(docs.routes.some((route) => route.path === "/api/diagnostics"));
   assert(docs.routes.some((route) => route.path === "/api/managed-actions/audit"));
   assert(docs.routes.some((route) => route.path === "/api/managed-actions/dry-run"));
+  assert(docs.routes.some((route) => route.path === "/api/managed-actions/live"));
   assert(docs.routes.some((route) => route.path === "/api/tasks/heartbeat"));
   assert(docs.routes.some((route) => route.path === "/api/usage-cost"));
 

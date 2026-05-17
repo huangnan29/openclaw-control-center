@@ -40,6 +40,10 @@ import { applyImportMutation, readImportMutationGuardState } from "../runtime/im
 import { validateExportBundleDryRun, validateExportFileDryRun } from "../runtime/import-dry-run";
 import { readManagedActionDryRunAudits, type ManagedActionAuditRecord } from "../runtime/managed-action-audit";
 import {
+  evaluateManagedActionLiveGate,
+  runtimeManagedActionLiveGate,
+} from "../runtime/managed-action-live";
+import {
   buildManagedActionDryRun,
   isManagedActionName,
   listManagedActions,
@@ -1407,6 +1411,84 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
         });
 
         return writeJson(res, 200, result);
+      }
+
+      if (method === "POST" && path === "/api/managed-actions/live") {
+        assertAllowedQueryParams(url.searchParams, [], true);
+        assertJsonContentType(req);
+        const payload = expectObject(await readJsonBody(req), "managed action live payload");
+        assertMutationAuthorizedWithConfig(
+          req,
+          "/api/managed-actions/live",
+          {
+            gateRequired: localTokenGateRequired,
+            configuredToken: localApiToken,
+          },
+          typeof payload.localToken === "string" ? payload.localToken : undefined,
+        );
+
+        const instanceId = requiredBoundedString(payload.instanceId, "instanceId", 120);
+        const action = requiredBoundedString(payload.action, "action", 80);
+        if (!isManagedActionName(action)) {
+          throw new RequestValidationError("action must be one of: healthcheck, collector_refresh, skill_run.", 400);
+        }
+
+        const instanceConfig = loadOpenClawInstanceConfigs();
+        const instance = instanceConfig.instances.find((item) => item.id === instanceId);
+        if (!instance) {
+          throw new RequestValidationError(`instance '${instanceId}' was not found.`, 404);
+        }
+        const operator = requiredBoundedString(payload.operator, "operator", 120);
+        const reason = requiredBoundedString(payload.reason, "reason", 240);
+        const operationRequestId = requiredBoundedString(payload.operationRequestId, "operationRequestId", 120);
+        const confirmedText = requiredBoundedString(payload.confirmedText, "confirmedText", 80);
+        const gate = runtimeManagedActionLiveGate();
+        const decision = evaluateManagedActionLiveGate({
+          gate,
+          action,
+          operationRequestId,
+          confirmedText,
+        });
+
+        await appendOperationAudit({
+          action: "managed_action_live_blocked",
+          source: "api",
+          ok: false,
+          requestId,
+          detail: decision.message,
+          metadata: {
+            managedAction: action,
+            status: decision.status,
+            target: {
+              instanceId: instance.id,
+              instanceName: instance.name,
+              ...(instance.serverId ? { serverId: instance.serverId } : {}),
+              ...(instance.serverName ? { serverName: instance.serverName } : {}),
+            },
+            operationRequestId,
+            operator,
+            reason,
+            liveExecution: false,
+            gate: {
+              enabled: gate.enabled,
+              readonlyMode: gate.readonlyMode,
+              allowedActions: gate.allowedActions,
+            },
+          },
+        });
+
+        return writeJson(res, decision.statusCode, {
+          ok: false,
+          status: decision.status,
+          message: decision.message,
+          liveExecution: false,
+          gate: {
+            enabled: gate.enabled,
+            readonlyMode: gate.readonlyMode,
+            allowedActions: gate.allowedActions,
+            requiredConfirmationText: gate.requiredConfirmationText,
+          },
+        });
       }
 
       if (method === "GET" && path === "/api/diagnostics") {

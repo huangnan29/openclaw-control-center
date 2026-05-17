@@ -105,6 +105,30 @@ test("managed action dry-run previews whitelisted actions without executing in r
     assert.equal(audit.records[0]?.confirmationTextMatched, true);
     assert.equal(audit.records[0]?.mutatesOpenClawInstance, false);
 
+    const liveResponse = await fetch(`${baseUrl}/api/managed-actions/live`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        instanceId: "tom",
+        action: "healthcheck",
+        operator: "Anan",
+        reason: "确认真实执行默认关闭",
+        operationRequestId: body.review.operationRequestId,
+        confirmedText: "LIVE-ACTION-APPROVED",
+      }),
+    });
+    assert.equal(liveResponse.status, 403);
+    const liveBody = await liveResponse.json() as {
+      ok: boolean;
+      status: string;
+      liveExecution: boolean;
+      gate: { enabled: boolean };
+    };
+    assert.equal(liveBody.ok, false);
+    assert.equal(liveBody.status, "blocked_disabled");
+    assert.equal(liveBody.liveExecution, false);
+    assert.equal(liveBody.gate.enabled, false);
+
     const blockedResponse = await fetch(`${baseUrl}/api/managed-actions/dry-run`, {
       method: "POST",
       headers: { "content-type": "application/json" },
