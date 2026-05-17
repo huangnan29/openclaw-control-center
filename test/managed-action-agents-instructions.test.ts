@@ -113,6 +113,32 @@ test("managed action AGENTS installer apply 插入标记块并备份原文件", 
   }
 });
 
+test("managed action AGENTS installer apply 后 status 不应再次要求更新", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-managed-action-agents-status-"));
+  try {
+    const agentsPath = await writeAgentsFile(dir);
+
+    const applied = runInstaller("apply", {
+      MANAGED_ACTION_AGENTS_TARGET_SOURCE: "local",
+      MANAGED_ACTION_AGENTS_TARGET_PATH: agentsPath,
+      CONFIRM_MANAGED_ACTION_AGENTS_INSTALL: "I_UNDERSTAND_THIS_UPDATES_TOM_AGENTS_INSTRUCTIONS_ONLY",
+    });
+    assert.equal(applied.exitCode, 0);
+
+    const checked = runInstaller("status", {
+      MANAGED_ACTION_AGENTS_TARGET_SOURCE: "local",
+      MANAGED_ACTION_AGENTS_TARGET_PATH: agentsPath,
+    });
+
+    assert.equal(checked.exitCode, 0);
+    assert.equal(checked.report.status, "agents_instructions_installed");
+    assert.equal(checked.report.installed, true);
+    assert.equal(checked.report.needsUpdate, false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("managed action AGENTS installer apply 可幂等更新已有标记块", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openclaw-managed-action-agents-idempotent-"));
   try {

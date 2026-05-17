@@ -146,9 +146,12 @@ function replaceBlock(content, block) {
   const start = content.indexOf(markerBegin);
   const end = content.indexOf(markerEnd);
   if (start >= 0 && end >= 0 && end > start) {
-    return `${content.slice(0, start).replace(/\s*$/, "\n\n")}${block}${content.slice(end + markerEnd.length).replace(/^\s*/, "\n\n")}`;
+    const before = content.slice(0, start).replace(/\s*$/, "");
+    const after = content.slice(end + markerEnd.length).replace(/^\s*/, "");
+    return `${before ? `${before}\n\n` : ""}${block}${after ? `\n\n${after}` : "\n"}`;
   }
-  return `${content.replace(/\s*$/, "\n\n")}${block}\n`;
+  const prefix = content.replace(/\s*$/, "");
+  return `${prefix ? `${prefix}\n\n` : ""}${block}\n`;
 }
 
 function readLocalFile(filePath) {
