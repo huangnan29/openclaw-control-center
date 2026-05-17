@@ -198,6 +198,23 @@ JSON
 JSON
   exit 2
 fi
+if printf '%s\\n' "$*" | grep -q 'live-healthcheck-rollout-runner.sh verify-completed'; then
+  cat <<'JSON'
+{
+  "schemaVersion": 1,
+  "status": "verified_live_healthcheck_completed",
+  "issues": [],
+  "nextCommands": ["repo/ops/tom-readonly/live-healthcheck-readiness.sh check"],
+  "safety": {
+    "opensLiveGate": false,
+    "callsManagedActionsLiveApi": false,
+    "writesOpenClawInstanceDirs": false,
+    "restartsOpenClawInstances": false
+  }
+}
+JSON
+  exit 0
+fi
 if printf '%s\\n' "$*" | grep -q 'live-healthcheck-approval-review.sh check'; then
   if [ "${approvalReviewStatus}" = "blocked_preconditions" ]; then
     cat <<'JSON'
@@ -491,6 +508,7 @@ test("final go-live runner approve-and-run 批准后执行一次性 live healthc
     const reviewIndex = sshLog.indexOf("live-healthcheck-approval-review.sh check");
     const approvalIndex = sshLog.indexOf("live-healthcheck-approval.sh approve");
     const runIndex = sshLog.indexOf("live-healthcheck-rollout-runner.sh run-approved");
+    const verifyIndex = sshLog.indexOf("live-healthcheck-rollout-runner.sh verify-completed");
 
     assert.equal(exitCode, 0);
     assert.equal(report.status, "completed_final_live_healthcheck");
@@ -501,7 +519,28 @@ test("final go-live runner approve-and-run 批准后执行一次性 live healthc
     assert(reviewIndex >= 0);
     assert(approvalIndex > reviewIndex);
     assert(runIndex > approvalIndex);
+    assert(verifyIndex > runIndex);
     assert.doesNotMatch(JSON.stringify(report), /test-token/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("final go-live runner verify-completed 只读代理 Tom 演练后验收", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-final-go-live-runner-verify-"));
+  try {
+    const harness = await writeHarness(dir);
+    const { exitCode, report } = runRunner(harness, "verify-completed");
+    const sshLog = await readFile(harness.sshCalls, "utf8");
+
+    assert.equal(exitCode, 0);
+    assert.equal(report.status, "verified_final_live_healthcheck_completed");
+    assert.equal(report.safety.opensLiveGate, false);
+    assert.equal(report.safety.callsManagedActionsLiveApi, false);
+    assert.equal(report.safety.writesTomRuntime, false);
+    assert.match(sshLog, /live-healthcheck-rollout-runner\.sh verify-completed/);
+    assert.doesNotMatch(sshLog, /live-healthcheck-rollout-runner\.sh run-approved/);
+    assert.doesNotMatch(sshLog, /live-healthcheck-approval\.sh approve/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

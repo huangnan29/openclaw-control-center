@@ -5,6 +5,7 @@ set +x
 # live healthcheck 演练预备 runner。
 # status 只读取 readiness；prepare 只准备 approval 模板、生成/校验证据包并刷新 readiness。
 # run-approved 只在 approval 已批准、证据包通过且显式确认后执行一次性演练窗口。
+# verify-completed 只读验收演练结果：approval 已消费、报告通过、只读状态恢复。
 # 本脚本不会批准 approval，不会修改任何 OpenClaw 实例目录。
 
 DEPLOY_DIR="${DEPLOY_DIR:-/srv/openclaw-control-center-readonly}"
@@ -28,6 +29,7 @@ usage() {
   live-healthcheck-rollout-runner.sh status
   live-healthcheck-rollout-runner.sh prepare
   live-healthcheck-rollout-runner.sh run-approved
+  live-healthcheck-rollout-runner.sh verify-completed
 
 说明：
   status 只调用 live-healthcheck-readiness.sh status，不写文件。
@@ -37,6 +39,7 @@ usage() {
     3. 生成并校验批准前证据包。
     4. 运行 live-healthcheck-readiness.sh check 汇总下一步。
   run-approved 只在 readiness 为 approved_ready_for_live_window 后，调用一次性演练窗口。
+  verify-completed 只读复核演练后状态和最新报告，不调用 live API。
 
 安全边界：
   - 不批准 approval。
@@ -60,6 +63,7 @@ run_node() {
     OPERATOR="$OPERATOR" \
     node <<'NODE'
 const { spawnSync } = require("node:child_process");
+const fs = require("node:fs");
 const path = require("node:path");
 
 const mode = process.env.MODE || "status";
@@ -69,6 +73,7 @@ const topologyMode = process.env.OPENCLAW_TOPOLOGY_MODE || "local-only";
 const instanceId = process.env.INSTANCE_ID || "tom";
 const operator = process.env.OPERATOR || "Anan";
 const approvalFile = path.join(deployDir, "runtime", "live-healthcheck-approval.json");
+const reportDir = process.env.LIVE_HEALTHCHECK_REPORT_DIR || path.join(deployDir, "runtime", "live-healthcheck-reports");
 const runnerConfirm = process.env.CONFIRM_LIVE_HEALTHCHECK_RUNNER || "";
 const localApiToken = process.env.LOCAL_API_TOKEN || "";
 
@@ -136,6 +141,46 @@ function stage(result, label) {
     stdoutLines: compactLines(result.stdout, 40),
     stderrLines: compactLines(result.stderr, 40),
   };
+}
+
+function readLatestReport() {
+  try {
+    if (!fs.existsSync(reportDir)) {
+      return {
+        status: "missing_report_dir",
+        dir: reportDir,
+        issues: [`报告目录不存在：${reportDir}`],
+      };
+    }
+    const candidates = fs.readdirSync(reportDir)
+      .filter((name) => /^live-healthcheck-report-.+\.json$/.test(name))
+      .map((name) => {
+        const file = path.join(reportDir, name);
+        const stat = fs.statSync(file);
+        return { file, mtimeMs: stat.mtimeMs };
+      })
+      .sort((a, b) => b.mtimeMs - a.mtimeMs);
+    if (candidates.length === 0) {
+      return {
+        status: "missing_report",
+        dir: reportDir,
+        issues: ["未找到 live healthcheck JSON 报告"],
+      };
+    }
+    const latest = candidates[0];
+    return {
+      status: "read",
+      file: latest.file,
+      report: JSON.parse(fs.readFileSync(latest.file, "utf8")),
+    };
+  } catch (error) {
+    return {
+      status: "invalid_report",
+      dir: reportDir,
+      error: formatError(error),
+      issues: [`最新报告无法读取或解析：${formatError(error)}`],
+    };
+  }
 }
 
 function formatError(error) {
@@ -324,21 +369,26 @@ function runApproved() {
     stderrLines: compactLines(liveWindowResult.stderr, 120),
     error: liveWindowResult.error,
   };
+  const postLiveVerify = liveWindowResult.exitCode === 0 ? verifyCompleted() : undefined;
+  const verified = postLiveVerify?.status === "verified_live_healthcheck_completed";
+  const postLiveIssues = Array.isArray(postLiveVerify?.issues) ? postLiveVerify.issues : [];
 
   return {
     schemaVersion: 1,
-    status: liveWindowResult.exitCode === 0 ? "completed_live_healthcheck" : "failed_live_healthcheck",
+    status: liveWindowResult.exitCode === 0
+      ? (verified ? "completed_live_healthcheck" : "failed_post_live_verification")
+      : "failed_live_healthcheck",
     mode,
     generatedAt: new Date().toISOString(),
     target: { instanceId, action: "healthcheck", operator },
-    stages: { readiness, liveWindow },
-    issues: liveWindowResult.exitCode === 0 ? [] : [`live healthcheck window 失败：exit=${liveWindowResult.exitCode}`],
-    nextCommands: liveWindowResult.exitCode === 0
+    stages: { readiness, liveWindow, postLiveVerify },
+    issues: liveWindowResult.exitCode === 0 ? postLiveIssues : [`live healthcheck window 失败：exit=${liveWindowResult.exitCode}`],
+    nextCommands: liveWindowResult.exitCode === 0 && verified
       ? [
-        "repo/ops/tom-readonly/live-healthcheck-readiness.sh check",
-        "repo/ops/tom-readonly/live-healthcheck-report.sh report <before.json> <after.json> runtime/live-healthcheck-approval.json",
+        "repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh verify-completed",
       ]
       : [
+        "repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh verify-completed",
         "repo/ops/tom-readonly/live-healthcheck-window.sh status",
         "repo/ops/tom-readonly/live-healthcheck-window.sh disable",
       ],
@@ -351,11 +401,63 @@ function runApproved() {
   };
 }
 
+function verifyCompleted() {
+  const readinessResult = run(scripts.readiness, ["check"]);
+  const readiness = stage(readinessResult, "live healthcheck readiness");
+  const latestReport = readLatestReport();
+  const report = latestReport.report || {};
+  const issues = [];
+  const readinessStatus = readiness.report?.status || "unknown";
+  if (readinessResult.exitCode !== 0 || readinessStatus !== "approval_consumed") {
+    issues.push(`readiness 不是 approval_consumed：${readinessStatus}`);
+  }
+  if (latestReport.status !== "read") {
+    issues.push(...(Array.isArray(latestReport.issues) ? latestReport.issues : [`报告状态异常：${latestReport.status}`]));
+  }
+  if (latestReport.status === "read") {
+    if (report.status !== "passed") issues.push(`最新演练报告未 passed：${report.status || "unknown"}`);
+    if (report.approval?.consumed !== true) issues.push("最新演练报告未证明 approval.consumed=true");
+    if (report.audit?.liveResultFound !== true) issues.push("最新演练报告未找到 live result 审计");
+    if (report.audit?.liveExecution !== true) issues.push("最新演练报告未证明 liveExecution=true");
+    if (report.audit?.mutatesOpenClawInstance !== false) issues.push("最新演练报告未证明 mutatesOpenClawInstance=false");
+    if (report.impact?.ok !== true) issues.push("最新演练报告 impact.ok 不是 true");
+  }
+  const verified = issues.length === 0;
+  return {
+    schemaVersion: 1,
+    status: verified ? "verified_live_healthcheck_completed" : "blocked_post_live_verification",
+    mode: "verify-completed",
+    generatedAt: new Date().toISOString(),
+    target: { instanceId, action: "healthcheck", operator },
+    stages: { readiness, latestReport },
+    issues,
+    nextCommands: verified
+      ? [
+        "repo/ops/tom-readonly/live-healthcheck-readiness.sh check",
+      ]
+      : [
+        "repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh prepare",
+        "repo/ops/tom-readonly/live-healthcheck-window.sh status",
+      ],
+    safety: safety({
+      writesControlCenterRuntimeOnly: false,
+      writesApprovalTemplateOnly: false,
+      generatesApprovalPacket: false,
+      opensLiveGate: false,
+      callsManagedActionsLiveApi: false,
+      readsStatusOnly: true,
+      checkRunsHealthcheckOnly: true,
+      verifiesReportOnly: true,
+    }),
+  };
+}
+
 function emit(report) {
   console.log(JSON.stringify(report, null, 2));
   if (mode === "prepare" && report.status === "blocked_dry_run") process.exit(2);
   if (mode === "run-approved" && String(report.status || "").startsWith("blocked_")) process.exit(2);
-  if (mode === "run-approved" && report.status === "failed_live_healthcheck") process.exit(1);
+  if (mode === "run-approved" && (report.status === "failed_live_healthcheck" || report.status === "failed_post_live_verification")) process.exit(1);
+  if (mode === "verify-completed" && report.status !== "verified_live_healthcheck_completed") process.exit(2);
 }
 
 if (mode === "status") {
@@ -364,6 +466,8 @@ if (mode === "status") {
   emit(prepare());
 } else if (mode === "run-approved") {
   emit(runApproved());
+} else if (mode === "verify-completed") {
+  emit(verifyCompleted());
 } else {
   console.error(`[失败] 未知模式：${mode}`);
   process.exit(2);
@@ -382,6 +486,9 @@ main() {
       ;;
     run-approved)
       run_node "run-approved"
+      ;;
+    verify-completed)
+      run_node "verify-completed"
       ;;
     -h|--help|help)
       usage

@@ -34,7 +34,7 @@
 - `../local/discover-remote-oracle-credentials.example.json`：本机候选发现配置样板，不包含真实密钥内容。
 - `../local/remote-oracle-intake.sh`：本机侧凭据接入编排器；`doctor/plan` 不写文件不联网，`apply` 显式确认后只写本机 push 配置和 Tom control-center runtime，`run` 会继续触发 Tom 端安全 rollout。
 - `../local/final-go-live-status.sh`：本机侧最终上线状态汇总入口；默认 `local-only`，`status/check` 读取 Tom `go-live-gate.sh`，不写本机 push 配置、不写 Tom runtime、不连接第二台 Oracle。
-- `../local/final-go-live-runner.sh`：本机侧最终上线推进 runner；`prepare` 可自动推进到 Tom 人工批准前，`run-approved` 必须显式确认和本地令牌，并继续交给 Tom runner 校验 approval/readiness；`approve-and-run` 先执行只读 approval review，只有 review 已到 `ready_for_human_approval` 且强确认、批准人、本地令牌齐全时，才记录 approval 并执行一次性演练。
+- `../local/final-go-live-runner.sh`：本机侧最终上线推进 runner；`prepare` 可自动推进到 Tom 人工批准前，`run-approved` 必须显式确认和本地令牌，并继续交给 Tom runner 校验 approval/readiness；`approve-and-run` 先执行只读 approval review，只有 review 已到 `ready_for_human_approval` 且强确认、批准人、本地令牌齐全时，才记录 approval 并执行一次性演练；`verify-completed` 只读复核演练报告、approval 消费和只读恢复状态。
 - `../local/push-remote-collector-credentials.sh`：在本机把远端只读 SSH key 和 onboarding 配置推送到 Tom control-center runtime，不连接第二台 Oracle。
 - `managed-action-healthcheck-rollout.example.json`：只读 healthcheck live 演练的 rollout 样板，不会被默认加载。
 - `managed-action-dry-run-gate.sh`：管理动作 dry-run 证据闸门，默认只读检查 readiness 与 audit，显式确认后只创建 dry-run 审计记录。
@@ -42,7 +42,7 @@
 - `live-healthcheck-approval.example.json`：批准记录样板，默认未批准。
 - `live-healthcheck-approval-packet.sh`：生成 live healthcheck 批准前证据包，汇总总闸门、dry-run、approval、live window 状态和影响快照。
 - `live-healthcheck-readiness.sh`：只读汇总 live healthcheck 演练 readiness；不生成证据包、不写 approval、不打开 live gate。
-- `live-healthcheck-rollout-runner.sh`：自动推进 live 演练阶段；`status` 只读，`prepare` 会准备 approval 模板、生成/校验证据包并刷新 readiness，`run-approved` 只在人工 approval 已批准且显式确认后执行一次性演练窗口。
+- `live-healthcheck-rollout-runner.sh`：自动推进 live 演练阶段；`status` 只读，`prepare` 会准备 approval 模板、生成/校验证据包并刷新 readiness，`run-approved` 只在人工 approval 已批准且显式确认后执行一次性演练窗口，`verify-completed` 只读验收演练报告与恢复状态。
 - `live-healthcheck-preflight.sh`：只读检查 healthcheck live 演练条件，不调用 live API。
 - `live-healthcheck-smoke.sh`：手动 live healthcheck 演练脚本；只有显式提供本地令牌和确认环境变量才会调用 live API。
 - `live-healthcheck-report.sh`：演练报告脚本；读取 approval、impact snapshots 和 operation audit，生成 JSON 与 Markdown 报告。
@@ -168,6 +168,8 @@ CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK \
 APPROVED_BY=Anan \
 LOCAL_API_TOKEN=<本地令牌> \
 ops/local/final-go-live-runner.sh approve-and-run
+ops/local/final-go-live-runner.sh verify-completed
+repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh verify-completed
 repo/ops/tom-readonly/live-healthcheck-window.sh status
 repo/ops/tom-readonly/instance-impact-snapshot.sh snapshot readonly-baseline
 ```
@@ -182,7 +184,7 @@ COLLECTOR_SNAPSHOT_MAX_AGE_SECONDS=300 ./healthcheck.sh
 BRANCH=multi-instance-readonly-control-center ./update.sh
 ```
 
-`ops/local/final-go-live-runner.sh prepare` 是给 openclaw 调用的本机侧总 runner：它先执行 `final-go-live-status.sh check`，只有当总闸门下一步是 Tom `live-healthcheck-rollout-runner.sh prepare` 时，才 SSH 到 Tom 准备 approval 模板和批准前证据包，然后重新检查最终状态并停在人工批准前。如果总闸门仍提示 `prepare`，本机 runner 会先只读询问 Tom runner 当前 readiness；已经处在人工批准边界或已批准待执行边界时，重复执行 `prepare` 会幂等返回当前边界，不会再次写 Tom runtime。它不会批准 approval、不会打开 live gate、不会调用 managed action live API。`run-approved` 还必须显式设置 `CONFIRM_FINAL_GO_LIVE_RUNNER` 和 `LOCAL_API_TOKEN`，并会继续交给 Tom runner 再校验 approval/readiness。`approve-and-run` 是人工批准后的单命令入口：先运行 Tom `live-healthcheck-approval-review.sh check`，只在 `ready_for_human_approval` 时用 `APPROVED_BY` 写入 approval，再调用原 `run-approved` 链路；未确认、未提供批准人/令牌、review 未 ready 时都会在批准前阻断。
+`ops/local/final-go-live-runner.sh prepare` 是给 openclaw 调用的本机侧总 runner：它先执行 `final-go-live-status.sh check`，只有当总闸门下一步是 Tom `live-healthcheck-rollout-runner.sh prepare` 时，才 SSH 到 Tom 准备 approval 模板和批准前证据包，然后重新检查最终状态并停在人工批准前。如果总闸门仍提示 `prepare`，本机 runner 会先只读询问 Tom runner 当前 readiness；已经处在人工批准边界或已批准待执行边界时，重复执行 `prepare` 会幂等返回当前边界，不会再次写 Tom runtime。它不会批准 approval、不会打开 live gate、不会调用 managed action live API。`run-approved` 还必须显式设置 `CONFIRM_FINAL_GO_LIVE_RUNNER` 和 `LOCAL_API_TOKEN`，并会继续交给 Tom runner 再校验 approval/readiness。`approve-and-run` 是人工批准后的单命令入口：先运行 Tom `live-healthcheck-approval-review.sh check`，只在 `ready_for_human_approval` 时用 `APPROVED_BY` 写入 approval，再调用原 `run-approved` 链路；未确认、未提供批准人/令牌、review 未 ready 时都会在批准前阻断。`run-approved` 和 `approve-and-run` 成功后会自动调用 Tom `verify-completed`，要求最新报告通过、approval 已消费、只读状态已恢复；也可以单独运行本机 `verify-completed` 做演练后复核。
 
 `managed-action-command-runner.sh` 是给 OpenClaw/Discord 机器人调用的 dry-run 命令入口。`plan` 只读取命令 JSON 并校验字段，不联网、不写审计；`parse-text/plan-text` 会把“对 tom 运行 zhihu-human-ops-writing dry-run”这类文本解析成受控 payload，且要求文本必须明确包含 dry-run/预览/演练并拒绝 live、发布、重启、approval 等高风险词；`dry-run/dry-run-text` 必须设置 `CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN`，并通过 `LOCAL_API_TOKEN` 或显式 `MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container` 取得本地令牌，只调用 `/api/managed-actions/dry-run` 生成预览与审计记录，不打开 live gate、不执行实例命令。`skill_run` 命令必须带 `skillName`，当前仍只是预览未来 skill 调用，不会真正调 OpenClaw skill。
 
@@ -324,7 +326,7 @@ LOCAL_API_TOKEN=<本地令牌> \
 repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh run-approved
 ```
 
-`live-healthcheck-rollout-runner.sh prepare` 可以自动推进到人工批准前：先确认 dry-run 证据 ready，再准备 approval 模板，生成并校验批准前证据包，最后运行 readiness `check`。它不会批准 approval、不会打开 live gate、不会调用 managed action live API。`live-healthcheck-rollout-runner.sh status` 只读取 readiness，不写文件。人工 approval 已批准后，`run-approved` 会再次检查 readiness 必须为 `approved_ready_for_live_window`，并要求 `CONFIRM_LIVE_HEALTHCHECK_RUNNER` 和 `LOCAL_API_TOKEN`，随后才调用一次性演练窗口；如果被前置条件或人工批准挡住，runner 会返回非 0 退出码，避免自动化误判为已执行成功。
+`live-healthcheck-rollout-runner.sh prepare` 可以自动推进到人工批准前：先确认 dry-run 证据 ready，再准备 approval 模板，生成并校验批准前证据包，最后运行 readiness `check`。它不会批准 approval、不会打开 live gate、不会调用 managed action live API。`live-healthcheck-rollout-runner.sh status` 只读取 readiness，不写文件。人工 approval 已批准后，`run-approved` 会再次检查 readiness 必须为 `approved_ready_for_live_window`，并要求 `CONFIRM_LIVE_HEALTHCHECK_RUNNER` 和 `LOCAL_API_TOKEN`，随后才调用一次性演练窗口；窗口完成后 runner 会自动执行 `verify-completed`，只读确认 readiness 为 `approval_consumed`、最新报告 `passed`、approval 已消费、impact 检查通过且 `mutatesOpenClawInstance=false`。如果被前置条件、人工批准或演练后验收挡住，runner 会返回非 0 退出码，避免自动化误判为已执行成功。
 
 `live-healthcheck-readiness.sh status/check` 会只读汇总总闸门、dry-run 证据、批准前证据包、approval 和 live window 状态，输出 `waiting_human_approval`、`approved_ready_for_live_window` 或 `blocked_preconditions` 等状态；它给出的下一步命令统一指向 `live-healthcheck-rollout-runner.sh prepare/run-approved` 主链路。它不会生成新证据包、不会写 approval、不会打开 live gate、不会调用 managed action live API。
 

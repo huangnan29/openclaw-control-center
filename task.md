@@ -50,6 +50,10 @@ Tom 单 Oracle 上线下一步：
   `CONFIRM_FINAL_GO_LIVE_RUNNER=I_UNDERSTAND_THIS_RUNS_APPROVED_FINAL_GO_LIVE LOCAL_API_TOKEN=<本地令牌> ops/local/final-go-live-runner.sh run-approved`
   `CONFIRM_LIVE_HEALTHCHECK_RUNNER=I_UNDERSTAND_THIS_RUNS_APPROVED_LIVE_HEALTHCHECK LOCAL_API_TOKEN=<本地令牌> repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh run-approved`
   该模式会先确认 readiness 为 `approved_ready_for_live_window`，否则不会打开 live gate，并以非 0 退出码让 openclaw 调度侧知道本次被人工批准边界挡住。
+- 演练后只读验收：
+  `ops/local/final-go-live-runner.sh verify-completed`
+  `repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh verify-completed`
+  该模式只读确认 readiness 为 `approval_consumed`、最新报告 `passed`、approval 已消费、impact 检查通过且未修改 OpenClaw 实例。
 
 ## 本轮新增（approve-and-run 最终入口）
 
@@ -62,6 +66,16 @@ Tom 单 Oracle 上线下一步：
 - 已新增测试覆盖缺确认不连接 Tom、approval review 未 ready 不批准、批准后才执行一次性 live healthcheck。
 - 已验证 `bash -n ops/local/final-go-live-runner.sh`。
 - 已验证 `npm test -- test/final-go-live-runner.test.ts`，10/10 通过。
+
+## 本轮新增（演练后 verify-completed 验收）
+
+- 已扩展 `ops/tom-readonly/live-healthcheck-rollout-runner.sh`，新增 `verify-completed` 模式。
+- `verify-completed` 只读运行 readiness `check` 并读取 `runtime/live-healthcheck-reports/` 最新 JSON 报告。
+- 验收通过条件包括 readiness 为 `approval_consumed`、最新报告 `status=passed`、`approval.consumed=true`、存在 live result 审计、`liveExecution=true`、`mutatesOpenClawInstance=false`、`impact.ok=true`。
+- 已让 Tom `run-approved` 在 live window 成功后自动执行 `verify-completed`；验收失败时返回 `failed_post_live_verification`，不把演练误判为完成。
+- 已扩展 `ops/local/final-go-live-runner.sh`，新增本机 `verify-completed` 代理入口；本机 `run-approved` 与 `approve-and-run` 成功后也会自动调用 Tom 验收。
+- 已更新 approval review：`ready_for_human_approval` 下一步现在同时给出本机 `approve-and-run` 单命令入口和手动 approval 命令。
+- 仍未执行 approval `approve`、未打开 live gate、未调用 managed action live API、未修改 OpenClaw 实例目录、未重启实例。
 
 后续跨服务器扩展预留步骤：
 

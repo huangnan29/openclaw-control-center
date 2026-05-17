@@ -34,12 +34,14 @@ usage() {
   final-go-live-runner.sh prepare
   final-go-live-runner.sh run-approved
   final-go-live-runner.sh approve-and-run
+  final-go-live-runner.sh verify-completed
 
 说明：
   status：只运行 final-go-live-status.sh status。
   prepare：运行 final-go-live-status.sh check；如果下一步是 Tom live-healthcheck-rollout-runner.sh prepare，就自动 SSH 到 Tom 执行 prepare，再复核最终状态。
   run-approved：必须显式确认并提供 LOCAL_API_TOKEN，才会 SSH 到 Tom 执行 live-healthcheck-rollout-runner.sh run-approved。
   approve-and-run：必须显式确认、提供 APPROVED_BY 与 LOCAL_API_TOKEN；先执行 Tom approval review，只在 ready_for_human_approval 时记录 approval 并执行一次性 run-approved。
+  verify-completed：只读复核 Tom 一次性演练是否已完成、报告是否通过、approval 是否已消费。
 
 run-approved 必须设置：
   CONFIRM_FINAL_GO_LIVE_RUNNER=I_UNDERSTAND_THIS_RUNS_APPROVED_FINAL_GO_LIVE
@@ -55,6 +57,7 @@ approve-and-run 必须设置：
   - approve-and-run 只有在 approval review ready 且强确认齐全时才记录 approval。
   - status/prepare 不打开 live gate，不调用 managed-actions live API。
   - run-approved/approve-and-run 都会交给 Tom runner 再次校验 approval/readiness。
+  - verify-completed 只读验收，不批准、不打开 live gate、不调用 managed-actions live API。
   - 不修改任何 OpenClaw 实例目录。
 TEXT
 }
@@ -499,20 +502,28 @@ function runApproved() {
 
   const before = runFinalStatus("check");
   const tomRun = runTomRunner("run-approved");
-  const after = runFinalStatus("check");
   const tomStatus = tomRun.report?.status || "unknown";
   const completed = tomRun.exitCode === 0 && tomStatus === "completed_live_healthcheck";
+  const postLiveVerify = completed ? runTomRunner("verify-completed") : undefined;
+  const verified = postLiveVerify?.exitCode === 0 && postLiveVerify?.report?.status === "verified_live_healthcheck_completed";
+  const after = runFinalStatus("check");
   const tomNextCommands = Array.isArray(tomRun.report?.nextCommands) ? tomRun.report.nextCommands : [];
   const afterNextCommands = Array.isArray(after.report?.nextCommands) ? after.report.nextCommands : [];
   return {
     schemaVersion: 1,
-    status: completed ? "completed_final_live_healthcheck" : tomStatus,
+    status: completed ? (verified ? "completed_final_live_healthcheck" : "failed_final_post_live_verification") : tomStatus,
     mode,
     topologyMode,
     generatedAt: new Date().toISOString(),
-    stages: { before, tomRun, after },
-    issues: Array.isArray(tomRun.report?.issues) ? tomRun.report.issues : [],
-    nextCommands: completed && afterNextCommands.length > 0 ? afterNextCommands : tomNextCommands,
+    stages: { before, tomRun, postLiveVerify, after },
+    issues: completed && !verified
+      ? (Array.isArray(postLiveVerify?.report?.issues) ? postLiveVerify.report.issues : ["Tom 演练后验收未通过"])
+      : (Array.isArray(tomRun.report?.issues) ? tomRun.report.issues : []),
+    nextCommands: completed && verified && afterNextCommands.length > 0
+      ? afterNextCommands
+      : completed
+        ? ["ops/local/final-go-live-runner.sh verify-completed"]
+        : tomNextCommands,
     safety: baseSafety({
       connectsTomSsh: true,
       writesTomRuntime: completed,
@@ -522,7 +533,37 @@ function runApproved() {
       requiresFinalRunnerConfirmation: true,
       requiresLocalApiToken: true,
       requiresTomApprovedReadiness: true,
+      requiresPostLiveVerification: true,
       blockedBeforeLive: !completed,
+    }),
+  };
+}
+
+function verifyCompleted() {
+  const tomVerify = runTomRunner("verify-completed");
+  const after = runFinalStatus("check");
+  const verified = tomVerify.exitCode === 0 && tomVerify.report?.status === "verified_live_healthcheck_completed";
+  const tomNextCommands = Array.isArray(tomVerify.report?.nextCommands) ? tomVerify.report.nextCommands : [];
+  const afterNextCommands = Array.isArray(after.report?.nextCommands) ? after.report.nextCommands : [];
+  return {
+    schemaVersion: 1,
+    status: verified ? "verified_final_live_healthcheck_completed" : "blocked_final_post_live_verification",
+    mode,
+    topologyMode,
+    generatedAt: new Date().toISOString(),
+    stages: { tomVerify, after },
+    issues: Array.isArray(tomVerify.report?.issues) ? tomVerify.report.issues : [],
+    nextCommands: verified && afterNextCommands.length > 0 ? afterNextCommands : tomNextCommands,
+    safety: baseSafety({
+      connectsTomSsh: true,
+      writesTomRuntime: false,
+      writesControlCenterRuntimeOnly: false,
+      approvesLiveHealthcheck: false,
+      opensLiveGate: false,
+      callsManagedActionsLiveApi: false,
+      readsStatusOnly: true,
+      checkRunsHealthcheckOnly: true,
+      verifiesPostLiveReportOnly: true,
     }),
   };
 }
@@ -662,20 +703,28 @@ function approveAndRun() {
   }
 
   const tomRun = runTomRunner("run-approved");
-  const after = runFinalStatus("check");
   const tomStatus = tomRun.report?.status || "unknown";
   const completed = tomRun.exitCode === 0 && tomStatus === "completed_live_healthcheck";
+  const postLiveVerify = completed ? runTomRunner("verify-completed") : undefined;
+  const verified = postLiveVerify?.exitCode === 0 && postLiveVerify?.report?.status === "verified_live_healthcheck_completed";
+  const after = runFinalStatus("check");
   const tomNextCommands = Array.isArray(tomRun.report?.nextCommands) ? tomRun.report.nextCommands : [];
   const afterNextCommands = Array.isArray(after.report?.nextCommands) ? after.report.nextCommands : [];
   return {
     schemaVersion: 1,
-    status: completed ? "completed_final_live_healthcheck" : tomStatus,
+    status: completed ? (verified ? "completed_final_live_healthcheck" : "failed_final_post_live_verification") : tomStatus,
     mode,
     topologyMode,
     generatedAt: new Date().toISOString(),
-    stages: { approvalReview, approval, tomRun, after },
-    issues: Array.isArray(tomRun.report?.issues) ? tomRun.report.issues : [],
-    nextCommands: completed && afterNextCommands.length > 0 ? afterNextCommands : tomNextCommands,
+    stages: { approvalReview, approval, tomRun, postLiveVerify, after },
+    issues: completed && !verified
+      ? (Array.isArray(postLiveVerify?.report?.issues) ? postLiveVerify.report.issues : ["Tom 演练后验收未通过"])
+      : (Array.isArray(tomRun.report?.issues) ? tomRun.report.issues : []),
+    nextCommands: completed && verified && afterNextCommands.length > 0
+      ? afterNextCommands
+      : completed
+        ? ["ops/local/final-go-live-runner.sh verify-completed"]
+        : tomNextCommands,
     safety: baseSafety({
       connectsTomSsh: true,
       writesTomRuntime: true,
@@ -688,6 +737,7 @@ function approveAndRun() {
       requiresApprovedBy: true,
       requiresLocalApiToken: true,
       requiresTomApprovedReadiness: true,
+      requiresPostLiveVerification: true,
       blockedBeforeLive: !completed,
     }),
   };
@@ -698,6 +748,7 @@ function emit(report) {
   if (mode === "prepare" && String(report.status || "").startsWith("blocked_")) process.exit(2);
   if (mode === "run-approved" && report.status !== "completed_final_live_healthcheck") process.exit(2);
   if (mode === "approve-and-run" && report.status !== "completed_final_live_healthcheck") process.exit(2);
+  if (mode === "verify-completed" && report.status !== "verified_final_live_healthcheck_completed") process.exit(2);
 }
 
 if (mode === "status") {
@@ -708,6 +759,8 @@ if (mode === "status") {
   emit(runApproved());
 } else if (mode === "approve-and-run") {
   emit(approveAndRun());
+} else if (mode === "verify-completed") {
+  emit(verifyCompleted());
 } else {
   console.error(`[失败] 未知模式：${mode}`);
   process.exit(2);
@@ -732,6 +785,9 @@ main() {
       ;;
     approve-and-run)
       run_node "approve-and-run"
+      ;;
+    verify-completed)
+      run_node "verify-completed"
       ;;
     -h|--help|help)
       usage

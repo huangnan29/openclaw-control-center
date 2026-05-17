@@ -18,29 +18,65 @@ async function writeHarness(
   options: {
     dryRunReady?: boolean;
     readinessStatus?: "waiting_human_approval" | "approved_ready_for_live_window";
+    alreadyCompleted?: boolean;
+    reportReady?: boolean;
   } = {},
 ) {
   const deployDir = join(dir, "deploy");
   const scriptDir = join(dir, "scripts");
   const logFile = join(dir, "commands.log");
+  const consumedFile = join(dir, "approval-consumed.txt");
+  const reportDir = join(deployDir, "runtime", "live-healthcheck-reports");
   const dryRunReady = options.dryRunReady !== false;
   const readinessStatus = options.readinessStatus || "waiting_human_approval";
+  const reportReady = options.reportReady !== false;
   await mkdir(join(deployDir, "runtime"), { recursive: true });
+  await mkdir(reportDir, { recursive: true });
   await mkdir(scriptDir, { recursive: true });
+  if (options.alreadyCompleted === true) {
+    await writeFile(consumedFile, "consumed\n", "utf8");
+    if (reportReady) {
+      await writeFile(
+        join(reportDir, "live-healthcheck-report-20260517T000000+0000.json"),
+        JSON.stringify(
+          {
+            schemaVersion: 1,
+            status: "passed",
+            approval: { consumed: true },
+            audit: {
+              liveResultFound: true,
+              liveExecution: true,
+              mutatesOpenClawInstance: false,
+            },
+            impact: { ok: true },
+          },
+          null,
+          2,
+        ),
+        "utf8",
+      );
+    }
+  }
 
   await writeExecutable(
     join(scriptDir, "live-healthcheck-readiness.sh"),
     `#!/usr/bin/env bash
 set -euo pipefail
 printf 'readiness %s\\n' "$*" >> "${logFile}"
-cat <<'JSON'
+status="${readinessStatus}"
+approval_status="${readinessStatus === "approved_ready_for_live_window" ? "approved" : "needs_manual_approval"}"
+if [ -f "${consumedFile}" ]; then
+  status="approval_consumed"
+  approval_status="consumed"
+fi
+cat <<JSON
 {
   "schemaVersion": 1,
-  "status": "${readinessStatus}",
+  "status": "$status",
   "target": { "instanceId": "tom", "action": "healthcheck", "operator": "Anan" },
   "stages": {
     "approvalPacket": { "report": { "status": "ready" } },
-    "approval": { "report": { "status": "${readinessStatus === "approved_ready_for_live_window" ? "approved" : "needs_manual_approval"}" } },
+    "approval": { "report": { "status": "$approval_status" } },
     "liveWindow": { "readonlyMode": "true", "liveEnabled": "<unset>" }
   },
   "issues": [],
@@ -128,6 +164,24 @@ JSON
     `#!/usr/bin/env bash
 set -euo pipefail
 printf 'window %s confirm-window=%s confirm-live=%s token=%s\\n' "$*" "\${CONFIRM_LIVE_HEALTHCHECK_WINDOW:-}" "\${CONFIRM_LIVE_HEALTHCHECK:-}" "\${LOCAL_API_TOKEN:-}" >> "${logFile}"
+touch "${consumedFile}"
+cat > "${reportDir}/live-healthcheck-report-20260517T010000+0000.json" <<'JSON'
+{
+  "schemaVersion": 1,
+  "status": "passed",
+  "approval": {
+    "consumed": true
+  },
+  "audit": {
+    "liveResultFound": true,
+    "liveExecution": true,
+    "mutatesOpenClawInstance": false
+  },
+  "impact": {
+    "ok": true
+  }
+}
+JSON
 cat <<'TEXT'
 live healthcheck window completed
 TEXT
@@ -137,7 +191,7 @@ TEXT
   return { deployDir, scriptDir, logFile };
 }
 
-function runRunner(harness: Awaited<ReturnType<typeof writeHarness>>, mode: "status" | "prepare" | "run-approved", extraEnv: Record<string, string> = {}) {
+function runRunner(harness: Awaited<ReturnType<typeof writeHarness>>, mode: "status" | "prepare" | "run-approved" | "verify-completed", extraEnv: Record<string, string> = {}) {
   const output = execFileSync(SCRIPT, [mode], {
     env: {
       ...process.env,
@@ -151,7 +205,7 @@ function runRunner(harness: Awaited<ReturnType<typeof writeHarness>>, mode: "sta
   return JSON.parse(output);
 }
 
-function runRunnerResult(harness: Awaited<ReturnType<typeof writeHarness>>, mode: "status" | "prepare" | "run-approved", extraEnv: Record<string, string> = {}) {
+function runRunnerResult(harness: Awaited<ReturnType<typeof writeHarness>>, mode: "status" | "prepare" | "run-approved" | "verify-completed", extraEnv: Record<string, string> = {}) {
   const result = spawnSync(SCRIPT, [mode], {
     env: {
       ...process.env,
@@ -283,11 +337,51 @@ test("live healthcheck rollout runner run-approved 在批准和确认后调用�
     assert.equal(report.safety.callsManagedActionsLiveApi, true);
     assert.equal(report.safety.requiresApprovedReadiness, true);
     assert.equal(report.safety.requiresRunnerConfirmation, true);
+    assert.equal(report.stages.postLiveVerify.status, "verified_live_healthcheck_completed");
     assert.match(log, /readiness check/);
     assert.match(log, /window run/);
     assert.match(log, /confirm-window=I_UNDERSTAND_THIS_TEMPORARILY_ENABLES_LIVE_GATE/);
     assert.match(log, /confirm-live=I_UNDERSTAND_THIS_CALLS_LIVE_API/);
     assert.match(log, /token=test-token/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("live healthcheck rollout runner verify-completed 只读验收已完成演练", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-live-rollout-runner-verify-"));
+  try {
+    const harness = await writeHarness(dir, { alreadyCompleted: true });
+    const report = runRunner(harness, "verify-completed");
+    const log = await readFile(harness.logFile, "utf8");
+
+    assert.equal(report.status, "verified_live_healthcheck_completed");
+    assert.equal(report.stages.readiness.report.status, "approval_consumed");
+    assert.equal(report.stages.latestReport.report.status, "passed");
+    assert.equal(report.safety.opensLiveGate, false);
+    assert.equal(report.safety.callsManagedActionsLiveApi, false);
+    assert.equal(report.safety.writesOpenClawInstanceDirs, false);
+    assert.match(log, /readiness check/);
+    assert.doesNotMatch(log, /window run/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("live healthcheck rollout runner verify-completed 缺报告时阻塞", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-live-rollout-runner-verify-blocked-"));
+  try {
+    const harness = await writeHarness(dir, { alreadyCompleted: true, reportReady: false });
+    const result = runRunnerResult(harness, "verify-completed");
+    const log = await readFile(harness.logFile, "utf8");
+
+    assert.notEqual(result.exitCode, 0);
+    assert.equal(result.report.status, "blocked_post_live_verification");
+    assert(result.report.issues.some((issue: string) => issue.includes("未找到 live healthcheck JSON 报告")));
+    assert.equal(result.report.safety.opensLiveGate, false);
+    assert.equal(result.report.safety.callsManagedActionsLiveApi, false);
+    assert.match(log, /readiness check/);
+    assert.doesNotMatch(log, /window run/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
