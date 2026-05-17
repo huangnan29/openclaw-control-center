@@ -12,6 +12,8 @@ OPERATOR="${OPERATOR:-Anan}"
 APPROVAL_MAX_AGE_HOURS="${APPROVAL_MAX_AGE_HOURS:-24}"
 CONFIRM_APPROVAL_RECORD="${CONFIRM_APPROVAL_RECORD:-}"
 APPROVED_BY="${APPROVED_BY:-}"
+APPROVAL_PACKET_SCRIPT="${APPROVAL_PACKET_SCRIPT:-${DEPLOY_DIR}/repo/ops/tom-readonly/live-healthcheck-approval-packet.sh}"
+APPROVAL_PACKET_FILE="${APPROVAL_PACKET_FILE:-}"
 
 timestamp() {
   date +"%Y-%m-%dT%H:%M:%S%z"
@@ -85,11 +87,31 @@ prepare_template() {
   show_status "$output"
 }
 
+check_approval_packet() {
+  [ -x "$APPROVAL_PACKET_SCRIPT" ] || fail "批准前证据包校验脚本不可执行：${APPROVAL_PACKET_SCRIPT}"
+
+  local packet_output
+  log "校验 live healthcheck 批准前证据包"
+  if [ -n "$APPROVAL_PACKET_FILE" ]; then
+    if ! packet_output="$(INSTANCE_ID="$INSTANCE_ID" ACTION="healthcheck" OPERATOR="$OPERATOR" "$APPROVAL_PACKET_SCRIPT" check "$APPROVAL_PACKET_FILE" 2>&1)"; then
+      printf '%s\n' "$packet_output" >&2
+      fail "批准前证据包校验未通过"
+    fi
+  else
+    if ! packet_output="$(INSTANCE_ID="$INSTANCE_ID" ACTION="healthcheck" OPERATOR="$OPERATOR" "$APPROVAL_PACKET_SCRIPT" check 2>&1)"; then
+      printf '%s\n' "$packet_output" >&2
+      fail "批准前证据包校验未通过"
+    fi
+  fi
+  printf '%s\n' "$packet_output" >&2
+}
+
 approve_record() {
   local output="${1:-$APPROVAL_FILE}"
   [ "$CONFIRM_APPROVAL_RECORD" = "I_APPROVE_LIVE_HEALTHCHECK_RECORD" ] || \
     fail "必须设置 CONFIRM_APPROVAL_RECORD=I_APPROVE_LIVE_HEALTHCHECK_RECORD"
   [ -n "$APPROVED_BY" ] || fail "必须设置 APPROVED_BY=<批准人>"
+  check_approval_packet
 
   mkdir -p "$(dirname "$output")"
   APPROVAL_FILE="$output" \
@@ -398,7 +420,7 @@ usage() {
 
 说明：
   prepare 只在文件不存在时生成模板，并输出当前状态。
-  approve 需要 CONFIRM_APPROVAL_RECORD 和 APPROVED_BY，只写批准文件，不会启用 live gate。
+  approve 需要 CONFIRM_APPROVAL_RECORD、APPROVED_BY 和已通过校验的批准前证据包；只写批准文件，不会启用 live gate。
   consume 将已批准记录标记为已使用，后续 check 会要求重新 approve。
   template 只生成批准文件模板，不会启用 live gate。
   check 只校验批准文件，不会调用 live API。

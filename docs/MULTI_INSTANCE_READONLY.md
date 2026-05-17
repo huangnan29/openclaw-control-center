@@ -416,7 +416,7 @@ repo/ops/tom-readonly/live-healthcheck-approval-packet.sh check
 /srv/openclaw-control-center-readonly/runtime/live-healthcheck-approval-packets/
 ```
 
-证据包包含总闸门 `check`、dry-run 证据 `status`、approval `status`、live window `status`、当前 commit、下一步命令和一份 `pre-live-approval-packet` 影响快照。`check` 会校验最新证据包是否新鲜、匹配当前 commit 与目标实例、dry-run 已 ready、live window 仍只读、影响快照存在且安全字段未越界。它只写 control-center runtime 证据文件，不批准 live healthcheck，不打开 live gate，不调用 managed action live API，不修改任何 OpenClaw 实例目录。`live-healthcheck-window.sh enable/run` 会先通过证据包 `check`，再校验 approval 文件。
+证据包包含总闸门 `check`、dry-run 证据 `status`、approval `status`、live window `status`、当前 commit、下一步命令和一份 `pre-live-approval-packet` 影响快照。`check` 会校验最新证据包是否新鲜、匹配当前 commit 与目标实例、dry-run 已 ready、live window 仍只读、影响快照存在且安全字段未越界。它只写 control-center runtime 证据文件，不批准 live healthcheck，不打开 live gate，不调用 managed action live API，不修改任何 OpenClaw 实例目录。`live-healthcheck-approval.sh approve` 会先通过证据包 `check` 才写 approval；`live-healthcheck-window.sh enable/run` 会先通过证据包 `check`，再校验 approval 文件。
 
 ## 推荐环境变量
 

@@ -258,7 +258,7 @@ repo/ops/tom-readonly/live-healthcheck-window.sh run
 /srv/openclaw-control-center-readonly/runtime/live-healthcheck-approval-packets/
 ```
 
-它会运行总闸门 `check`、dry-run 证据 `status`、approval `status`、live window `status`，并生成一份 `pre-live-approval-packet` 影响快照。`check` 会校验最新证据包是否匹配当前 commit、目标实例、dry-run 证据、只读状态和影响快照。该脚本不会批准 live healthcheck，不会打开 live gate，不会调用 managed action live API。`live-healthcheck-window.sh enable/run` 会先执行证据包 `check`，再校验 approval 文件。
+它会运行总闸门 `check`、dry-run 证据 `status`、approval `status`、live window `status`，并生成一份 `pre-live-approval-packet` 影响快照。`check` 会校验最新证据包是否匹配当前 commit、目标实例、dry-run 证据、只读状态和影响快照。该脚本不会批准 live healthcheck，不会打开 live gate，不会调用 managed action live API。`live-healthcheck-approval.sh approve` 会先执行证据包 `check` 才写 approval；`live-healthcheck-window.sh enable/run` 会先执行证据包 `check`，再校验 approval 文件。
 
 `run` 模式会在 live healthcheck 调用成功后把 approval 标记为已使用，后续必须重新 `approve` 才能再次演练；它也会自动生成 before/after 实例影响快照，位置默认为：
 

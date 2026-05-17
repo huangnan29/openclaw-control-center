@@ -122,7 +122,7 @@ Tom 单 Oracle 上线下一步：
 - 必须显式提供 `CONFIRM_LIVE_HEALTHCHECK_WINDOW`、`CONFIRM_LIVE_HEALTHCHECK` 和 `LOCAL_API_TOKEN`。
 - 演练窗口会临时启用 control-center live healthcheck 配置，动作仍限制为 `healthcheck`。
 - 必须先生成并批准 `runtime/live-healthcheck-approval.json`，通过 `live-healthcheck-approval.sh check` 后才允许打开窗口。
-- 批准前先生成并校验 `live-healthcheck-approval-packet.sh generate/check` 证据包，确认总闸门、dry-run、approval、live window、当前 commit 和影响快照都在预期状态；`live-healthcheck-window.sh enable/run` 已强制先校验证据包，再校验 approval 文件。
+- 批准前先生成并校验 `live-healthcheck-approval-packet.sh generate/check` 证据包，确认总闸门、dry-run、approval、live window、当前 commit 和影响快照都在预期状态；`live-healthcheck-approval.sh approve` 已强制先校验证据包才写 approval，`live-healthcheck-window.sh enable/run` 也会先校验证据包，再校验 approval 文件。
 - 推荐批准方式：
   `CONFIRM_APPROVAL_RECORD=I_APPROVE_LIVE_HEALTHCHECK_RECORD APPROVED_BY=Anan repo/ops/tom-readonly/live-healthcheck-approval.sh approve runtime/live-healthcheck-approval.json`
 - 当前 Tom 已生成 approval 草稿，状态为 `needs_manual_approval`。

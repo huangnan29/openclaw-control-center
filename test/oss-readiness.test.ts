@@ -449,6 +449,10 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(approvalText, /live-healthcheck-approval\.sh status/);
   assert.match(approvalText, /I_APPROVE_LIVE_HEALTHCHECK_RECORD/);
   assert.match(approvalText, /APPROVED_BY/);
+  assert.match(approvalText, /APPROVAL_PACKET_SCRIPT/);
+  assert.match(approvalText, /live-healthcheck-approval-packet\.sh/);
+  assert.match(approvalText, /check_approval_packet/);
+  assert.match(approvalText, /approve_record\(\)[\s\S]*check_approval_packet[\s\S]*已写入人工批准记录/);
   assert.match(approvalText, /needs_manual_approval/);
   assert.match(approvalText, /approved 必须为 true/);
   assert.match(approvalText, /批准记录已被使用/);
