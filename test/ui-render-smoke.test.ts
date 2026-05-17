@@ -290,6 +290,11 @@ test("multi-instance overview renders status metrics detail links and selected s
   assert(html.includes("Collector 快照"));
   assert(html.includes("快照新鲜"));
   assert(html.includes("snapshot.json"));
+  assert(html.includes("管理动作预览"));
+  assert(html.includes("data-managed-action-form"));
+  assert(html.includes("/api/managed-actions/dry-run"));
+  assert(html.includes("mutatesOpenClawInstance"));
+  assert(!html.includes("LOCAL_API_TOKEN"));
   assert(html.includes("Tom Oracle"));
   assert(html.includes("Jerry Oracle"));
   assert(html.includes('href="/?server=tom-oracle&amp;section=overview&amp;lang=zh"'));
@@ -395,6 +400,7 @@ test("multi-instance routes render overview detail and invalid-instance fallback
     assert(detailHtml.includes("用量"));
     assert(detailHtml.includes("最近日志"));
     assert(detailHtml.includes("最近任务"));
+    assert(!detailHtml.includes("管理动作预览"));
     assert(detailHtml.includes("数据来源"));
     assert(detailHtml.includes("实例配置优先"));
     assert(detailHtml.includes("gateway 连接状态 + 会话状态推导"));

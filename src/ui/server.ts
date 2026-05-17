@@ -42,6 +42,7 @@ import {
   buildManagedActionDryRun,
   isManagedActionName,
   listManagedActions,
+  type ManagedActionName,
 } from "../runtime/managed-actions";
 import {
   evaluateLocalTokenGate,
@@ -6915,6 +6916,14 @@ function renderMultiInstanceOverview(
     th { color: var(--muted); font-weight: 600; }
     code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
     a.button { display: inline-flex; margin-top: 8px; text-decoration: none; color: #005cb9; font-weight: 600; }
+    .control-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; align-items: end; }
+    .control-field { display: grid; gap: 5px; }
+    .control-field label { color: var(--muted); font-size: 12px; font-weight: 600; }
+    .control-field select, .control-field input { width: 100%; min-height: 38px; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font: inherit; background: #fff; color: var(--text); }
+    .control-field button { min-height: 38px; border: 1px solid rgba(0, 113, 227, 0.45); border-radius: 8px; padding: 8px 12px; font: inherit; font-weight: 700; color: #005cb9; background: #eff8ff; cursor: pointer; }
+    .action-result { margin: 10px 0 0; white-space: pre-wrap; border: 1px solid var(--border); border-radius: 8px; padding: 10px; background: #f9fafb; color: #344054; font-size: 12px; overflow-x: auto; }
+    .action-result.ok { border-color: rgba(22, 163, 74, 0.28); background: #f0fdf4; color: #05603a; }
+    .action-result.error { border-color: rgba(220, 38, 38, 0.28); background: #fef3f2; color: #b42318; }
     @media (max-width: 980px) { .overview-layout { grid-template-columns: 1fr; } }
     @media (max-width: 720px) { .metrics { grid-template-columns: 1fr; } .panel-head { display: grid; } }
   </style>
@@ -6934,6 +6943,7 @@ function renderMultiInstanceOverview(
     <section class="status-strip">${totalChips}</section>
     ${renderServerHealthPanel(snapshot, language, selectedServerId)}
     ${renderCollectorSnapshotPanel(snapshot.instances, language, snapshot.generatedAt)}
+    ${renderManagedActionDryRunPanel(snapshot.instances, language, snapshot.selectedInstanceId)}
     <section class="overview-layout">
       <div>
         ${renderMultiInstanceHealthPanel(snapshot.instances, language)}
@@ -6950,8 +6960,139 @@ function renderMultiInstanceOverview(
       </div>
     </section>
   </main>
+  ${renderManagedActionDryRunScript(language)}
 </body>
 </html>`;
+}
+
+function renderManagedActionDryRunPanel(
+  instances: InstanceSnapshot[],
+  language: UiLanguage,
+  selectedInstanceId?: string,
+): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const instanceOptions = instances
+    .map((item) => {
+      const selected = item.instance.id === selectedInstanceId ? " selected" : "";
+      const label = `${item.instance.name} (${item.instance.id})`;
+      return `<option value="${escapeHtml(item.instance.id)}"${selected}>${escapeHtml(label)}</option>`;
+    })
+    .join("");
+  const actionOptions = listManagedActions()
+    .map(
+      (action) =>
+        `<option value="${escapeHtml(action.action)}">${escapeHtml(managedActionUiLabel(action.action, language))}</option>`,
+    )
+    .join("");
+  return `<section class="panel" id="managed-actions-dry-run">
+    <div class="panel-head">
+      <div>
+        <h2>${escapeHtml(t("Managed action preview", "管理动作预览"))}</h2>
+        <div class="meta">${escapeHtml(t("Dry-run and audit only. No OpenClaw instance command is executed.", "仅 dry-run 与审计，不执行 OpenClaw 实例命令。"))}</div>
+      </div>
+      ${badge("partial", "dry-run")}
+    </div>
+    <form data-managed-action-form>
+      <div class="control-grid">
+        <div class="control-field">
+          <label for="managed-action-instance">${escapeHtml(t("Instance", "实例"))}</label>
+          <select id="managed-action-instance" name="instanceId" required>${instanceOptions}</select>
+        </div>
+        <div class="control-field">
+          <label for="managed-action-name">${escapeHtml(t("Action", "动作"))}</label>
+          <select id="managed-action-name" name="action" required>${actionOptions}</select>
+        </div>
+        <div class="control-field">
+          <label for="managed-action-skill">${escapeHtml(t("Skill", "Skill"))}</label>
+          <input id="managed-action-skill" name="skillName" type="text" autocomplete="off" placeholder="${escapeHtml(t("Optional", "可选"))}" />
+        </div>
+        <div class="control-field">
+          <label for="managed-action-reason">${escapeHtml(t("Reason", "原因"))}</label>
+          <input id="managed-action-reason" name="reason" type="text" autocomplete="off" placeholder="${escapeHtml(t("Before rollout check", "上线前检查"))}" />
+        </div>
+        <div class="control-field">
+          <label for="managed-action-token">${escapeHtml(t("Local token", "本地令牌"))}</label>
+          <input id="managed-action-token" name="localToken" type="password" autocomplete="current-password" />
+        </div>
+        <div class="control-field">
+          <button type="submit">${escapeHtml(t("Generate preview", "生成预览"))}</button>
+        </div>
+      </div>
+      <pre class="action-result" data-managed-action-result hidden></pre>
+    </form>
+  </section>`;
+}
+
+function managedActionUiLabel(action: ManagedActionName, language: UiLanguage): string {
+  if (action === "healthcheck") return pickUiText(language, "Healthcheck", "健康检查");
+  if (action === "collector_refresh") return pickUiText(language, "Collector refresh", "刷新 collector");
+  return pickUiText(language, "Skill invocation", "调用 skill");
+}
+
+function renderManagedActionDryRunScript(language: UiLanguage): string {
+  const copy = JSON.stringify({
+    loading: pickUiText(language, "Generating preview...", "正在生成预览..."),
+    failed: pickUiText(language, "Preview failed", "预览失败"),
+    status: pickUiText(language, "Status", "状态"),
+    target: pickUiText(language, "Target", "目标"),
+    mode: pickUiText(language, "Mode", "模式"),
+    safety: pickUiText(language, "Safety", "安全"),
+    commandPreview: pickUiText(language, "Command preview", "命令预览"),
+    dryRun: "dry-run",
+    noCommand: pickUiText(language, "No command preview returned.", "没有返回命令预览。"),
+  }).replace(/</g, "\\u003c");
+  return `<script>
+(() => {
+  const copy = ${copy};
+  const forms = Array.from(document.querySelectorAll("[data-managed-action-form]"));
+  forms.forEach((form) => {
+    const resultNode = form.querySelector("[data-managed-action-result]");
+    if (!(form instanceof HTMLFormElement) || !(resultNode instanceof HTMLElement)) return;
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      resultNode.hidden = false;
+      resultNode.classList.remove("ok", "error");
+      resultNode.textContent = copy.loading;
+      const data = new FormData(form);
+      const payload = {
+        instanceId: String(data.get("instanceId") || ""),
+        action: String(data.get("action") || ""),
+        skillName: String(data.get("skillName") || ""),
+        reason: String(data.get("reason") || ""),
+        localToken: String(data.get("localToken") || ""),
+      };
+      try {
+        const response = await fetch("/api/managed-actions/dry-run", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          resultNode.classList.add("error");
+          resultNode.textContent = [copy.failed, body.error || body.message || response.status].join("\\n");
+          return;
+        }
+        const commands = Array.isArray(body.commandPreview) && body.commandPreview.length > 0
+          ? body.commandPreview.map((item) => "  - " + String(item)).join("\\n")
+          : "  - " + copy.noCommand;
+        resultNode.classList.add("ok");
+        resultNode.textContent = [
+          copy.status + ": " + String(body.status || "dry_run_ready"),
+          copy.target + ": " + String(body.target?.instanceName || body.target?.instanceId || payload.instanceId),
+          copy.mode + ": " + copy.dryRun + " / liveExecution=" + String(body.liveExecution === true),
+          copy.safety + ": mutatesOpenClawInstance=" + String(body.safety?.mutatesOpenClawInstance === true) + ", requiresConfirmation=" + String(body.safety?.requiresConfirmation !== false),
+          copy.commandPreview + ":",
+          commands,
+        ].join("\\n");
+      } catch (error) {
+        resultNode.classList.add("error");
+        resultNode.textContent = copy.failed + "\\n" + String(error && error.message ? error.message : error);
+      }
+    });
+  });
+})();
+</script>`;
 }
 
 function renderMultiInstanceCard(instance: InstanceSnapshot, selectedInstanceId: string, language: UiLanguage): string {
