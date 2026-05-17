@@ -840,7 +840,35 @@ Tom 单 Oracle 上线下一步：
 - `apply` 会在目标 `AGENTS.md` 同目录 `.backup/control-center-agents/` 下备份原文件，并只更新受控标记块。
 - 已新增 `test/managed-action-agents-instructions.test.ts`，覆盖 plan 不写文件、apply 缺确认阻断、apply 插入并备份、已有标记块幂等更新。
 - 已更新 `ops/tom-readonly/README.md`、`docs/MULTI_INSTANCE_READONLY.md`、`implementation_plan.md` 和 `test/oss-readiness.test.ts`，记录 AGENTS 规范安装器和安全边界。
+- 已验证 `bash -n ops/tom-readonly/install-managed-action-agents-instructions.sh`。
+- 已验证 `npm test -- test/managed-action-agents-instructions.test.ts test/managed-action-inbox-runner.test.ts test/managed-action-text-bridge.test.ts test/managed-action-command-runner.test.ts test/oss-readiness.test.ts`，27/27 通过。
+- 已验证 `npm test -- test/managed-action-agents-instructions.test.ts test/managed-action-inbox-runner.test.ts test/managed-action-text-bridge.test.ts test/managed-action-command-runner.test.ts test/managed-actions-dry-run.test.ts test/managed-action-live-readiness.test.ts test/managed-action-live-gate.test.ts test/oss-readiness.test.ts test/readonly-multi-instance-safety.test.ts`，37/37 通过。
+- 已验证 `npm run build` 与 `git diff --check`。
+- 已提交并推送 `716cfc9 ops: install managed action agents instructions`。
+- 已部署到 Tom，并验证 `update.sh` 通过，5 个 OpenClaw gateway 健康端口、只读写接口拦截、容器安全边界和 collector 快照均通过。
+- 已在 Tom 执行 `status/plan`，确认目标为 `/home/node/.openclaw/workspace/AGENTS.md`，初始状态 `installed=false`、`needsUpdate=true`，计划只插入 `OPENCLAW_CONTROL_CENTER_MANAGED_ACTIONS` 标记块。
+- 已执行显式确认 `apply`，返回 `agents_instructions_installed`，备份路径为 `/home/node/.openclaw/workspace/.backup/control-center-agents/2026-05-17T16-37-12-259Z-AGENTS.md`，安全字段为 `writesAgentsMdOnly=true`、`writesOpenClawConfig=false`、`restartsOpenClawInstances=false`、`callsManagedActionsLiveApi=false`、`opensLiveGate=false`。
+- 部署后发现 `apply` 已插入标记块但 `status` 仍误报 `needsUpdate=true`；根因为受控标记块前后空白归一化不幂等。
+- 已新增回归测试“apply 后 status 不应再次要求更新”，先复现失败，再修复 `replaceBlock()` 的空白处理。
+- 已验证修复后 `npm test -- test/managed-action-agents-instructions.test.ts`，5/5 通过。
+- 已验证修复后 managed-action 安全回归，38/38 通过。
+- 已再次验证 `npm run build` 与 `git diff --check`。
+- 已提交并推送 `b10d5a9 fix: make managed action agents installer idempotent`。
+- 已部署到 Tom，并验证 Tom repo 当前提交为 `b10d5a9`。
+- 已重新运行 Tom `status`，返回 `agents_instructions_installed`、`installed=true`、`needsUpdate=false`。
+- 已验证 Tom OpenClaw gateway 容器 `openclaw-work-openclaw-gateway-1` 仍为 `Up 28 hours (healthy)`。
+- 已验证 Tom `healthcheck.sh` 通过，collector 快照正常，当前实例数量为 5。
+- 已执行标准 inbox smoke，先确认 `/instances/tom/workspace/control-center-commands/inbox` 返回 `inbox_empty`、`pendingCount=0`。
+- 已模拟 Tom/Discord 按 AGENTS 规范在容器内写入 `/home/node/.openclaw/workspace/control-center-commands/inbox/20260517T164118Z-managed-action.txt`，内容为“对 tom 运行 zhihu-human-ops-writing dry-run”。
+- 已验证 control-center 通过只读挂载读取标准 inbox，`status` 返回 `inbox_status_ready`、`candidateCount=1`、`pendingCount=1`。
+- 已验证 `plan-next` 返回 `inbox_plan_completed`、`bridgeStatus=bridge_plan_completed`、`runnerStatus=planned`，目标为 `tom / skill_run / zhihu-human-ops-writing`，且 `callsManagedActionsDryRunApi=false`、`callsManagedActionsLiveApi=false`、`writesOpenClawInstanceDirs=false`、`restartsOpenClawInstances=false`。
+- 已验证 `run-next` 使用显式确认和 `MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container` 成功，返回 `inbox_dry_run_completed`、`bridgeStatus=bridge_dry_run_completed`、`runnerStatus=dry_run_completed`。
+- 本次标准 inbox smoke 生成 dry-run 审计 `operationRequestId=d7b98d20-39ad-47e9-9b31-53bae6121c1f`，`commandPreview` 为 `openclaw skill dry-run for instance tom: zhihu-human-ops-writing`。
+- 已验证 smoke 结果写入 `/srv/openclaw-control-center-readonly/runtime/managed-action-inbox-runner/results/2026-05-17T16-41-32-472Z-20260517T164118Z-managed-action.txt.json`。
+- 已验证重复 `status` 返回 `inbox_empty`、`pendingCount=0`，原请求文件仍存在，大小 47 bytes，没有被移动或删除。
+- 已再次验证 Tom `healthcheck.sh` 通过，collector 快照正常，当前实例数量为 5。
+- 本轮仍未执行 approval `approve`、未打开 live gate、未调用 managed action live API、未修改 `openclaw.json`、未重启任何 OpenClaw 实例。
 
 ## 阶段完成后的下一步
 
-下一步部署安装器到 Tom，先运行 `status/plan` 审查 AGENTS 标记块，然后用显式确认执行 `apply`，验证只改 `AGENTS.md` 受控块且备份存在。安装后让 Tom 通过 Discord 真实消息写入 `control-center-commands/inbox/*.txt`，再由 host 侧 runner 做 `status/plan-next/run-next` smoke；仍不得执行 approval `approve`、不得打开 live gate、不得触发真实 skill。
+下一步让 Anan 从 Discord 发一条同类测试指令，验证“Discord/OpenClaw 消息 → Tom inbox → control-center dry-run 审计”的真实链路。建议指令为：“控制中心 dry-run：对 tom 运行 zhihu-human-ops-writing dry-run”。Tom 应只回报 inbox 文件路径；随后在 host 侧运行 `managed-action-inbox-runner.sh status/plan-next/run-next` 完成 dry-run 审计。仍不得执行 approval `approve`、不得打开 live gate、不得触发真实 skill。
