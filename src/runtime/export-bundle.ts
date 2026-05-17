@@ -3,9 +3,9 @@ import { join } from "node:path";
 import type { ExportBundle, ReadModelSnapshot } from "../types";
 import { loadBudgetPolicy } from "./budget-policy";
 import { commanderExceptions, commanderExceptionsFeed } from "./commander";
+import { resolveRuntimePath } from "./runtime-path";
 
-const RUNTIME_DIR = join(process.cwd(), "runtime");
-export const EXPORTS_DIR = join(RUNTIME_DIR, "exports");
+export const EXPORTS_DIR = resolveRuntimePath("exports");
 
 export interface ExportBundleWriteResult {
   fileName: string;

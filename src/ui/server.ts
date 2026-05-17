@@ -39,6 +39,11 @@ import { loadOpenClawInstanceConfigs } from "../runtime/instance-config";
 import { applyImportMutation, readImportMutationGuardState } from "../runtime/import-live";
 import { validateExportBundleDryRun, validateExportFileDryRun } from "../runtime/import-dry-run";
 import {
+  buildManagedActionDryRun,
+  isManagedActionName,
+  listManagedActions,
+} from "../runtime/managed-actions";
+import {
   evaluateLocalTokenGate,
   normalizeToken,
   readAuthorizationBearer,
@@ -1307,6 +1312,64 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
           ok: true,
           docs: buildApiDocs(),
         });
+      }
+
+      if (method === "GET" && path === "/api/managed-actions") {
+        assertAllowedQueryParams(url.searchParams, [], true);
+        return writeJson(res, 200, {
+          ok: true,
+          dryRunOnly: true,
+          actions: listManagedActions(),
+        });
+      }
+
+      if (method === "POST" && path === "/api/managed-actions/dry-run") {
+        assertAllowedQueryParams(url.searchParams, [], true);
+        assertJsonContentType(req);
+        const payload = expectObject(await readJsonBody(req), "managed action dry-run payload");
+        assertMutationAuthorizedWithConfig(
+          req,
+          "/api/managed-actions/dry-run",
+          {
+            gateRequired: localTokenGateRequired,
+            configuredToken: localApiToken,
+          },
+          typeof payload.localToken === "string" ? payload.localToken : undefined,
+        );
+
+        const instanceId = requiredBoundedString(payload.instanceId, "instanceId", 120);
+        const action = requiredBoundedString(payload.action, "action", 80);
+        if (!isManagedActionName(action)) {
+          throw new RequestValidationError("action must be one of: healthcheck, collector_refresh, skill_run.", 400);
+        }
+
+        const instanceConfig = loadOpenClawInstanceConfigs();
+        const instance = instanceConfig.instances.find((item) => item.id === instanceId);
+        if (!instance) {
+          throw new RequestValidationError(`instance '${instanceId}' was not found.`, 404);
+        }
+
+        const result = buildManagedActionDryRun({
+          action,
+          instance,
+          reason: optionalBoundedString(payload.reason, "reason", 240),
+          skillName: optionalBoundedString(payload.skillName, "skillName", 120),
+        });
+
+        await appendOperationAudit({
+          action: "managed_action_dry_run",
+          source: "api",
+          ok: true,
+          requestId,
+          detail: `previewed ${result.action} for ${result.target.instanceId}`,
+          metadata: {
+            target: result.target,
+            commandPreview: result.commandPreview,
+            mutatesOpenClawInstance: result.safety.mutatesOpenClawInstance,
+          },
+        });
+
+        return writeJson(res, 200, result);
       }
 
       if (method === "GET" && path === "/api/diagnostics") {

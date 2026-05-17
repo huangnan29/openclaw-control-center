@@ -6,18 +6,23 @@
 
 ## 本轮任务
 
-UI collector 可见性增强：在总览和详情页展示 collector 快照生成时间、来源路径、新鲜度和最大允许年龄，方便从页面上判断数据是否仍然可信。
+受控管理动作 dry-run 骨架：新增白名单管理动作的预览接口，只返回目标实例、命令预览、安全状态，并写入控制中心自己的审计日志，不对任何 OpenClaw 实例执行动作。
 
 ## 本轮不做
 
-- 不做任何写操作或管理动作。
+- 不执行任何真实管理动作。
 - 不修改任何 OpenClaw 实例目录。
-- 不接入 Tom 之外的其他 Oracle 服务器。
+- 不重启、不停止、不发布、不触发任何 OpenClaw 实例任务。
 - 不让中央控制中心直接挂载远端实例目录。
 
 ## 当前下一步
 
-接入第二台 Oracle 服务器的本地 collector：仍使用只读 exporter + collector 快照文件，先验证单台新增服务器不影响 Tom 和现有 OpenClaw 实例。
+把 dry-run 管理动作部署到 Tom 并验证：
+
+- `GET /api/managed-actions` 可以列出当前白名单动作。
+- `POST /api/managed-actions/dry-run` 只返回预览结果并写入 `operation-audit.log`。
+- Tom `healthcheck.sh` 继续通过。
+- 页面和现有 5 个 OpenClaw 实例不受影响。
 
 ## 最近完成
 
@@ -63,7 +68,16 @@ UI collector 可见性增强：在总览和详情页展示 collector 快照生�
 - 已在多实例总览和实例详情页新增 `Collector 快照` 面板，展示来源路径、生成时间、年龄/上限和新鲜度。
 - 已验证 `npm test -- test/multi-instance-readonly.test.ts test/ui-render-smoke.test.ts`。
 - 已验证 `npm run build`。
+- 已发现 Tom 之外的候选 Oracle 主机暂不能安全接入：22 端口可达，但 SSH banner 阶段超时；本轮不强行修改该主机。
+- 已新增只读多实例模式下的管理动作 dry-run API：`GET /api/managed-actions` 与 `POST /api/managed-actions/dry-run`。
+- 已新增白名单动作预览：`healthcheck`、`collector_refresh`、`skill_run`。
+- 已确保 dry-run 返回 `liveExecution:false`、`dryRun:true`，并声明 `mutatesOpenClawInstance:false`。
+- 已让 dry-run API 写入控制中心审计日志 `managed_action_dry_run`，不调用 OpenClaw 实例命令。
+- 已把 `notification-center` 与导出包目录统一到 `OPENCLAW_RUNTIME_DIR` 兼容路径，修复测试隔离下的命令回归。
+- 已验证 `npm test -- test/managed-actions-dry-run.test.ts test/readonly-multi-instance-safety.test.ts test/multi-instance-readonly.test.ts test/ui-render-smoke.test.ts`。
+- 已验证 `npm test -- test/phase9-routes-commands.test.ts`。
+- 已验证 `npm run build`。
 
 ## 阶段完成后的下一步
 
-跨服务器 collector 接入：选择 Tom 之外的一台 Oracle，部署只读 collector exporter，中央 registry 增加该服务器的 `collectorSnapshotPath`，并通过页面与 `healthcheck.sh` 验证不影响现有实例。
+部署 Tom 验证通过后，下一步进入管理入口可视化：在 UI 中添加 dry-run 动作入口，仍然只允许预览和审计，不开放真实执行。

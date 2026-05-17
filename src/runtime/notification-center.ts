@@ -1,5 +1,4 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import type {
   AcksStoreSnapshot,
   ActionQueueLink,
@@ -8,9 +7,10 @@ import type {
   NotificationCenterSnapshot,
   NotificationAck,
 } from "../types";
+import { getRuntimeDir, resolveRuntimePath } from "./runtime-path";
 
-const RUNTIME_DIR = join(process.cwd(), "runtime");
-export const ACKS_PATH = join(RUNTIME_DIR, "acks.json");
+const RUNTIME_DIR = getRuntimeDir();
+export const ACKS_PATH = resolveRuntimePath("acks.json");
 
 const EMPTY_ACKS: AcksStoreSnapshot = {
   acks: [],

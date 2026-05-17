@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 const PROJECT_ROOT = process.cwd();
-const RUNTIME_DIR = join(PROJECT_ROOT, "runtime");
+const RUNTIME_DIR = process.env.OPENCLAW_RUNTIME_DIR?.trim() || join(PROJECT_ROOT, "runtime");
 const OPERATION_AUDIT_LOG = join(RUNTIME_DIR, "operation-audit.log");
 const ACKS_PATH = join(RUNTIME_DIR, "acks.json");
 const TEST_LOCAL_TOKEN = "phase10-test-token";
@@ -52,6 +52,7 @@ test("done-checklist route logic builds readiness payload", async () => {
   assert(docs.routes.some((route) => route.path === "/api/action-queue"));
   assert(docs.routes.some((route) => route.path === "/api/action-queue/acks/prune-preview"));
   assert(docs.routes.some((route) => route.path === "/api/diagnostics"));
+  assert(docs.routes.some((route) => route.path === "/api/managed-actions/dry-run"));
   assert(docs.routes.some((route) => route.path === "/api/tasks/heartbeat"));
   assert(docs.routes.some((route) => route.path === "/api/usage-cost"));
 
@@ -150,7 +151,11 @@ test("backup export command path writes bundle and operation audit entry", async
   const metadata = asRecord(commandEntry.metadata);
   assert.equal(typeof metadata?.path, "string");
   const writtenPath = metadata?.path as string;
-  assert(writtenPath.replace(/\\/g, "/").includes("/runtime/exports/"));
+  assert(
+    writtenPath
+      .replace(/\\/g, "/")
+      .includes(`${RUNTIME_DIR.replace(/\\/g, "/")}/exports/`),
+  );
   assert(await fileExists(writtenPath), "Expected backup export file path from audit metadata to exist.");
 });
 

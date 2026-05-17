@@ -684,6 +684,36 @@ export function buildApiDocs(): ApiDocsPayload {
       },
       {
         method: "GET",
+        path: "/api/managed-actions",
+        summary: "List the whitelisted managed actions currently available as dry-run previews",
+        response: {
+          ok: "boolean",
+          dryRunOnly: "true",
+          actions: "ManagedActionDefinition[]",
+        },
+      },
+      {
+        method: "POST",
+        path: "/api/managed-actions/dry-run",
+        summary:
+          "Preview a whitelisted instance management action without executing OpenClaw instance commands (requires local token gate)",
+        body: {
+          instanceId: "required configured instance id",
+          action: "required healthcheck|collector_refresh|skill_run",
+          reason: "optional string <= 240",
+          skillName: "optional string <= 120 when action=skill_run",
+        },
+        response: {
+          ok: "boolean",
+          status: "dry_run_ready",
+          dryRun: "true",
+          liveExecution: "false",
+          commandPreview: "string[]",
+          safety: "{ mutatesOpenClawInstance:false, requiresConfirmation:true, auditRequired:true }",
+        },
+      },
+      {
+        method: "GET",
         path: "/api/tasks/heartbeat",
         summary: "Read recent heartbeat runs for assigned backlog automation",
         query: {

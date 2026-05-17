@@ -10,6 +10,7 @@ export type OperationAuditAction =
   | "import_apply"
   | "ack_prune"
   | "task_heartbeat"
+  | "managed_action_dry_run"
   | "task_room_create"
   | "task_room_message"
   | "task_room_handoff"
