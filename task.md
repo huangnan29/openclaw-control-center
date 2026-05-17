@@ -17,13 +17,13 @@ live 执行器挂载开关：新增 `MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED`，�
 
 ## 当前下一步
 
-部署 live 执行器挂载开关到 Tom 并验证默认关闭：
+设计 healthcheck 真实执行灰度演练方案：
 
-- Tom 继续保持 `MANAGED_ACTIONS_LIVE_ENABLED` 不为 `true`。
-- Tom 继续保持 `MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED` 不为 `true`。
-- Tom readiness 继续返回 `executor.productionWired=false`。
-- Tom 页面继续不包含 `/api/managed-actions/live` 前端调用。
-- Tom `healthcheck.sh` 必须通过新增的 live 开关安全检查。
+- 仅覆盖只读 `healthcheck`。
+- 先做配置样板与运行手册，不默认启用。
+- 真实调用必须继续要求本地令牌、有效 dry-run、rollout 规则和 `LIVE-ACTION-APPROVED`。
+- 页面仍不提供真实执行按钮。
+- Tom 暂不启用 live gate 或 executor。
 
 ## 最近完成
 
@@ -219,7 +219,13 @@ live 执行器挂载开关：新增 `MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED`，�
 - 已更新 Tom `healthcheck.sh`，如果 `MANAGED_ACTIONS_LIVE_ENABLED=true` 或 `MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED=true` 会直接失败。
 - 已验证 `npm test -- test/managed-action-live-gate.test.ts test/managed-actions-dry-run.test.ts test/managed-action-executor.test.ts test/managed-action-live-audit.test.ts test/managed-action-live-readiness.test.ts test/phase9-routes-commands.test.ts test/readonly-multi-instance-safety.test.ts test/multi-instance-readonly.test.ts test/ui-render-smoke.test.ts test/oss-readiness.test.ts`。
 - 已验证 `npm run build`。
+- 已提交并推送 `5ee4b43 feat: gate live managed action executor wiring`。
+- 已部署到 Tom，并验证运行提交 `5ee4b43`。
+- 已验证 Tom `healthcheck.sh` 通过，新增 live 开关安全检查通过。
+- 已验证 Tom 容器没有启用 `MANAGED_ACTIONS_LIVE_ENABLED=true` 或 `MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED=true`。
+- 已验证 Tom readiness 返回 `status=blocked`、`liveExecutionAvailable=false`、`liveExecutionAttempted=false`、`executor.productionWired=false`。
+- 已验证 Tom 总览页仍包含 `真实执行上线条件`，但不包含 `/api/managed-actions/live` 前端调用，也不包含真实执行确认短语。
 
 ## 阶段完成后的下一步
 
-部署 Tom 验证 live 执行器挂载开关默认关闭；通过后，进入 healthcheck 真实执行灰度演练方案设计，仍先不在页面提供执行入口。
+healthcheck 真实执行灰度演练方案：准备只读 healthcheck 的 rollout 样板、手动演练命令和回退说明；Tom 暂不默认启用。
