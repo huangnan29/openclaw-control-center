@@ -876,7 +876,7 @@ Tom 单 Oracle 上线下一步：
 ## 本轮继续（最终上线 runner prepare）
 
 - 已核对本地仓库：`multi-instance-readonly-control-center` 与 origin 同步，工作树干净。
-- 已核对 Tom repo：运行提交 `4fc0a4a`，工作树干净。
+- 已核对 Tom repo：运行提交 `fbd015d`，工作树干净。
 - 已检查标准 inbox：`MANAGED_ACTION_INBOX_SOURCE=control-center-container`、`MANAGED_ACTION_INBOX_DIR=/instances/tom/workspace/control-center-commands/inbox` 返回 `inbox_empty`、`candidateCount=1`、`pendingCount=0`，说明还没有新的 Discord 真实请求。
 - 已执行本机总状态入口 `ops/local/final-go-live-status.sh status`，返回 `ready_for_existing_instance_healthcheck`；当前拓扑为 `local-only`，第二台 Oracle host/key 被跳过，跨服务器接入不是当前上线阻塞。
 - 已执行本机总检查入口 `ops/local/final-go-live-status.sh check`，现有 5 个 OpenClaw gateway 端口、总览页、实例详情页、只读写接口闸门、容器安全边界和 collector 快照均通过；状态阻塞在 `blocked_managed_actions`，原因是 approval 仍为 `needs_manual_approval`，live gate 未打开。
@@ -885,7 +885,10 @@ Tom 单 Oracle 上线下一步：
 - `prepare` 后再次自动执行最终 check，现有实例健康仍通过，collector 快照正常，仍阻塞在人工 approval，不进入 live。
 - 已验证 Tom `live-healthcheck-readiness.sh status` 返回 `waiting_human_approval`。
 - 已验证 Tom `live-healthcheck-approval.sh status runtime/live-healthcheck-approval.json` 返回 `needs_manual_approval`，`approved=false`，`approvedBy` 和 `approvedAt` 仍为空，所有人工 checklist 仍未勾选。
-- 已验证最新证据包 `runtime/live-healthcheck-approval-packets/live-healthcheck-approval-packet-20260517T164512+0000.json`，`live-healthcheck-approval-packet.sh check` 返回 `ready`，commit 与当前 `4fc0a4a` 一致，`issues=[]`。
+- 文档提交同步到 Tom 后，旧证据包会因为 commit 变化被 readiness 正确拦截并返回 commit mismatch；这是批准前证据包安全机制生效。
+- 已按安全机制重新执行 `ops/local/final-go-live-runner.sh prepare`，为 Tom 当前 commit 重新生成证据包，并继续停在人工批准前。
+- 当前有效证据包不写死在文档中；以 Tom runtime 最新 `runtime/live-healthcheck-approval-packets/live-healthcheck-approval-packet-*.json` 和 `live-healthcheck-readiness.sh status` 为准。
+- 最终复核要求：Tom `live-healthcheck-readiness.sh status` 返回 `waiting_human_approval`，`issues=[]`，`approvalStatus=needs_manual_approval`；最新证据包 `live-healthcheck-approval-packet.sh check` 返回 `ready`，packet commit 与 Tom 当前 commit 一致。
 - 证据包安全字段显示：`callsManagedActionsLiveApi=false`、`writesOpenClawInstanceDirs=false`、`restartsOpenClawInstances=false`、`bypassesApproval=false`。
 - 已再次验证 Tom `healthcheck.sh` 通过，当前实例数量为 5。
 - 本轮仍未执行 approval `approve`、未打开 live gate、未调用 managed action live API、未修改 `openclaw.json`、未重启任何 OpenClaw 实例。
