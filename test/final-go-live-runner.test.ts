@@ -258,6 +258,7 @@ JSON
   "status": "ready_for_human_approval",
   "issues": [],
   "nextCommands": [
+    "CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK APPROVED_BY=Anan LOCAL_API_TOKEN=<本地令牌> ops/local/final-go-live-runner.sh approve-and-run",
     "CONFIRM_APPROVAL_RECORD=I_APPROVE_LIVE_HEALTHCHECK_RECORD APPROVED_BY=Anan repo/ops/tom-readonly/live-healthcheck-approval.sh approve runtime/live-healthcheck-approval.json"
   ],
   "safety": {
@@ -295,7 +296,7 @@ exit 2
 
 function runRunner(
   harness: Awaited<ReturnType<typeof writeHarness>>,
-  mode: "status" | "prepare" | "run-approved" | "approve-and-run",
+  mode: "status" | "prepare" | "run-approved" | "approve-and-run" | "verify-completed",
   extraEnv: Record<string, string> = {},
 ) {
   const result = spawnSync(SCRIPT, [mode], {
@@ -344,9 +345,11 @@ test("final go-live runner prepare 自动推进到人工批准前", async () => 
     assert.equal(report.status, "prepared_waiting_human_approval");
     assert.equal(report.safety.opensLiveGate, false);
     assert.equal(report.safety.callsManagedActionsLiveApi, false);
+    assert(report.nextCommands.some((command: string) => command.includes("final-go-live-runner.sh approve-and-run")));
     assert(report.nextCommands.some((command: string) => command.includes("live-healthcheck-approval.sh approve")));
     assert.equal(report.nextCommands.some((command: string) => command.includes("live-healthcheck-rollout-runner.sh prepare")), false);
     assert.match(sshLog, /live-healthcheck-rollout-runner\.sh prepare/);
+    assert.match(sshLog, /live-healthcheck-approval-review\.sh check/);
     assert.doesNotMatch(sshLog, /run-approved/);
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -388,8 +391,30 @@ test("final go-live runner prepare 已在人工批准边界时幂等返回", asy
     assert.equal(second.report.safety.opensLiveGate, false);
     assert.equal(second.report.safety.callsManagedActionsLiveApi, false);
     assert.equal(second.report.safety.alreadyAtHumanApprovalBoundary, true);
+    assert(second.report.nextCommands.some((command: string) => command.includes("final-go-live-runner.sh approve-and-run")));
     assert(second.report.nextCommands.some((command: string) => command.includes("live-healthcheck-approval.sh approve")));
     assert.equal(prepareCalls.length, 1);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("final go-live runner prepare 在 approval review 未 ready 时阻断且不批准", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-final-go-live-runner-prepare-review-blocked-"));
+  try {
+    const harness = await writeHarness(dir, { approvalReviewStatus: "blocked_preconditions" });
+    const { exitCode, report } = runRunner(harness, "prepare");
+    const sshLog = await readFile(harness.sshCalls, "utf8");
+
+    assert.notEqual(exitCode, 0);
+    assert.equal(report.status, "blocked_approval_review");
+    assert.equal(report.safety.approvesLiveHealthcheck, false);
+    assert.equal(report.safety.opensLiveGate, false);
+    assert.equal(report.safety.callsManagedActionsLiveApi, false);
+    assert.match(sshLog, /live-healthcheck-rollout-runner\.sh prepare/);
+    assert.match(sshLog, /live-healthcheck-approval-review\.sh check/);
+    assert.doesNotMatch(sshLog, /live-healthcheck-approval\.sh approve/);
+    assert.doesNotMatch(sshLog, /live-healthcheck-rollout-runner\.sh run-approved/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

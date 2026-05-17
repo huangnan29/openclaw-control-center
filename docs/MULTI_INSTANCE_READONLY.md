@@ -504,7 +504,18 @@ repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh run-approved
 
 `live-healthcheck-rollout-runner.sh prepare` 用于自动推进到人工批准前：如果 dry-run 证据已经 ready，它会准备 approval 模板、生成并校验批准前证据包，再运行 readiness `check`。它只写 control-center runtime 下的模板和证据文件，不批准 approval、不打开 live gate、不调用 managed action live API、不修改任何 OpenClaw 实例目录。
 
-`ops/local/final-go-live-runner.sh prepare` 是本机侧总入口：它先运行 `final-go-live-status.sh check`，确认 Tom 当前实例 healthcheck 通过且总闸门下一步确实是 Tom `live-healthcheck-rollout-runner.sh prepare` 后，才 SSH 到 Tom 自动推进到人工批准前。它不批准 approval、不打开 live gate、不调用 managed action live API。`run-approved` 必须额外提供 `CONFIRM_FINAL_GO_LIVE_RUNNER` 和 `LOCAL_API_TOKEN`，并由 Tom runner 再次校验 approval/readiness。`approve-and-run` 用于人工确认后的单命令上线演练：必须设置 `CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK`、`APPROVED_BY` 和 `LOCAL_API_TOKEN`，先运行 Tom `live-healthcheck-approval-review.sh check`，只有 review 是 `ready_for_human_approval` 才写 approval，然后执行一次性 `run-approved`；任何阻断态都不会写 approval 或打开 live gate。`run-approved` 与 `approve-and-run` 成功后会自动执行 Tom `verify-completed`，单独运行 `ops/local/final-go-live-runner.sh verify-completed` 也可以只读验收最新演练报告、approval 消费和只读恢复状态。
+`ops/local/final-go-live-runner.sh prepare` 是本机侧总入口：它先运行 `final-go-live-status.sh check`，确认 Tom 当前实例 healthcheck 通过且总闸门下一步确实是 Tom `live-healthcheck-rollout-runner.sh prepare` 后，才 SSH 到 Tom 自动推进到人工批准前。到达人工批准边界后，它会只读执行 Tom `live-healthcheck-approval-review.sh check`，把 `approve-and-run` 单命令作为下一步；如果 review 不 ready，则在批准前阻断。它不批准 approval、不打开 live gate、不调用 managed action live API。`run-approved` 必须额外提供 `CONFIRM_FINAL_GO_LIVE_RUNNER` 和 `LOCAL_API_TOKEN`，并由 Tom runner 再次校验 approval/readiness。`approve-and-run` 用于人工确认后的单命令上线演练：必须设置 `CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK`、`APPROVED_BY` 和 `LOCAL_API_TOKEN`，先运行 Tom `live-healthcheck-approval-review.sh check`，只有 review 是 `ready_for_human_approval` 才写 approval，然后执行一次性 `run-approved`；任何阻断态都不会写 approval 或打开 live gate。`run-approved` 与 `approve-and-run` 成功后会自动执行 Tom `verify-completed`，单独运行 `ops/local/final-go-live-runner.sh verify-completed` 也可以只读验收最新演练报告、approval 消费和只读恢复状态。
+
+Tom 当前部署没有在 `/srv/openclaw-control-center-readonly/.env` 保存 `LOCAL_API_TOKEN`，而是通过 `docker-compose.yml` 注入到 `openclaw-control-center-readonly` 容器环境。本机运行最终 live healthcheck 前，可以用 SSH 从容器环境读到当前 shell，并只检查长度，不打印 token：
+
+```bash
+export LOCAL_API_TOKEN="$(ssh -i /Users/anan/.ssh/oracle-oracle.key ubuntu@146.235.226.66 \
+'docker inspect openclaw-control-center-readonly --format "{{range .Config.Env}}{{println .}}{{end}}" | sed -n "s/^LOCAL_API_TOKEN=//p"')"
+python - <<'PY'
+import os
+print("LOCAL_API_TOKEN length =", len(os.environ.get("LOCAL_API_TOKEN", "")))
+PY
+```
 
 人工 approval 已批准后，`live-healthcheck-rollout-runner.sh run-approved` 会先确认 readiness 为 `approved_ready_for_live_window`，再要求 `CONFIRM_LIVE_HEALTHCHECK_RUNNER` 与 `LOCAL_API_TOKEN`，最后调用一次性演练窗口；如果前置条件或人工批准未满足，runner 会返回非 0 退出码并保持 live gate 关闭，避免 openclaw 调度侧把阻断误判成成功。窗口脚本仍负责自动恢复只读状态、消费 approval、生成前后影响快照和演练报告。随后 `live-healthcheck-rollout-runner.sh verify-completed` 只读确认 readiness 已变为 `approval_consumed`、最新报告 `passed`、approval 已消费、impact 检查通过且 `mutatesOpenClawInstance=false`，作为 live 演练完成的验收证据。
 

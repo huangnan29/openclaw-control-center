@@ -38,7 +38,7 @@ Tom 单 Oracle 上线下一步：
   readiness 脚本只读汇总总闸门、dry-run、证据包、approval 和 live window；它输出的下一步已统一指向 `live-healthcheck-rollout-runner.sh prepare/run-approved` 主链路，不生成证据包、不写 approval、不打开 live gate。
 - 自动推进到人工批准前：
   `ops/local/final-go-live-runner.sh prepare`
-  该本机总 runner 会先跑最终上线 `check`，确认 Tom 现有实例健康且下一步确实是 Tom runner prepare 后，才 SSH 到 Tom 执行准备动作并复核最终状态。
+  该本机总 runner 会先跑最终上线 `check`，确认 Tom 现有实例健康且下一步确实是 Tom runner prepare 后，才 SSH 到 Tom 执行准备动作并复核最终状态。到达人工批准边界后，它会只读运行 Tom approval review，并把 `approve-and-run` 单命令作为下一步；review 不 ready 时会在批准前阻断。
 - Tom 侧自动推进到人工批准前：
   `repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh prepare`
   该 runner 会检查 dry-run、准备 approval 模板、生成并校验证据包、刷新 readiness，然后停在人工批准前；不会批准 approval、不会打开 live gate。
@@ -54,6 +54,7 @@ Tom 单 Oracle 上线下一步：
   `ops/local/final-go-live-runner.sh verify-completed`
   `repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh verify-completed`
   该模式只读确认 readiness 为 `approval_consumed`、最新报告 `passed`、approval 已消费、impact 检查通过且未修改 OpenClaw 实例。
+- Tom 当前部署没有 `/srv/openclaw-control-center-readonly/.env`，`LOCAL_API_TOKEN` 来自 `openclaw-control-center-readonly` 容器环境；本机执行 live 演练前用 `docker inspect ... | sed -n "s/^LOCAL_API_TOKEN=//p"` 通过 SSH 读入当前 shell，且不要打印真实 token。
 
 ## 本轮新增（approve-and-run 最终入口）
 
@@ -76,6 +77,13 @@ Tom 单 Oracle 上线下一步：
 - 已扩展 `ops/local/final-go-live-runner.sh`，新增本机 `verify-completed` 代理入口；本机 `run-approved` 与 `approve-and-run` 成功后也会自动调用 Tom 验收。
 - 已更新 approval review：`ready_for_human_approval` 下一步现在同时给出本机 `approve-and-run` 单命令入口和手动 approval 命令。
 - 仍未执行 approval `approve`、未打开 live gate、未调用 managed action live API、未修改 OpenClaw 实例目录、未重启实例。
+
+## 本轮新增（prepare 下一步收敛到 approve-and-run）
+
+- 已增强 `ops/local/final-go-live-runner.sh prepare`：到达 `prepared_waiting_human_approval` 后，会只读执行 Tom `live-healthcheck-approval-review.sh check`。
+- `prepare` 现在会优先返回 approval review 的下一步，因此 OpenClaw 调度侧可直接看到 `final-go-live-runner.sh approve-and-run` 单命令。
+- 如果 approval review 未到 `ready_for_human_approval`，`prepare` 返回 `blocked_approval_review`，不会批准 approval、不会打开 live gate、不会调用 managed action live API。
+- 已补测试覆盖：`prepare` 返回 `approve-and-run` 下一步、重复 prepare 仍幂等、approval review 未 ready 时阻断且不批准。
 
 后续跨服务器扩展预留步骤：
 

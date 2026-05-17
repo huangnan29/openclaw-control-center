@@ -285,6 +285,43 @@ function hasCommand(report, pattern) {
   return commands.some((command) => String(command).includes(pattern));
 }
 
+function nextCommandsFrom(report) {
+  return Array.isArray(report?.nextCommands) ? report.nextCommands : [];
+}
+
+function reviewNextCommandsOrFallback(approvalReview, fallback) {
+  const reviewCommands = nextCommandsFrom(approvalReview?.report);
+  return reviewCommands.length > 0 ? reviewCommands : fallback;
+}
+
+function preparedHumanApprovalReport({ stages, writesTomRuntime, safetyExtra = {}, fallbackNextCommands = [] }) {
+  const approvalReview = runTomApprovalReview();
+  const reviewStatus = approvalReview.report?.status || "unknown";
+  const nextCommands = reviewNextCommandsOrFallback(approvalReview, fallbackNextCommands);
+  const reviewReady = approvalReview.exitCode === 0 && reviewStatus === "ready_for_human_approval";
+  return {
+    schemaVersion: 1,
+    status: reviewReady ? "prepared_waiting_human_approval" : "blocked_approval_review",
+    mode,
+    topologyMode,
+    generatedAt: new Date().toISOString(),
+    stages: { ...stages, approvalReview },
+    issues: reviewReady ? [] : [`approval review 未到 ready_for_human_approval：${reviewStatus}`],
+    nextCommands,
+    safety: baseSafety({
+      connectsTomSsh: true,
+      writesTomRuntime,
+      writesControlCenterRuntimeOnly: writesTomRuntime,
+      opensLiveGate: false,
+      callsManagedActionsLiveApi: false,
+      alreadyAtHumanApprovalBoundary: !writesTomRuntime,
+      checkRunsHealthcheckOnly: true,
+      approvalReviewRunsHealthcheckOnly: true,
+      ...safetyExtra,
+    }),
+  };
+}
+
 function baseSafety(extra = {}) {
   return {
     connectsTomSsh: mode !== "status",
@@ -338,25 +375,11 @@ function prepare() {
 
   const hasPrepareStep = hasCommand(before.report, "live-healthcheck-rollout-runner.sh prepare");
   if (!hasPrepareStep && hasCommand(before.report, "live-healthcheck-approval.sh approve")) {
-    return {
-      schemaVersion: 1,
-      status: "prepared_waiting_human_approval",
-      mode,
-      topologyMode,
-      generatedAt: new Date().toISOString(),
+    return preparedHumanApprovalReport({
       stages: { before },
-      issues: [],
-      nextCommands: Array.isArray(before.report?.nextCommands) ? before.report.nextCommands : [],
-      safety: baseSafety({
-        connectsTomSsh: true,
-        writesTomRuntime: false,
-        writesControlCenterRuntimeOnly: false,
-        opensLiveGate: false,
-        callsManagedActionsLiveApi: false,
-        alreadyAtHumanApprovalBoundary: true,
-        checkRunsHealthcheckOnly: true,
-      }),
-    };
+      writesTomRuntime: false,
+      fallbackNextCommands: nextCommandsFrom(before.report),
+    });
   }
 
   if (!hasPrepareStep && (hasCommand(before.report, "final-go-live-runner.sh run-approved") || hasCommand(before.report, "live-healthcheck-rollout-runner.sh run-approved"))) {
@@ -398,25 +421,12 @@ function prepare() {
   const tomStatusBefore = runTomRunner("status");
   const tomReadinessStatus = tomStatusBefore.report?.status || "unknown";
   if (tomStatusBefore.exitCode === 0 && tomReadinessStatus === "waiting_human_approval") {
-    return {
-      schemaVersion: 1,
-      status: "prepared_waiting_human_approval",
-      mode,
-      topologyMode,
-      generatedAt: new Date().toISOString(),
+    return preparedHumanApprovalReport({
       stages: { before, tomStatusBefore },
-      issues: [],
-      nextCommands: Array.isArray(tomStatusBefore.report?.nextCommands) ? tomStatusBefore.report.nextCommands : [],
-      safety: baseSafety({
-        connectsTomSsh: true,
-        writesTomRuntime: false,
-        writesControlCenterRuntimeOnly: false,
-        opensLiveGate: false,
-        callsManagedActionsLiveApi: false,
-        alreadyAtHumanApprovalBoundary: true,
-        observedTomReadinessStatus: tomReadinessStatus,
-      }),
-    };
+      writesTomRuntime: false,
+      safetyExtra: { observedTomReadinessStatus: tomReadinessStatus },
+      fallbackNextCommands: nextCommandsFrom(tomStatusBefore.report),
+    });
   }
 
   if (tomStatusBefore.exitCode === 0 && tomReadinessStatus === "approved_ready_for_live_window") {
@@ -449,6 +459,14 @@ function prepare() {
     && (tomStatus === "prepared_waiting_human_approval" || tomStatus === "prepared_approved_ready_for_live_window");
   const tomNextCommands = Array.isArray(tomPrepare.report?.nextCommands) ? tomPrepare.report.nextCommands : [];
   const afterNextCommands = Array.isArray(after.report?.nextCommands) ? after.report.nextCommands : [];
+  if (prepared && tomStatus === "prepared_waiting_human_approval") {
+    return preparedHumanApprovalReport({
+      stages: { before, tomStatusBefore, tomPrepare, after },
+      writesTomRuntime: true,
+      safetyExtra: { finalStatusAfter: afterStatus },
+      fallbackNextCommands: tomNextCommands.length > 0 ? tomNextCommands : afterNextCommands,
+    });
+  }
   return {
     schemaVersion: 1,
     status: prepared ? tomStatus : `blocked_${tomStatus}`,

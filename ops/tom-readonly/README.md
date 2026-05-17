@@ -184,7 +184,18 @@ COLLECTOR_SNAPSHOT_MAX_AGE_SECONDS=300 ./healthcheck.sh
 BRANCH=multi-instance-readonly-control-center ./update.sh
 ```
 
-`ops/local/final-go-live-runner.sh prepare` 是给 openclaw 调用的本机侧总 runner：它先执行 `final-go-live-status.sh check`，只有当总闸门下一步是 Tom `live-healthcheck-rollout-runner.sh prepare` 时，才 SSH 到 Tom 准备 approval 模板和批准前证据包，然后重新检查最终状态并停在人工批准前。如果总闸门仍提示 `prepare`，本机 runner 会先只读询问 Tom runner 当前 readiness；已经处在人工批准边界或已批准待执行边界时，重复执行 `prepare` 会幂等返回当前边界，不会再次写 Tom runtime。它不会批准 approval、不会打开 live gate、不会调用 managed action live API。`run-approved` 还必须显式设置 `CONFIRM_FINAL_GO_LIVE_RUNNER` 和 `LOCAL_API_TOKEN`，并会继续交给 Tom runner 再校验 approval/readiness。`approve-and-run` 是人工批准后的单命令入口：先运行 Tom `live-healthcheck-approval-review.sh check`，只在 `ready_for_human_approval` 时用 `APPROVED_BY` 写入 approval，再调用原 `run-approved` 链路；未确认、未提供批准人/令牌、review 未 ready 时都会在批准前阻断。`run-approved` 和 `approve-and-run` 成功后会自动调用 Tom `verify-completed`，要求最新报告通过、approval 已消费、只读状态已恢复；也可以单独运行本机 `verify-completed` 做演练后复核。
+`ops/local/final-go-live-runner.sh prepare` 是给 openclaw 调用的本机侧总 runner：它先执行 `final-go-live-status.sh check`，只有当总闸门下一步是 Tom `live-healthcheck-rollout-runner.sh prepare` 时，才 SSH 到 Tom 准备 approval 模板和批准前证据包，然后重新检查最终状态并停在人工批准前。如果总闸门仍提示 `prepare`，本机 runner 会先只读询问 Tom runner 当前 readiness；已经处在人工批准边界或已批准待执行边界时，重复执行 `prepare` 会幂等返回当前边界，不会再次写 Tom runtime。到达人工批准边界后，`prepare` 还会只读执行 Tom `live-healthcheck-approval-review.sh check`，并把 `approve-and-run` 单命令作为下一步；如果 review 不 ready，则在批准前阻断。它不会批准 approval、不会打开 live gate、不会调用 managed action live API。`run-approved` 还必须显式设置 `CONFIRM_FINAL_GO_LIVE_RUNNER` 和 `LOCAL_API_TOKEN`，并会继续交给 Tom runner 再校验 approval/readiness。`approve-and-run` 是人工批准后的单命令入口：先运行 Tom `live-healthcheck-approval-review.sh check`，只在 `ready_for_human_approval` 时用 `APPROVED_BY` 写入 approval，再调用原 `run-approved` 链路；未确认、未提供批准人/令牌、review 未 ready 时都会在批准前阻断。`run-approved` 和 `approve-and-run` 成功后会自动调用 Tom `verify-completed`，要求最新报告通过、approval 已消费、只读状态已恢复；也可以单独运行本机 `verify-completed` 做演练后复核。
+
+`LOCAL_API_TOKEN` 是 control-center 本地 API 令牌。Tom 当前部署将它注入到 `openclaw-control-center-readonly` 容器环境中，而不是放在部署目录 `.env`。本机执行最终 live healthcheck 前，可从容器环境读取到当前 shell，命令本身不会打印真实 token：
+
+```bash
+export LOCAL_API_TOKEN="$(ssh -i ~/.ssh/oracle-oracle.key ubuntu@146.235.226.66 \
+'docker inspect openclaw-control-center-readonly --format "{{range .Config.Env}}{{println .}}{{end}}" | sed -n "s/^LOCAL_API_TOKEN=//p"')"
+python - <<'PY'
+import os
+print("LOCAL_API_TOKEN length =", len(os.environ.get("LOCAL_API_TOKEN", "")))
+PY
+```
 
 `managed-action-command-runner.sh` 是给 OpenClaw/Discord 机器人调用的 dry-run 命令入口。`plan` 只读取命令 JSON 并校验字段，不联网、不写审计；`parse-text/plan-text` 会把“对 tom 运行 zhihu-human-ops-writing dry-run”这类文本解析成受控 payload，且要求文本必须明确包含 dry-run/预览/演练并拒绝 live、发布、重启、approval 等高风险词；`dry-run/dry-run-text` 必须设置 `CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN`，并通过 `LOCAL_API_TOKEN` 或显式 `MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container` 取得本地令牌，只调用 `/api/managed-actions/dry-run` 生成预览与审计记录，不打开 live gate、不执行实例命令。`skill_run` 命令必须带 `skillName`，当前仍只是预览未来 skill 调用，不会真正调 OpenClaw skill。
 
