@@ -484,6 +484,8 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(readinessText, /live-healthcheck-readiness\.sh status/);
   assert.match(readinessText, /live-healthcheck-readiness\.sh check/);
   assert.match(readinessText, /live-healthcheck-approval-packet\.sh/);
+  assert.match(readinessText, /live-healthcheck-rollout-runner\.sh prepare/);
+  assert.match(readinessText, /live-healthcheck-rollout-runner\.sh run-approved/);
   assert.match(readinessText, /generatesApprovalPacket: false/);
   assert.match(readinessText, /writesApprovalFile: false/);
   assert.match(readinessText, /opensLiveGate: false/);

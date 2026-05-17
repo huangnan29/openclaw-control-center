@@ -218,11 +218,11 @@ function decide(stages, issues) {
 }
 
 function nextCommands(status) {
+  const prepareRunner = "repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh prepare";
+  const runApproved = "CONFIRM_LIVE_HEALTHCHECK_RUNNER=I_UNDERSTAND_THIS_RUNS_APPROVED_LIVE_HEALTHCHECK LOCAL_API_TOKEN=<本地令牌> repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh run-approved";
   if (status === "blocked_preconditions") {
     return [
-      "repo/ops/tom-readonly/managed-action-dry-run-gate.sh status",
-      "repo/ops/tom-readonly/live-healthcheck-approval-packet.sh generate",
-      "repo/ops/tom-readonly/live-healthcheck-approval-packet.sh check",
+      prepareRunner,
     ];
   }
   if (status === "waiting_human_approval") {
@@ -232,12 +232,13 @@ function nextCommands(status) {
   }
   if (status === "approved_ready_for_live_window") {
     return [
-      "CONFIRM_LIVE_HEALTHCHECK_WINDOW=I_UNDERSTAND_THIS_TEMPORARILY_ENABLES_LIVE_GATE CONFIRM_LIVE_HEALTHCHECK=I_UNDERSTAND_THIS_CALLS_LIVE_API LOCAL_API_TOKEN=<本地令牌> INSTANCE_ID=tom OPERATOR=Anan repo/ops/tom-readonly/live-healthcheck-window.sh run",
+      runApproved,
     ];
   }
   if (status === "approval_consumed") {
     return [
-      "repo/ops/tom-readonly/live-healthcheck-approval.sh prepare runtime/live-healthcheck-approval.json",
+      prepareRunner,
+      "CONFIRM_APPROVAL_RECORD=I_APPROVE_LIVE_HEALTHCHECK_RECORD APPROVED_BY=Anan repo/ops/tom-readonly/live-healthcheck-approval.sh approve runtime/live-healthcheck-approval.json",
     ];
   }
   return [

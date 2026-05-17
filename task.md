@@ -35,7 +35,7 @@ Tom 单 Oracle 上线下一步：
   `repo/ops/tom-readonly/live-healthcheck-readiness.sh status`
   需要同时验证 Tom 现有实例只读健康时运行：
   `repo/ops/tom-readonly/live-healthcheck-readiness.sh check`
-  readiness 脚本只读汇总总闸门、dry-run、证据包、approval 和 live window，不生成证据包、不写 approval、不打开 live gate。
+  readiness 脚本只读汇总总闸门、dry-run、证据包、approval 和 live window；它输出的下一步已统一指向 `live-healthcheck-rollout-runner.sh prepare/run-approved` 主链路，不生成证据包、不写 approval、不打开 live gate。
 - 自动推进到人工批准前：
   `repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh prepare`
   该 runner 会检查 dry-run、准备 approval 模板、生成并校验证据包、刷新 readiness，然后停在人工批准前；不会批准 approval、不会打开 live gate。

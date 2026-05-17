@@ -178,7 +178,7 @@ test("live healthcheck readiness 在批准后提示一次性演练命令", async
 
     assert.equal(report.status, "approved_ready_for_live_window");
     assert.equal(report.safety.checkRunsHealthcheckOnly, true);
-    assert(report.nextCommands.some((command: string) => command.includes("live-healthcheck-window.sh run")));
+    assert(report.nextCommands.some((command: string) => command.includes("live-healthcheck-rollout-runner.sh run-approved")));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -192,7 +192,7 @@ test("live healthcheck readiness 在证据包失效时阻塞前置条件", async
 
     assert.equal(report.status, "blocked_preconditions");
     assert(report.issues.some((issue: string) => issue.includes("批准前证据包未 ready")));
-    assert(report.nextCommands.some((command: string) => command.includes("live-healthcheck-approval-packet.sh generate")));
+    assert(report.nextCommands.some((command: string) => command.includes("live-healthcheck-rollout-runner.sh prepare")));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
