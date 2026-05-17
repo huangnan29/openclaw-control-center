@@ -164,12 +164,17 @@ rollback_on_exit() {
 show_status() {
   require_base_paths
   [ -x "$PREFLIGHT_SCRIPT" ] || fail "preflight 脚本不存在或不可执行：${PREFLIGHT_SCRIPT}"
+  [ -x "$APPROVAL_SCRIPT" ] || fail "批准校验脚本不存在或不可执行：${APPROVAL_SCRIPT}"
   local rollout_for_status="$ROLLOUT_HOST_FILE"
   if [ -f "$OVERRIDE_FILE" ]; then
     log "检测到临时 override 文件：${OVERRIDE_FILE}"
   else
     log "未检测到临时 override 文件"
   fi
+  log "读取 approval 状态：${APPROVAL_FILE}"
+  INSTANCE_ID="${INSTANCE_ID:-tom}" \
+    OPERATOR="${OPERATOR:-Anan}" \
+    "$APPROVAL_SCRIPT" status "$APPROVAL_FILE"
   if [ ! -f "$rollout_for_status" ]; then
     rollout_for_status="$ROLLOUT_SOURCE"
   fi

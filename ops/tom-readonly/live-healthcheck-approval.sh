@@ -68,6 +68,16 @@ NODE
   log "已生成批准模板：${output}"
 }
 
+prepare_template() {
+  local output="${1:-$APPROVAL_FILE}"
+  if [ -f "$output" ]; then
+    log "批准文件已存在，不覆盖：${output}"
+  else
+    write_template "$output" >/dev/null
+  fi
+  show_status "$output"
+}
+
 check_approval() {
   local input="${1:-$APPROVAL_FILE}"
   [ -f "$input" ] || fail "批准文件不存在：${input}。请先运行：$0 template ${input}"
@@ -154,26 +164,109 @@ console.log(JSON.stringify({
 NODE
 }
 
+show_status() {
+  local input="${1:-$APPROVAL_FILE}"
+  APPROVAL_FILE="$input" \
+    INSTANCE_ID="$INSTANCE_ID" \
+    OPERATOR="$OPERATOR" \
+    APPROVAL_MAX_AGE_HOURS="$APPROVAL_MAX_AGE_HOURS" \
+    node <<'NODE'
+const fs = require("node:fs");
+
+const file = process.env.APPROVAL_FILE;
+const expectedInstanceId = process.env.INSTANCE_ID || "tom";
+const expectedOperator = process.env.OPERATOR || "Anan";
+const maxAgeHours = Number(process.env.APPROVAL_MAX_AGE_HOURS || "24");
+
+function print(status, extra = {}) {
+  console.log(JSON.stringify({ status, file, ...extra }, null, 2));
+}
+
+if (!fs.existsSync(file)) {
+  print("missing", {
+    nextAction: `run live-healthcheck-approval.sh prepare ${file}`,
+  });
+  process.exit(0);
+}
+
+let approval;
+try {
+  approval = JSON.parse(fs.readFileSync(file, "utf8"));
+} catch (error) {
+  print("invalid_json", {
+    message: error instanceof Error ? error.message : String(error),
+  });
+  process.exit(0);
+}
+
+const issues = [];
+if (approval.approved !== true) issues.push("approved is not true");
+if (typeof approval.approvedBy !== "string" || approval.approvedBy.trim() === "") issues.push("approvedBy is empty");
+const approvedAtMs = Date.parse(String(approval.approvedAt || ""));
+if (!Number.isFinite(approvedAtMs)) {
+  issues.push("approvedAt is invalid");
+} else if (Number.isFinite(maxAgeHours) && maxAgeHours > 0) {
+  const ageMs = Date.now() - approvedAtMs;
+  if (ageMs < -5 * 60 * 1000) issues.push("approvedAt is too far in the future");
+  if (ageMs > maxAgeHours * 60 * 60 * 1000) issues.push(`approval is older than ${maxAgeHours}h`);
+}
+if (approval.instanceId !== expectedInstanceId) issues.push(`instanceId is not ${expectedInstanceId}`);
+if (approval.action !== "healthcheck") issues.push("action is not healthcheck");
+if (approval.operator !== expectedOperator) issues.push(`operator is not ${expectedOperator}`);
+if (approval.risk !== "low") issues.push("risk is not low");
+if (approval.scope?.mutatesOpenClawInstance !== false) issues.push("scope.mutatesOpenClawInstance is not false");
+const checklist = approval.checklist || {};
+for (const key of [
+  "understandsTemporaryLiveGate",
+  "understandsLocalTokenRequired",
+  "understandsAutoRollback",
+  "understandsImpactSnapshot",
+]) {
+  if (checklist[key] !== true) issues.push(`checklist.${key} is not true`);
+}
+
+print(issues.length === 0 ? "approved" : "needs_manual_approval", {
+  approved: approval.approved === true,
+  approvedBy: typeof approval.approvedBy === "string" ? approval.approvedBy : "",
+  approvedAt: typeof approval.approvedAt === "string" ? approval.approvedAt : "",
+  instanceId: approval.instanceId,
+  action: approval.action,
+  operator: approval.operator,
+  issues,
+});
+NODE
+}
+
 usage() {
   cat <<'TEXT'
 用法：
+  live-healthcheck-approval.sh prepare [approval.json]
   live-healthcheck-approval.sh template [approval.json]
   live-healthcheck-approval.sh check [approval.json]
+  live-healthcheck-approval.sh status [approval.json]
 
 说明：
+  prepare 只在文件不存在时生成模板，并输出当前状态。
   template 只生成批准文件模板，不会启用 live gate。
   check 只校验批准文件，不会调用 live API。
+  status 只读取批准文件状态，不会失败，也不会调用 live API。
 TEXT
 }
 
 main() {
   require_command node
   case "${1:-check}" in
+    prepare)
+      prepare_template "${2:-$APPROVAL_FILE}"
+      ;;
     template)
       write_template "${2:-$APPROVAL_FILE}"
       ;;
     check)
       check_approval "${2:-$APPROVAL_FILE}"
+      ;;
+    status)
+      show_status "${2:-$APPROVAL_FILE}"
       ;;
     -h|--help|help)
       usage

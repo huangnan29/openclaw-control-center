@@ -33,7 +33,8 @@ cd /srv/openclaw-control-center-readonly
 ./install-collector-cron.sh
 ./update.sh
 ./rollback.sh <commit>
-repo/ops/tom-readonly/live-healthcheck-approval.sh template runtime/live-healthcheck-approval.json
+repo/ops/tom-readonly/live-healthcheck-approval.sh prepare runtime/live-healthcheck-approval.json
+repo/ops/tom-readonly/live-healthcheck-approval.sh status runtime/live-healthcheck-approval.json
 repo/ops/tom-readonly/live-healthcheck-approval.sh check runtime/live-healthcheck-approval.json
 repo/ops/tom-readonly/live-healthcheck-window.sh status
 repo/ops/tom-readonly/instance-impact-snapshot.sh snapshot readonly-baseline
@@ -68,12 +69,13 @@ OPERATOR=Anan \
 更推荐使用一次性演练窗口，脚本会在退出前自动恢复只读状态：
 
 ```bash
-repo/ops/tom-readonly/live-healthcheck-approval.sh template runtime/live-healthcheck-approval.json
+repo/ops/tom-readonly/live-healthcheck-approval.sh prepare runtime/live-healthcheck-approval.json
 # 人工编辑 runtime/live-healthcheck-approval.json：
 # - approved=true
 # - approvedAt=<当前 ISO 时间>
 # - approvedBy=<批准人>
 # - checklist 全部为 true
+repo/ops/tom-readonly/live-healthcheck-approval.sh status runtime/live-healthcheck-approval.json
 repo/ops/tom-readonly/live-healthcheck-approval.sh check runtime/live-healthcheck-approval.json
 
 CONFIRM_LIVE_HEALTHCHECK_WINDOW=I_UNDERSTAND_THIS_TEMPORARILY_ENABLES_LIVE_GATE \

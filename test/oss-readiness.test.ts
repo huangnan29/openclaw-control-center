@@ -172,7 +172,10 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(impactText, /liveExecutionAvailable/);
   assert.match(impactText, /READONLY_MODE/);
   const approvalText = readFileSync(liveHealthcheckApproval, "utf8");
+  assert.match(approvalText, /live-healthcheck-approval\.sh prepare/);
   assert.match(approvalText, /live-healthcheck-approval\.sh template/);
+  assert.match(approvalText, /live-healthcheck-approval\.sh status/);
+  assert.match(approvalText, /needs_manual_approval/);
   assert.match(approvalText, /approved 必须为 true/);
   assert.match(approvalText, /I_UNDERSTAND_THIS_TEMPORARILY_ENABLES_LIVE_GATE/);
   assert.match(approvalText, /I_UNDERSTAND_THIS_CALLS_LIVE_API/);
@@ -206,6 +209,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(liveWindowText, /stop_live_window/);
   assert.match(liveWindowText, /live-healthcheck-approval\.sh/);
   assert.match(liveWindowText, /check_approval_file/);
+  assert.match(liveWindowText, /APPROVAL_SCRIPT\" status/);
   assert.match(liveWindowText, /live-healthcheck-report\.sh/);
   assert.match(liveWindowText, /instance-impact-snapshot\.sh/);
   assert.match(liveWindowText, /compare "\$IMPACT_BEFORE" "\$impact_after"/);
