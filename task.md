@@ -734,8 +734,16 @@ Tom 单 Oracle 上线下一步：
 - 已重新验证 `npm test -- test/managed-action-command-runner.test.ts test/managed-actions-dry-run.test.ts test/managed-action-live-readiness.test.ts test/managed-action-live-gate.test.ts test/oss-readiness.test.ts test/readonly-multi-instance-safety.test.ts`。
 - 已重新验证 `npm run build`。
 - 已重新验证 `git diff --check`。
+- 已提交并推送 `c8497be ops: add managed action command dry run runner` 与 `5cc68c6 ops: support container token for command dry runs`。
+- 已部署到 Tom，并验证运行提交 `5cc68c6`。
+- 已验证 Tom `update.sh` 通过，5 个 OpenClaw gateway 健康端口、只读写接口拦截、容器安全边界和 collector 快照均通过。
+- 已在 Tom 生成 `runtime/managed-action-command-smoke.json`，内容为 `instanceId=tom`、`action=skill_run`、`skillName=zhihu-human-ops-writing`。
+- 已验证 Tom `managed-action-command-runner.sh status` 返回 `status_ready`，readiness 仍为 `blocked`、`liveExecutionAvailable=false`。
+- 已验证 Tom `managed-action-command-runner.sh plan runtime/managed-action-command-smoke.json` 返回 `planned`，且 `callsManagedActionsDryRunApi=false`、`callsManagedActionsLiveApi=false`、`writesOpenClawInstanceDirs=false`。
+- 已验证 Tom 使用 `CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN=I_UNDERSTAND_THIS_ONLY_CALLS_MANAGED_ACTION_DRY_RUN_API MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container` 执行 `dry-run` 成功，返回 `dry_run_completed`、`apiStatus=dry_run_ready`，生成 dry-run 审计 `operationRequestId=26dc83f7-5abb-4736-b6ae-578a7b8db1ea`。
+- 已验证 Tom dry-run 的 `commandPreview` 为 `openclaw skill dry-run for instance tom: zhihu-human-ops-writing`，安全字段为 `callsManagedActionsDryRunApi=true`、`callsManagedActionsLiveApi=false`、`writesOpenClawInstanceDirs=false`、`restartsOpenClawInstances=false`、`opensLiveGate=false`、`localApiTokenSource=container`。
 - 本轮仍未执行 approval `approve`、未打开 live gate、未调用 `/api/managed-actions/live`、未修改或重启任何 OpenClaw 实例。
 
 ## 阶段完成后的下一步
 
-先提交并部署本轮 `managed-action-command-runner.sh` 到 Tom，然后在 Tom 上用 `skill_run` 命令 JSON 做一次 `plan` 和一次 dry-run 烟测，确认机器人入口能写入 dry-run 审计但仍不执行实例命令。人工填写并校验 `/srv/openclaw-control-center-readonly/runtime/live-healthcheck-approval.json` 后，才能执行一次只读 healthcheck live 演练；演练前后都必须确认现有 OpenClaw 实例未被重启、未被写入、未被触发任务。若演练通过，再进入单动作灰度策略收口；若失败，保持只读并先修复失败点。
+下一步把 OpenClaw/Discord 指令文本到 `runtime/managed-action-command.json` 的转换规则固化，例如把“对 tom 运行 zhihu-human-ops-writing dry-run”映射成 `managed-action-command-runner.sh plan/dry-run`。人工填写并校验 `/srv/openclaw-control-center-readonly/runtime/live-healthcheck-approval.json` 后，才能执行一次只读 healthcheck live 演练；演练前后都必须确认现有 OpenClaw 实例未被重启、未被写入、未被触发任务。若演练通过，再进入单动作灰度策略收口；若失败，保持只读并先修复失败点。
