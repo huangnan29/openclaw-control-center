@@ -521,6 +521,22 @@ export interface AgentRosterSnapshot {
   entries: AgentRosterEntry[];
 }
 
+export type RuntimeLogSeverity = "info" | "warn" | "error" | "action-required";
+
+export interface RuntimeLogEntry {
+  timestamp: string;
+  severity: RuntimeLogSeverity;
+  sourcePath: string;
+  message: string;
+}
+
+export interface RuntimeLogSnapshot {
+  status: "connected" | "partial" | "not_connected";
+  sourcePaths: string[];
+  detail: string;
+  entries: RuntimeLogEntry[];
+}
+
 export interface BudgetPolicyConfig {
   defaults: BudgetThresholds;
   agent: Record<string, BudgetThresholds>;
@@ -539,6 +555,7 @@ export interface ReadModelSnapshot {
   tasksSummary: TasksSummary;
   budgetSummary: BudgetSummary;
   agentRoster?: AgentRosterSnapshot;
+  runtimeLogs?: RuntimeLogSnapshot;
   generatedAt: string;
 }
 

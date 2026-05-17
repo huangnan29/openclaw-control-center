@@ -19,6 +19,7 @@ import { computeProjectSummaries } from "../runtime/project-summary";
 import { loadTaskStore } from "../runtime/task-store";
 import { computeTasksSummary } from "../runtime/task-summary";
 import { loadBestEffortAgentRoster } from "../runtime/agent-roster";
+import { loadRuntimeLogs } from "../runtime/runtime-logs";
 import type { OpenClawInstanceConfig } from "../types";
 
 /**
@@ -109,12 +110,17 @@ export class OpenClawReadonlyAdapter {
     const statuses = Array.from(this.cachedStatuses.values());
     const cronJobs = await this.listCronJobs();
     const approvals = await this.listApprovals();
-    const [projects, tasks, agentRoster] = await Promise.all([
+    const [projects, tasks, agentRoster, runtimeLogs] = await Promise.all([
       loadProjectStore(),
       loadTaskStore(),
       loadBestEffortAgentRoster({
         openclawHome: this.instance?.openclawHome,
         configPath: this.instance?.openclawConfigPath,
+      }),
+      loadRuntimeLogs({
+        workspaceRoot: this.instance?.workspaceRoot,
+        openclawHome: this.instance?.openclawHome,
+        openclawConfigPath: this.instance?.openclawConfigPath,
       }),
     ]);
     const budgetPolicy = await loadBudgetPolicy();
@@ -140,6 +146,7 @@ export class OpenClawReadonlyAdapter {
       tasksSummary,
       budgetSummary,
       agentRoster,
+      runtimeLogs,
       generatedAt: new Date().toISOString(),
     };
   }

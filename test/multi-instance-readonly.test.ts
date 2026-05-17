@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -121,5 +121,35 @@ test("OpenClawReadonlyAdapter 从实例级 openclaw.json 读取 Agent 配置名�
     assert(snapshot.agentRoster?.detail.includes("source of truth"));
   } finally {
     await rm(home, { recursive: true, force: true });
+  }
+});
+
+test("OpenClawReadonlyAdapter 从实例 workspace 读取真实 runtime 日志", async () => {
+  const root = await mkdtemp(join(tmpdir(), "openclaw-readonly-logs-"));
+  const workspace = join(root, "workspace");
+  const logDir = join(workspace, "runtime", "logs");
+
+  try {
+    await mkdir(logDir, { recursive: true });
+    await writeFile(
+      join(logDir, "runtime.log"),
+      "2026-05-17T03:10:00.000Z info adapter real runtime log\n",
+      "utf8",
+    );
+
+    const adapter = new OpenClawReadonlyAdapter(new ReadonlyToolClient(), {
+      ...instance("main"),
+      workspaceRoot: workspace,
+      openclawHome: join(root, "config"),
+      openclawConfigPath: join(root, "config", "openclaw.json"),
+    });
+
+    const snapshot = await adapter.snapshot();
+
+    assert.equal(snapshot.runtimeLogs?.status, "connected");
+    assert.equal(snapshot.runtimeLogs?.entries[0]?.message, "adapter real runtime log");
+    assert(snapshot.runtimeLogs?.entries[0]?.sourcePath.endsWith("runtime.log"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });

@@ -89,6 +89,12 @@ export function emptySnapshot(): ReadModelSnapshot {
       detail: "snapshot unavailable.",
       entries: [],
     },
+    runtimeLogs: {
+      status: "not_connected",
+      sourcePaths: [],
+      detail: "snapshot unavailable.",
+      entries: [],
+    },
     generatedAt,
   };
 }

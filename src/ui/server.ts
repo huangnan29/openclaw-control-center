@@ -6045,6 +6045,7 @@ interface MultiInstanceLogRow {
   severity: "info" | "warn" | "error" | "action-required";
   source: string;
   message: string;
+  real: boolean;
 }
 
 function collectAgentIdsForInstance(item: InstanceSnapshot): Set<string> {
@@ -6181,6 +6182,22 @@ function buildMultiInstanceLogRows(items: InstanceSnapshot[], generatedAt: strin
   const rows: MultiInstanceLogRow[] = [];
 
   for (const item of items) {
+    const realLogs = item.snapshot.runtimeLogs?.entries ?? [];
+    if (realLogs.length > 0) {
+      for (const log of realLogs) {
+        rows.push({
+          instanceId: item.instance.id,
+          instanceName: item.instance.name,
+          timestamp: log.timestamp,
+          severity: log.severity,
+          source: `runtime-log:${basenameForUi(log.sourcePath)}`,
+          message: log.message,
+          real: true,
+        });
+      }
+      continue;
+    }
+
     const metrics = buildInstanceUiMetrics(item);
     rows.push({
       instanceId: item.instance.id,
@@ -6189,6 +6206,7 @@ function buildMultiInstanceLogRows(items: InstanceSnapshot[], generatedAt: strin
       severity: item.status === "connected" ? "info" : item.status === "partial" ? "warn" : "error",
       source: "health",
       message: `${item.instance.name}: ${multiInstanceStatusLabel(item.status, "en")} · ${item.detail}`,
+      real: false,
     });
 
     for (const session of item.snapshot.sessions) {
@@ -6200,6 +6218,7 @@ function buildMultiInstanceLogRows(items: InstanceSnapshot[], generatedAt: strin
         severity: session.state === "error" ? "error" : session.state === "blocked" || session.state === "waiting_approval" ? "warn" : "info",
         source: "session",
         message: `${sessionStateLabel(session.state)} · ${session.label ?? session.agentId ?? session.sessionKey}`,
+        real: false,
       });
     }
 
@@ -6211,6 +6230,7 @@ function buildMultiInstanceLogRows(items: InstanceSnapshot[], generatedAt: strin
         severity: task.status === "blocked" ? "warn" : "info",
         source: "task",
         message: `${task.status} · ${task.title} · ${task.owner}`,
+        real: false,
       });
     }
 
@@ -6222,6 +6242,7 @@ function buildMultiInstanceLogRows(items: InstanceSnapshot[], generatedAt: strin
         severity: approval.status === "pending" ? "action-required" : approval.status === "denied" ? "warn" : "info",
         source: "approval",
         message: `${approval.status} · ${approval.command ?? approval.decision ?? approval.reason ?? approval.approvalId}`,
+        real: false,
       });
     }
 
@@ -6233,6 +6254,7 @@ function buildMultiInstanceLogRows(items: InstanceSnapshot[], generatedAt: strin
         severity: metrics.errors > 0 ? "error" : "action-required",
         source: "signal",
         message: `blocked=${metrics.blocked} errors=${metrics.errors} pendingApprovals=${metrics.pendingApprovals}`,
+        real: false,
       });
     }
 
@@ -6245,11 +6267,17 @@ function buildMultiInstanceLogRows(items: InstanceSnapshot[], generatedAt: strin
         severity: cron.enabled ? "info" : "warn",
         source: "cron",
         message: `${cron.enabled ? "enabled" : "disabled"} · ${cron.name ?? cron.jobId}`,
+        real: false,
       });
     }
   }
 
   return rows.sort((a, b) => toSortableMs(b.timestamp) - toSortableMs(a.timestamp));
+}
+
+function basenameForUi(path: string): string {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] ?? path;
 }
 
 function formatPreciseCost(value: number): string {
@@ -6410,19 +6438,20 @@ function renderMultiInstanceRecentTasksPanel(items: InstanceSnapshot[], language
 
 function renderMultiInstanceLogPanel(items: InstanceSnapshot[], language: UiLanguage, generatedAt: string, title?: string): string {
   const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const hasRealLogs = items.some((item) => (item.snapshot.runtimeLogs?.entries.length ?? 0) > 0);
   const rows = buildMultiInstanceLogRows(items, generatedAt)
     .slice(0, 14)
     .map(
       (log) =>
-        `<tr><td>${escapeHtml(log.timestamp ? formatUiTimestamp(log.timestamp, language) : "-")}</td><td>${escapeHtml(log.instanceName)}</td><td>${badge(log.severity, logSeverityLabel(log.severity, language))}</td><td>${escapeHtml(log.source)}</td><td>${escapeHtml(safeTruncate(log.message, 120))}</td></tr>`,
+        `<tr><td>${escapeHtml(log.timestamp ? formatUiTimestamp(log.timestamp, language) : "-")}</td><td>${escapeHtml(log.instanceName)}</td><td>${badge(log.severity, logSeverityLabel(log.severity, language))}</td><td>${escapeHtml(log.source)}${log.real ? ` · ${escapeHtml(t("real", "真实"))}` : ` · ${escapeHtml(t("fallback", "fallback"))}`}</td><td>${escapeHtml(safeTruncate(log.message, 120))}</td></tr>`,
     )
     .join("");
   return `<section class="panel">
     <div class="panel-head">
       <h2>${escapeHtml(title ?? t("Recent logs", "最近日志"))}</h2>
-      <div class="meta">${escapeHtml(t("Synthetic read-only event stream from snapshots.", "从快照合成的只读事件流。"))}</div>
+      <div class="meta">${escapeHtml(hasRealLogs ? t("Real runtime logs are shown first; snapshot events fill gaps.", "真实 runtime 日志优先；缺失时用快照合成事件流补充。") : t("No real runtime log files are visible yet; snapshot events are used as fallback.", "当前未看到真实 runtime 日志文件，暂用快照合成事件流 fallback。"))}</div>
     </div>
-    ${renderDataSourceNote(language, t("Synthetic event stream generated from snapshots.", "快照合成事件流"))}
+    ${renderDataSourceNote(language, t("Real runtime logs first; synthetic snapshot event stream as fallback.", "真实 runtime 日志优先；快照合成事件流 fallback"))}
     ${rows ? `<div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Time", "时间"))}</th><th>${escapeHtml(t("Instance", "实例"))}</th><th>${escapeHtml(t("Level", "级别"))}</th><th>${escapeHtml(t("Source", "来源"))}</th><th>${escapeHtml(t("Message", "消息"))}</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-state">${escapeHtml(t("No log-like events yet.", "暂无日志事件。"))}</div>`}
   </section>`;
 }

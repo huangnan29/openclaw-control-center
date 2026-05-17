@@ -180,6 +180,19 @@ test("multi-instance overview renders status metrics detail links and selected s
       { agentId: "config-only", displayName: "配置但未运行 Agent" },
     ],
   };
+  tomSnapshot.runtimeLogs = {
+    status: "connected",
+    sourcePaths: ["/instances/tom/workspace/runtime/logs/control.log"],
+    detail: "loaded 1 runtime log event.",
+    entries: [
+      {
+        timestamp: "2026-03-03T09:00:30.000Z",
+        severity: "info",
+        sourcePath: "/instances/tom/workspace/runtime/logs/control.log",
+        message: "real runtime log from file",
+      },
+    ],
+  };
   tomSnapshot.approvals = [
     { approvalId: "approval-1", status: "pending", agentId: "agent-kazik", command: "dangerous command" },
   ];
@@ -257,6 +270,8 @@ test("multi-instance overview renders status metrics detail links and selected s
   assert(html.includes("session status token 字段"));
   assert(html.includes("只读任务存储"));
   assert(html.includes("快照合成事件流"));
+  assert(html.includes("真实 runtime 日志优先"));
+  assert(html.includes("real runtime log from file"));
   assert(html.includes("agent-kazik"));
   assert(html.includes("配置但未运行 Agent"));
   assert(html.includes("Tom recent task"));
@@ -323,6 +338,7 @@ test("multi-instance routes render overview detail and invalid-instance fallback
     assert(detailHtml.includes("session status token 字段"));
     assert(detailHtml.includes("只读任务存储"));
     assert(detailHtml.includes("快照合成事件流"));
+    assert(detailHtml.includes("真实 runtime 日志优先"));
     assert(detailHtml.includes("项目"));
     assert(detailHtml.includes("任务"));
     assert(detailHtml.includes("预算关注"));
