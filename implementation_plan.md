@@ -6,7 +6,7 @@
 
 ## 当前阶段
 
-当前阶段推进 **只读 healthcheck live 演练准备**：中央 control-center 已完成 dry-run API、dry-run UI、人工确认字段、审计检索视图、默认关闭的 live gate、测试用 mock executor、真实执行审计结果类型、dry-run 引用校验、灰度配置解析、rollout 决策响应、只读 readiness 卡片、生产执行器最小骨架、显式挂载开关、只读 healthcheck 人工演练材料和 Tom preflight。下一步只准备临时配置切换与回滚脚本；Tom 仍不默认启用 live gate 或 executor，未人工批准不调用 live API。
+当前阶段推进 **人工批准的只读 healthcheck live 演练**：中央 control-center 已完成 dry-run API、dry-run UI、人工确认字段、审计检索视图、默认关闭的 live gate、测试用 mock executor、真实执行审计结果类型、dry-run 引用校验、灰度配置解析、rollout 决策响应、只读 readiness 卡片、生产执行器最小骨架、显式挂载开关、只读 healthcheck 人工演练材料、Tom preflight 和一次性演练窗口脚本。Tom 仍不默认启用 live gate 或 executor；下一步只有在人工批准并提供本地令牌后，才执行一次 `healthcheck` live 演练。
 
 ## 推进原则
 

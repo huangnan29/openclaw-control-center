@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-healthcheck live 演练前置校验收尾：修复 Tom preflight 中 rollout 校验没有把实例和操作者传入容器的问题，确保脚本只读检查 rollout、live 开关和 readiness，不调用 `/api/managed-actions/live`。
+只读 healthcheck live 演练准备：新增一次性演练窗口脚本，支持临时启用 control-center 的 `healthcheck` live 配置、执行 preflight、运行 smoke，并在结束或失败后恢复只读状态。
 
 ## 本轮不做
 
@@ -17,13 +17,13 @@ healthcheck live 演练前置校验收尾：修复 Tom preflight 中 rollout 校
 
 ## 当前下一步
 
-准备一次人工批准的只读 healthcheck live 演练方案：
+人工批准后执行一次只读 healthcheck live 演练：
 
-- 新增临时配置切换与回滚脚本，只作用于 control-center 容器环境变量。
-- 演练动作仅允许 `healthcheck`，目标先限制为 Tom 单实例。
-- 执行前必须通过 dry-run 引用、rollout、确认短语、本地令牌和操作者校验。
-- 默认状态仍保持 `READONLY_MODE=true`、live gate 关闭、executor 关闭；未人工批准不执行 live API。
-- 演练完成后必须能回到只读监控状态，并重新通过 `healthcheck.sh`。
+- 使用 `repo/ops/tom-readonly/live-healthcheck-window.sh run`。
+- 必须显式提供 `CONFIRM_LIVE_HEALTHCHECK_WINDOW`、`CONFIRM_LIVE_HEALTHCHECK` 和 `LOCAL_API_TOKEN`。
+- 演练窗口会临时启用 control-center live healthcheck 配置，动作仍限制为 `healthcheck`。
+- 脚本退出前必须恢复只读状态，并重新通过 `healthcheck.sh`。
+- 未获得人工批准前，不执行 `/api/managed-actions/live`。
 
 ## 最近完成
 
@@ -251,7 +251,24 @@ healthcheck live 演练前置校验收尾：修复 Tom preflight 中 rollout 校
 - 已验证 Tom 容器仍为 `READONLY_MODE=true`，`MANAGED_ACTIONS_LIVE_ENABLED` 与 `MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED` 均未启用。
 - 已验证 Tom readiness 仍为 `status=blocked`、`liveExecutionAvailable=false`、`executor.productionWired=false`。
 - 已验证 preflight 完成且未调用 live API。
+- 已新增一次性演练窗口脚本：`ops/tom-readonly/live-healthcheck-window.sh`。
+- 已让窗口脚本支持 `status`、`enable`、`disable`、`run` 四种模式。
+- 已让 `run` 模式设置退出 trap，失败或结束后自动执行 `disable` 恢复只读状态。
+- 已让窗口脚本生成临时 compose override，仅启用 `READONLY_MODE=false`、`MANAGED_ACTIONS_LIVE_ENABLED=true`、`MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED=true`、`MANAGED_ACTIONS_LIVE_ALLOWED_ACTIONS=healthcheck` 和 rollout 文件路径。
+- 已让窗口脚本的 `enable/run` 必须确认 `CONFIRM_LIVE_HEALTHCHECK_WINDOW=I_UNDERSTAND_THIS_TEMPORARILY_ENABLES_LIVE_GATE`。
+- 已让 `run` 模式继续要求 `CONFIRM_LIVE_HEALTHCHECK=I_UNDERSTAND_THIS_CALLS_LIVE_API` 和 `LOCAL_API_TOKEN`。
+- 已更新 `ops/tom-readonly/README.md`，记录一次性演练窗口命令。
+- 已增强 `test/oss-readiness.test.ts`，覆盖窗口脚本存在、确认短语、只允许 healthcheck 和退出恢复逻辑。
+- 已验证 `bash -n ops/tom-readonly/live-healthcheck-window.sh`。
+- 已验证 `npm test -- test/oss-readiness.test.ts test/managed-actions-dry-run.test.ts test/managed-action-live-gate.test.ts`。
+- 已验证 `npm run build`。
+- 已提交并推送 `98965fb ops: add live healthcheck window script`。
+- 已部署到 Tom，并验证运行提交 `98965fb`。
+- 已验证 Tom `healthcheck.sh` 通过，5 个 OpenClaw gateway 健康端口、容器只读边界和 collector 快照检查通过。
+- 已验证 Tom `repo/ops/tom-readonly/live-healthcheck-window.sh status` 通过，未检测到临时 override。
+- 已验证 Tom 当前仍为 `READONLY_MODE=true`，live gate 与 executor 均未启用，readiness 仍为 `blocked`。
+- 本轮未执行 `enable` 或 `run`，未调用 live API。
 
 ## 阶段完成后的下一步
 
-只读 healthcheck live 演练准备：先做临时配置切换和回滚脚本，再在人工批准窗口内执行一次受控演练；演练前后都必须确认现有 OpenClaw 实例未被重启、未被写入、未被触发任务。
+人工批准后执行一次只读 healthcheck live 演练；演练前后都必须确认现有 OpenClaw 实例未被重启、未被写入、未被触发任务。若演练通过，再进入单动作灰度策略收口；若失败，保持只读并先修复失败点。
