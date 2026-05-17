@@ -17,13 +17,12 @@
 
 ## 当前下一步
 
-部署 dry-run 引用校验到 Tom 并验证行为不变：
+设计单动作真实执行灰度配置文件：
 
+- 配置文件只描述允许灰度的动作、实例、操作者和风险等级。
+- 默认配置为空或禁用。
+- 不接真实执行器。
 - Tom 继续保持 `MANAGED_ACTIONS_LIVE_ENABLED=false`。
-- `/api/managed-actions/live` 继续返回 `blocked_disabled`。
-- live 响应中展示 `dryRunReference` 校验结果。
-- 页面继续不出现真实执行入口。
-- `healthcheck.sh` 继续通过。
 
 ## 最近完成
 
@@ -150,7 +149,14 @@
 - 已验证目标实例不一致时 `dryRunReference.status=target_mismatch`。
 - 已验证 `npm test -- test/managed-actions-dry-run.test.ts test/managed-action-live-audit.test.ts test/managed-action-executor.test.ts test/phase9-routes-commands.test.ts test/readonly-multi-instance-safety.test.ts test/multi-instance-readonly.test.ts test/ui-render-smoke.test.ts`。
 - 已验证 `npm run build`。
+- 已提交并推送 `0ec55da feat: validate live requests against dry-run audits`。
+- 已部署到 Tom，并验证运行提交 `0ec55da`。
+- 已验证 Tom 有效 dry-run 引用返回 `dryRunReference.status=valid`。
+- 已验证 Tom 缺失引用返回 `dryRunReference.status=missing`。
+- 已验证 Tom 动作不一致返回 `dryRunReference.status=action_mismatch`。
+- 已验证 Tom `/api/managed-actions/live` 仍返回 `blocked_disabled`、`liveExecution=false`、`enabled=false`。
+- 已验证 Tom 页面仍无真实执行入口。
 
 ## 阶段完成后的下一步
 
-部署 Tom 验证 dry-run 引用校验不会改变运行行为；通过后，下一步设计单动作真实执行灰度配置文件，但仍不启用真实执行。
+单动作真实执行灰度配置文件：只实现配置解析和测试，默认禁用，不在 Tom 开启真实执行。
