@@ -15,6 +15,8 @@ ROLLOUT_HOST_FILE="${ROLLOUT_HOST_FILE:-${DEPLOY_DIR}/runtime/managed-action-hea
 ROLLOUT_SOURCE="${ROLLOUT_SOURCE:-${DEPLOY_DIR}/repo/ops/tom-readonly/managed-action-healthcheck-rollout.example.json}"
 APPROVAL_FILE="${APPROVAL_FILE:-${DEPLOY_DIR}/runtime/live-healthcheck-approval.json}"
 APPROVAL_SCRIPT="${APPROVAL_SCRIPT:-${DEPLOY_DIR}/repo/ops/tom-readonly/live-healthcheck-approval.sh}"
+APPROVAL_PACKET_FILE="${APPROVAL_PACKET_FILE:-}"
+APPROVAL_PACKET_SCRIPT="${APPROVAL_PACKET_SCRIPT:-${DEPLOY_DIR}/repo/ops/tom-readonly/live-healthcheck-approval-packet.sh}"
 PREFLIGHT_SCRIPT="${PREFLIGHT_SCRIPT:-${DEPLOY_DIR}/repo/ops/tom-readonly/live-healthcheck-preflight.sh}"
 SMOKE_SCRIPT="${SMOKE_SCRIPT:-${DEPLOY_DIR}/repo/ops/tom-readonly/live-healthcheck-smoke.sh}"
 REPORT_SCRIPT="${REPORT_SCRIPT:-${DEPLOY_DIR}/repo/ops/tom-readonly/live-healthcheck-report.sh}"
@@ -65,9 +67,25 @@ require_base_paths() {
 require_live_paths() {
   [ -f "$ROLLOUT_SOURCE" ] || fail "rollout 样板不存在：${ROLLOUT_SOURCE}"
   [ -x "$APPROVAL_SCRIPT" ] || fail "批准校验脚本不存在或不可执行：${APPROVAL_SCRIPT}"
+  [ -x "$APPROVAL_PACKET_SCRIPT" ] || fail "批准前证据包脚本不存在或不可执行：${APPROVAL_PACKET_SCRIPT}"
   [ -x "$PREFLIGHT_SCRIPT" ] || fail "preflight 脚本不存在或不可执行：${PREFLIGHT_SCRIPT}"
   [ -x "$SMOKE_SCRIPT" ] || fail "smoke 脚本不存在或不可执行：${SMOKE_SCRIPT}"
   [ -x "$REPORT_SCRIPT" ] || fail "报告脚本不存在或不可执行：${REPORT_SCRIPT}"
+}
+
+check_approval_packet() {
+  log "校验 live healthcheck 批准前证据包"
+  if [ -n "$APPROVAL_PACKET_FILE" ]; then
+    INSTANCE_ID="${INSTANCE_ID:-tom}" \
+      ACTION="healthcheck" \
+      OPERATOR="${OPERATOR:-Anan}" \
+      "$APPROVAL_PACKET_SCRIPT" check "$APPROVAL_PACKET_FILE"
+  else
+    INSTANCE_ID="${INSTANCE_ID:-tom}" \
+      ACTION="healthcheck" \
+      OPERATOR="${OPERATOR:-Anan}" \
+      "$APPROVAL_PACKET_SCRIPT" check
+  fi
 }
 
 check_approval_file() {
@@ -122,6 +140,7 @@ start_live_window() {
   require_confirm
   require_base_paths
   require_live_paths
+  check_approval_packet
   check_approval_file
   write_rollout_file
   write_override_file
@@ -232,6 +251,9 @@ usage() {
 
   run 还必须存在通过校验的批准文件：
     /srv/openclaw-control-center-readonly/runtime/live-healthcheck-approval.json
+
+  run 还必须存在新鲜、匹配当前提交且通过校验的批准前证据包：
+    /srv/openclaw-control-center-readonly/runtime/live-healthcheck-approval-packets/
 
   run 会自动生成 before/after 实例影响快照并比较。
   run 成功后会生成 live healthcheck 演练报告。

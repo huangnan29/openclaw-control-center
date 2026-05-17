@@ -12,6 +12,7 @@ APPROVAL_FILE="${APPROVAL_FILE:-${DEPLOY_DIR}/runtime/live-healthcheck-approval.
 PACKET_DIR="${PACKET_DIR:-${DEPLOY_DIR}/runtime/live-healthcheck-approval-packets}"
 SCRIPT_DIR="${SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 OPENCLAW_TOPOLOGY_MODE="${OPENCLAW_TOPOLOGY_MODE:-local-only}"
+PACKET_MAX_AGE_SECONDS="${PACKET_MAX_AGE_SECONDS:-21600}"
 
 timestamp() {
   date +"%Y-%m-%dT%H:%M:%S%z"
@@ -372,14 +373,155 @@ if (packet.status !== "ready_for_manual_approval") process.exitCode = 2;
 NODE
 }
 
+check_packet() {
+  local packet_file="${1:-}"
+
+  DEPLOY_DIR="$DEPLOY_DIR" \
+    PACKET_DIR="$PACKET_DIR" \
+    PACKET_FILE="$packet_file" \
+    OPENCLAW_TOPOLOGY_MODE="$OPENCLAW_TOPOLOGY_MODE" \
+    PACKET_MAX_AGE_SECONDS="$PACKET_MAX_AGE_SECONDS" \
+    INSTANCE_ID="${INSTANCE_ID:-tom}" \
+    ACTION="${ACTION:-healthcheck}" \
+    OPERATOR="${OPERATOR:-Anan}" \
+    node <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
+
+const deployDir = path.resolve(process.env.DEPLOY_DIR || "/srv/openclaw-control-center-readonly");
+const packetDir = path.resolve(process.env.PACKET_DIR || path.join(deployDir, "runtime", "live-healthcheck-approval-packets"));
+const explicitPacket = String(process.env.PACKET_FILE || "").trim();
+const topologyMode = process.env.OPENCLAW_TOPOLOGY_MODE || "local-only";
+const maxAgeSeconds = Number.parseInt(process.env.PACKET_MAX_AGE_SECONDS || "21600", 10);
+const expected = {
+  instanceId: process.env.INSTANCE_ID || "tom",
+  action: process.env.ACTION || "healthcheck",
+  operator: process.env.OPERATOR || "Anan",
+};
+
+function fail(message) {
+  console.error(`[失败] ${message}`);
+  process.exit(2);
+}
+
+function findLatestPacket() {
+  if (!fs.existsSync(packetDir)) return undefined;
+  const files = fs.readdirSync(packetDir)
+    .filter((name) => /^live-healthcheck-approval-packet-.+\.json$/.test(name))
+    .map((name) => path.join(packetDir, name))
+    .map((file) => ({ file, mtimeMs: fs.statSync(file).mtimeMs }))
+    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return files[0]?.file;
+}
+
+function readJson(file) {
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch (error) {
+    fail(`无法读取证据包：${file}：${formatError(error)}`);
+  }
+}
+
+function currentCommit() {
+  const result = spawnSync("git", ["-C", path.join(deployDir, "repo"), "rev-parse", "HEAD"], {
+    encoding: "utf8",
+  });
+  return result.status === 0 ? result.stdout.trim() : "";
+}
+
+function formatError(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function checkPacket(file, packet) {
+  const issues = [];
+  if (packet.schemaVersion !== 1) issues.push("schemaVersion must be 1");
+  if (packet.status !== "ready_for_manual_approval") issues.push(`status is ${packet.status || "missing"}`);
+  if (!Array.isArray(packet.blockers) || packet.blockers.length !== 0) issues.push("blockers must be empty");
+  if (packet.topologyMode !== topologyMode) issues.push(`topologyMode mismatch: ${packet.topologyMode} != ${topologyMode}`);
+
+  const generatedAtMs = Date.parse(String(packet.generatedAt || ""));
+  const ageSeconds = Number.isFinite(generatedAtMs) ? Math.round((Date.now() - generatedAtMs) / 1000) : Number.NaN;
+  if (!Number.isFinite(ageSeconds)) issues.push("generatedAt is invalid");
+  if (Number.isFinite(ageSeconds) && ageSeconds < -60) issues.push("generatedAt is in the future");
+  if (Number.isFinite(ageSeconds) && Number.isFinite(maxAgeSeconds) && ageSeconds > maxAgeSeconds) {
+    issues.push(`packet is older than ${maxAgeSeconds}s`);
+  }
+
+  if (packet.target?.instanceId !== expected.instanceId) issues.push(`instanceId mismatch: ${packet.target?.instanceId}`);
+  if (packet.target?.action !== expected.action) issues.push(`action mismatch: ${packet.target?.action}`);
+  if (packet.target?.operator !== expected.operator) issues.push(`operator mismatch: ${packet.target?.operator}`);
+
+  if (packet.gates?.goLive?.existingInstancesStatus !== "passed") issues.push("existing instance healthcheck is not passed");
+  if (topologyMode === "local-only" && packet.gates?.goLive?.crossServerStatus !== "skipped_local_only") {
+    issues.push("cross-server gate is not skipped in local-only mode");
+  }
+  if (packet.gates?.dryRun?.status !== "ready") issues.push("dry-run gate is not ready");
+  if (!["needs_manual_approval", "approved", "approved_ready"].includes(packet.gates?.approval?.status || "")) {
+    issues.push(`approval status is not acceptable: ${packet.gates?.approval?.status || "missing"}`);
+  }
+  if (packet.gates?.liveWindow?.readonlyMode !== "true") issues.push("live window readonlyMode is not true");
+  if (packet.gates?.liveWindow?.liveEnabled === "true") issues.push("live gate was enabled when packet was generated");
+  if (packet.gates?.liveWindow?.executorEnabled === "true") issues.push("live executor was enabled when packet was generated");
+  if (packet.gates?.impactSnapshot?.status !== "generated") issues.push("impact snapshot was not generated");
+
+  const impactSnapshot = packet.artifacts?.impactSnapshot || packet.gates?.impactSnapshot?.path;
+  if (!impactSnapshot || !fs.existsSync(impactSnapshot)) issues.push(`impact snapshot file missing: ${impactSnapshot || "<empty>"}`);
+  const markdownPacket = packet.artifacts?.markdownPacket;
+  if (!markdownPacket || !fs.existsSync(markdownPacket)) issues.push(`markdown packet file missing: ${markdownPacket || "<empty>"}`);
+
+  const head = currentCommit();
+  if (head && packet.git?.head && packet.git.head !== head) {
+    issues.push(`git commit mismatch: packet=${packet.git.head.slice(0, 12)} current=${head.slice(0, 12)}`);
+  }
+  if (packet.safety?.callsManagedActionsLiveApi !== false) issues.push("safety.callsManagedActionsLiveApi must be false");
+  if (packet.safety?.writesOpenClawInstanceDirs !== false) issues.push("safety.writesOpenClawInstanceDirs must be false");
+  if (packet.safety?.restartsOpenClawInstances !== false) issues.push("safety.restartsOpenClawInstances must be false");
+  if (packet.safety?.bypassesApproval !== false) issues.push("safety.bypassesApproval must be false");
+
+  return {
+    schemaVersion: 1,
+    status: issues.length === 0 ? "ready" : "blocked",
+    checkedAt: new Date().toISOString(),
+    packetFile: file,
+    generatedAt: packet.generatedAt,
+    ageSeconds: Number.isFinite(ageSeconds) ? ageSeconds : null,
+    maxAgeSeconds,
+    topologyMode,
+    target: packet.target,
+    commit: {
+      packet: packet.git?.head || "",
+      current: head,
+    },
+    issues,
+    safety: {
+      callsManagedActionsLiveApi: false,
+      writesOpenClawInstanceDirs: false,
+      restartsOpenClawInstances: false,
+      bypassesApproval: false,
+    },
+  };
+}
+
+const file = explicitPacket ? path.resolve(explicitPacket) : findLatestPacket();
+if (!file) fail(`找不到批准前证据包：${packetDir}`);
+const report = checkPacket(file, readJson(file));
+console.log(JSON.stringify(report, null, 2));
+if (report.status !== "ready") process.exit(2);
+NODE
+}
+
 usage() {
   cat <<'TEXT'
 用法：
   live-healthcheck-approval-packet.sh generate
+  live-healthcheck-approval-packet.sh check [packet.json]
 
 说明：
   generate 会运行最终上线总闸门 check、dry-run 证据 status、approval status、live window status，
   并生成一份 pre-live 影响快照，最后写出 JSON 与 Markdown 证据包。
+  check 会校验指定证据包；未指定时校验 PACKET_DIR 中最新的一份。
   本脚本不会批准 live healthcheck，不会打开 live gate，不会调用 managed-actions live API。
 TEXT
 }
@@ -389,6 +531,9 @@ main() {
   case "${1:-generate}" in
     generate)
       generate_packet
+      ;;
+    check)
+      check_packet "${2:-}"
       ;;
     -h|--help|help)
       usage

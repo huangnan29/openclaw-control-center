@@ -176,6 +176,23 @@ test("live healthcheck approval packet generates pre-approval evidence without l
     assert(existsSync(packet.artifacts.markdownPacket));
     assert(existsSync(packet.artifacts.impactSnapshot));
 
+    const checked = JSON.parse(
+      execFileSync(SCRIPT, ["check", packetPath], {
+        env: {
+          ...process.env,
+          DEPLOY_DIR: deployDir,
+          SCRIPT_DIR: scriptDir,
+          PACKET_DIR: packetDir,
+          APPROVAL_FILE: approvalFile,
+        },
+        encoding: "utf8",
+      }),
+    );
+    assert.equal(checked.status, "ready");
+    assert.equal(checked.packetFile, packetPath);
+    assert.equal(checked.target.instanceId, "tom");
+    assert.equal(checked.safety.callsManagedActionsLiveApi, false);
+
     const log = await readFile(logFile, "utf8");
     assert.match(log, /go-live-gate check/);
     assert.match(log, /dry-run-gate status/);

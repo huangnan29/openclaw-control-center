@@ -462,6 +462,8 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.equal(approvalExample.scope.mutatesOpenClawInstance, false);
   const approvalPacketText = readFileSync(liveHealthcheckApprovalPacket, "utf8");
   assert.match(approvalPacketText, /live-healthcheck-approval-packet\.sh generate/);
+  assert.match(approvalPacketText, /live-healthcheck-approval-packet\.sh check/);
+  assert.match(approvalPacketText, /PACKET_MAX_AGE_SECONDS/);
   assert.match(approvalPacketText, /go-live-gate\.sh/);
   assert.match(approvalPacketText, /managed-action-dry-run-gate\.sh/);
   assert.match(approvalPacketText, /live-healthcheck-approval\.sh/);
@@ -494,6 +496,10 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(liveWindowText, /MANAGED_ACTIONS_LIVE_ALLOWED_ACTIONS: "healthcheck"/);
   assert.match(liveWindowText, /trap rollback_on_exit EXIT/);
   assert.match(liveWindowText, /stop_live_window/);
+  assert.match(liveWindowText, /APPROVAL_PACKET_SCRIPT/);
+  assert.match(liveWindowText, /live-healthcheck-approval-packet\.sh/);
+  assert.match(liveWindowText, /check_approval_packet/);
+  assert.match(liveWindowText, /check_approval_packet[\s\S]*check_approval_file/);
   assert.match(liveWindowText, /live-healthcheck-approval\.sh/);
   assert.match(liveWindowText, /check_approval_file/);
   assert.match(liveWindowText, /consume_approval_file/);
