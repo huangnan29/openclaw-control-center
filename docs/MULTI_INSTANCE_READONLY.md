@@ -245,6 +245,10 @@ OPENCLAW_COLLECTOR_CRON_SCHEDULE="*/2 * * * *" ./install-collector-cron.sh
 
 ```bash
 cp repo/ops/tom-readonly/remote-collector-onboarding.example.json runtime/remote-collector-onboarding.json
+cp repo/ops/tom-readonly/remote-collector-credentials.example.json runtime/remote-collector-credentials.json
+repo/ops/tom-readonly/remote-collector-credentials.sh plan runtime/remote-collector-credentials.json
+CONFIRM_REMOTE_COLLECTOR_CREDENTIALS=I_UNDERSTAND_THIS_ONLY_WRITES_CONTROL_CENTER_REMOTE_CREDENTIALS \
+repo/ops/tom-readonly/remote-collector-credentials.sh apply runtime/remote-collector-credentials.json
 repo/ops/tom-readonly/remote-collector-onboarding.sh plan runtime/remote-collector-onboarding.json
 CONFIRM_REMOTE_COLLECTOR_ONBOARDING=I_UNDERSTAND_THIS_ONLY_WRITES_REMOTE_ONBOARDING_BUNDLE \
 repo/ops/tom-readonly/remote-collector-onboarding.sh write runtime/remote-collector-onboarding.json
@@ -255,7 +259,7 @@ repo/ops/tom-readonly/remote-collector-preflight.sh check runtime/remote-onboard
 repo/ops/tom-readonly/remote-collector-rollout.sh status runtime/remote-onboarding/<serverId>
 ```
 
-`plan` 只校验配置并输出将生成的文件；`write` 只写 `runtime/remote-onboarding/<serverId>/` 下的接入包，不会 SSH、不会修改 `config/instances.json`、不会修改任何 OpenClaw 实例目录；`verify` 只读取接入包并离线校验 serverId、safety、pull/register 配置、build-context 和 bootstrap plan；`remote-collector-preflight.sh check` 才会 SSH 到远端，但只执行只读检查命令，检查 docker、目录可读性、deploy 目录权限和 gateway 端口，并把结果写入 Tom 本地 `runtime/remote-preflight-state/<serverId>.json`。`remote-collector-rollout.sh status` 只读取 Tom 本地状态，判断当前处于 `needs_remote_credentials`、`needs_remote_preflight`、`needs_remote_collector_pull`、`needs_registry_register` 或 `ready_for_healthcheck`，并输出下一步命令；它不 SSH、不写 registry、不写远端文件、不启动容器。接入包包含：
+`remote-collector-credentials.sh plan` 只校验真实远端 host/user/port 和 Tom 本地 source key 路径，不写文件、不联网；`apply` 只复制远端只读 SSH key 到 Tom control-center 的 `runtime/ssh/`，并生成 `runtime/remote-collector-onboarding.json`。`remote-collector-onboarding.sh plan` 只校验配置并输出将生成的文件；`write` 只写 `runtime/remote-onboarding/<serverId>/` 下的接入包，不会 SSH、不会修改 `config/instances.json`、不会修改任何 OpenClaw 实例目录；`verify` 只读取接入包并离线校验 serverId、safety、pull/register 配置、build-context 和 bootstrap plan；`remote-collector-preflight.sh check` 才会 SSH 到远端，但只执行只读检查命令，检查 docker、目录可读性、deploy 目录权限和 gateway 端口，并把结果写入 Tom 本地 `runtime/remote-preflight-state/<serverId>.json`。`remote-collector-rollout.sh status` 只读取 Tom 本地状态，判断当前处于 `needs_remote_credentials`、`needs_remote_preflight`、`needs_remote_collector_pull`、`needs_registry_register` 或 `ready_for_healthcheck`，并输出下一步命令；它不 SSH、不写 registry、不写远端文件、不启动容器。接入包包含：
 
 - `collector-node.json`：复制到远端 Oracle 后供 `bootstrap-collector-node.sh` 使用。
 - `bootstrap-collector-node.sh`：远端 collector-only 节点引导脚本。

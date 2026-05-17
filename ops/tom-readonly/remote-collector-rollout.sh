@@ -387,9 +387,11 @@ function buildCommands(bundle, stage) {
   }
   if (stage === "needs_remote_credentials") {
     return [
-      "# 先把真实第二台 Oracle 的 host/user/port/sshKey 写入 onboarding 配置并重新生成接入包",
-      "# Tom 上的 sshKey 必须存在且可读，建议权限 600",
-      `repo/ops/tom-readonly/remote-collector-onboarding.sh plan runtime/remote-collector-onboarding.json`,
+      "# 先把真实第二台 Oracle 的 host/user/port/sourceSshKeyPath 写入 credentials 配置",
+      "cp repo/ops/tom-readonly/remote-collector-credentials.example.json runtime/remote-collector-credentials.json",
+      "repo/ops/tom-readonly/remote-collector-credentials.sh plan runtime/remote-collector-credentials.json",
+      "CONFIRM_REMOTE_COLLECTOR_CREDENTIALS=I_UNDERSTAND_THIS_ONLY_WRITES_CONTROL_CENTER_REMOTE_CREDENTIALS repo/ops/tom-readonly/remote-collector-credentials.sh apply runtime/remote-collector-credentials.json",
+      "repo/ops/tom-readonly/remote-collector-onboarding.sh plan runtime/remote-collector-onboarding.json",
       `CONFIRM_REMOTE_COLLECTOR_ONBOARDING=I_UNDERSTAND_THIS_ONLY_WRITES_REMOTE_ONBOARDING_BUNDLE repo/ops/tom-readonly/remote-collector-onboarding.sh write runtime/remote-collector-onboarding.json`,
       `repo/ops/tom-readonly/remote-collector-onboarding.sh verify ${bundlePath}`,
     ];

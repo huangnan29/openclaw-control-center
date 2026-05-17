@@ -145,6 +145,8 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   const liveHealthcheckRollout = path.join(ROOT, "ops", "tom-readonly", "managed-action-healthcheck-rollout.example.json");
   const remoteCollectorOnboarding = path.join(ROOT, "ops", "tom-readonly", "remote-collector-onboarding.sh");
   const remoteCollectorOnboardingExample = path.join(ROOT, "ops", "tom-readonly", "remote-collector-onboarding.example.json");
+  const remoteCollectorCredentials = path.join(ROOT, "ops", "tom-readonly", "remote-collector-credentials.sh");
+  const remoteCollectorCredentialsExample = path.join(ROOT, "ops", "tom-readonly", "remote-collector-credentials.example.json");
   const remoteCollectorPreflight = path.join(ROOT, "ops", "tom-readonly", "remote-collector-preflight.sh");
   const remoteCollectorRollout = path.join(ROOT, "ops", "tom-readonly", "remote-collector-rollout.sh");
   const remoteCollectorPull = path.join(ROOT, "ops", "tom-readonly", "remote-collector-pull.sh");
@@ -162,6 +164,8 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(doc.includes("bootstrap-collector-node.sh"));
   assert(doc.includes("I_UNDERSTAND_THIS_ONLY_WRITES_COLLECTOR_NODE_FILES"));
   assert(doc.includes("remote-collector-onboarding.sh"));
+  assert(doc.includes("remote-collector-credentials.sh"));
+  assert(doc.includes("I_UNDERSTAND_THIS_ONLY_WRITES_CONTROL_CENTER_REMOTE_CREDENTIALS"));
   assert(doc.includes("I_UNDERSTAND_THIS_ONLY_WRITES_REMOTE_ONBOARDING_BUNDLE"));
   assert(doc.includes("remote-collector-preflight.sh"));
   assert(doc.includes("remote-collector-rollout.sh"));
@@ -187,6 +191,8 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(existsSync(liveHealthcheckRollout));
   assert(existsSync(remoteCollectorOnboarding));
   assert(existsSync(remoteCollectorOnboardingExample));
+  assert(existsSync(remoteCollectorCredentials));
+  assert(existsSync(remoteCollectorCredentialsExample));
   assert(existsSync(remoteCollectorPreflight));
   assert(existsSync(remoteCollectorRollout));
   assert(existsSync(remoteCollectorPull));
@@ -218,6 +224,19 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   const remoteCollectorOnboardingConfig = JSON.parse(readFileSync(remoteCollectorOnboardingExample, "utf8"));
   assert.equal(remoteCollectorOnboardingConfig.server.id, "remote-oracle");
   assert.equal(remoteCollectorOnboardingConfig.collectorNode.bundleBuildContext, true);
+  const remoteCollectorCredentialsText = readFileSync(remoteCollectorCredentials, "utf8");
+  assert.match(remoteCollectorCredentialsText, /CONFIRM_REMOTE_COLLECTOR_CREDENTIALS/);
+  assert.match(remoteCollectorCredentialsText, /I_UNDERSTAND_THIS_ONLY_WRITES_CONTROL_CENTER_REMOTE_CREDENTIALS/);
+  assert.match(remoteCollectorCredentialsText, /writesControlCenterRuntimeOnly/);
+  assert.match(remoteCollectorCredentialsText, /connectsSsh: false/);
+  assert.match(remoteCollectorCredentialsText, /writesRemoteFiles: false/);
+  assert.match(remoteCollectorCredentialsText, /writesActiveRegistry: false/);
+  assert.match(remoteCollectorCredentialsText, /mutatesOpenClawInstance: false/);
+  assert.match(remoteCollectorCredentialsText, /callsLiveApi: false/);
+  assert.doesNotMatch(remoteCollectorCredentialsText, /api\/managed-actions\/live/);
+  const remoteCollectorCredentialsConfig = JSON.parse(readFileSync(remoteCollectorCredentialsExample, "utf8"));
+  assert.equal(remoteCollectorCredentialsConfig.server.id, "remote-oracle");
+  assert.equal(remoteCollectorCredentialsConfig.overwrite, false);
   const remoteCollectorPreflightText = readFileSync(remoteCollectorPreflight, "utf8");
   assert.match(remoteCollectorPreflightText, /CONFIRM_REMOTE_COLLECTOR_PREFLIGHT/);
   assert.match(remoteCollectorPreflightText, /I_UNDERSTAND_THIS_ONLY_READS_REMOTE_PREREQUISITES/);
