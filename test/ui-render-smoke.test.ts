@@ -241,6 +241,12 @@ test("multi-instance overview renders status metrics detail links and selected s
   assert(html.includes("用量"));
   assert(html.includes("最近日志"));
   assert(html.includes("最近任务"));
+  assert(html.includes("数据来源"));
+  assert(html.includes("gateway 连接状态 + 会话状态推导"));
+  assert(html.includes("会话、任务负责人、审批和预算范围合并推导"));
+  assert(html.includes("session status token 字段"));
+  assert(html.includes("只读任务存储"));
+  assert(html.includes("快照合成事件流"));
   assert(html.includes("agent-kazik"));
   assert(html.includes("Tom recent task"));
   assert(html.includes("420"));
@@ -299,6 +305,12 @@ test("multi-instance routes render overview detail and invalid-instance fallback
     assert(detailHtml.includes("用量"));
     assert(detailHtml.includes("最近日志"));
     assert(detailHtml.includes("最近任务"));
+    assert(detailHtml.includes("数据来源"));
+    assert(detailHtml.includes("gateway 连接状态 + 会话状态推导"));
+    assert(detailHtml.includes("会话、任务负责人、审批和预算范围合并推导"));
+    assert(detailHtml.includes("session status token 字段"));
+    assert(detailHtml.includes("只读任务存储"));
+    assert(detailHtml.includes("快照合成事件流"));
     assert(detailHtml.includes("项目"));
     assert(detailHtml.includes("任务"));
     assert(detailHtml.includes("预算关注"));

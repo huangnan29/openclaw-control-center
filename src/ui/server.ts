@@ -5900,6 +5900,10 @@ function renderFleetMetricChip(label: string, value: number | string, tone = "")
   return `<div class="status-chip${tone ? ` ${escapeHtml(tone)}` : ""}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></div>`;
 }
 
+function renderDataSourceNote(language: UiLanguage, source: string): string {
+  return `<div class="source-note"><span>${escapeHtml(pickUiText(language, "Data source", "数据来源"))}</span>${escapeHtml(source)}</div>`;
+}
+
 function renderMiniSessions(item: InstanceSnapshot, language: UiLanguage, limit = 3): string {
   const t = (en: string, zh: string): string => pickUiText(language, en, zh);
   const sessions = [...item.snapshot.sessions]
@@ -6272,6 +6276,7 @@ function renderMultiInstanceHealthPanel(items: InstanceSnapshot[], language: UiL
       <h2>${escapeHtml(title ?? t("Instance health", "实例健康"))}</h2>
       <div class="meta">${escapeHtml(t("Connection, runtime risk, and freshness at a glance.", "集中查看连接、运行风险和新鲜度。"))}</div>
     </div>
+    ${renderDataSourceNote(language, t("Gateway connection state + derived session status.", "gateway 连接状态 + 会话状态推导"))}
     ${rows ? `<div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Instance", "实例"))}</th><th>${escapeHtml(t("Health", "健康"))}</th><th>${escapeHtml(t("Sessions", "会话"))}</th><th>Agent</th><th>${escapeHtml(t("Running", "运行中"))}</th><th>${escapeHtml(t("Blocked", "阻塞"))}</th><th>${escapeHtml(t("Errors", "错误"))}</th><th>${escapeHtml(t("Pending", "待审"))}</th><th>${escapeHtml(t("Latest", "最近"))}</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-state">${escapeHtml(t("No instances configured.", "尚未配置实例。"))}</div>`}
   </section>`;
 }
@@ -6306,6 +6311,7 @@ function renderMultiInstanceUsagePanel(items: InstanceSnapshot[], language: UiLa
       <h2>${escapeHtml(title ?? t("Usage", "用量"))}</h2>
       <div class="meta">${escapeHtml(t("Read from session status snapshots; no billing write path is used.", "来自会话状态快照，不触碰账单或写接口。"))}</div>
     </div>
+    ${renderDataSourceNote(language, t("Session status token fields.", "session status token 字段"))}
     <div class="status-strip">${chips}</div>
     ${modelRows ? `<div class="table-wrap"><table><thead><tr><th>Model</th><th>${escapeHtml(t("Total", "合计"))}</th><th>In</th><th>Out</th><th>Cost</th><th>${escapeHtml(t("Sessions", "会话"))}</th></tr></thead><tbody>${modelRows}</tbody></table></div>` : `<div class="empty-state">${escapeHtml(t("No status usage data yet.", "暂无状态用量数据。"))}</div>`}
   </section>`;
@@ -6361,6 +6367,7 @@ function renderMultiInstanceAgentRosterPanel(items: InstanceSnapshot[], language
       <h2>${escapeHtml(title ?? t("Agent roster", "Agent 名录"))}</h2>
       <div class="meta">${escapeHtml(t("Merged from sessions, task owners, approvals, and agent budget scopes.", "由会话、任务负责人、审批和 Agent 预算范围合并。"))}</div>
     </div>
+    ${renderDataSourceNote(language, t("Merged from sessions, task owners, approvals, and budget scopes.", "会话、任务负责人、审批和预算范围合并推导"))}
     ${rows ? `<div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Instance", "实例"))}</th><th>Agent</th><th>${escapeHtml(t("State", "状态"))}</th><th>${escapeHtml(t("Sessions", "会话"))}</th><th>${escapeHtml(t("Tasks", "任务"))}</th><th>${escapeHtml(t("Pending", "待审"))}</th><th>${escapeHtml(t("Usage", "用量"))}</th><th>Cost</th><th>${escapeHtml(t("Latest", "最近"))}</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-state">${escapeHtml(t("No agents are visible yet.", "暂未看到 Agent。"))}</div>`}
   </section>`;
 }
@@ -6379,6 +6386,7 @@ function renderMultiInstanceRecentTasksPanel(items: InstanceSnapshot[], language
       <h2>${escapeHtml(title ?? t("Recent tasks", "最近任务"))}</h2>
       <div class="meta">${escapeHtml(t("Newest task records across the selected scope.", "当前范围内最近更新的任务记录。"))}</div>
     </div>
+    ${renderDataSourceNote(language, t("Readonly task store.", "只读任务存储"))}
     ${rows ? `<div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Instance", "实例"))}</th><th>${escapeHtml(t("Task", "任务"))}</th><th>${escapeHtml(t("State", "状态"))}</th><th>${escapeHtml(t("Owner", "负责人"))}</th><th>${escapeHtml(t("Sessions", "会话"))}</th><th>${escapeHtml(t("Updated", "更新时间"))}</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-state">${escapeHtml(t("No tasks reported.", "暂无任务上报。"))}</div>`}
   </section>`;
 }
@@ -6397,6 +6405,7 @@ function renderMultiInstanceLogPanel(items: InstanceSnapshot[], language: UiLang
       <h2>${escapeHtml(title ?? t("Recent logs", "最近日志"))}</h2>
       <div class="meta">${escapeHtml(t("Synthetic read-only event stream from snapshots.", "从快照合成的只读事件流。"))}</div>
     </div>
+    ${renderDataSourceNote(language, t("Synthetic event stream generated from snapshots.", "快照合成事件流"))}
     ${rows ? `<div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Time", "时间"))}</th><th>${escapeHtml(t("Instance", "实例"))}</th><th>${escapeHtml(t("Level", "级别"))}</th><th>${escapeHtml(t("Source", "来源"))}</th><th>${escapeHtml(t("Message", "消息"))}</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-state">${escapeHtml(t("No log-like events yet.", "暂无日志事件。"))}</div>`}
   </section>`;
 }
@@ -6477,6 +6486,8 @@ function renderMultiInstanceOverview(
     .attention-list li { align-items: flex-start; border-bottom: 1px solid rgba(17, 24, 39, 0.08); padding-bottom: 8px; }
     .attention-list li:last-child { border-bottom: 0; padding-bottom: 0; }
     .attention-list a { color: #005cb9; font-weight: 600; text-decoration: none; }
+    .source-note { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 10px; border: 1px solid rgba(0, 113, 227, 0.18); border-radius: 999px; padding: 4px 9px; color: #344054; background: #f5fbff; font-size: 12px; }
+    .source-note span { color: #005cb9; font-weight: 700; }
     .table-wrap { overflow-x: auto; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th, td { text-align: left; border-bottom: 1px solid rgba(17, 24, 39, 0.08); padding: 8px 6px; vertical-align: top; }
@@ -6684,6 +6695,8 @@ function renderMultiInstanceDetail(
     .card h2, .panel h2 { margin: 0 0 8px; font-size: 17px; letter-spacing: 0; }
     .panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 10px; }
     .empty-state { color: var(--muted); font-size: 13px; border: 1px dashed var(--border); border-radius: 8px; padding: 12px; background: rgba(255, 255, 255, 0.72); }
+    .source-note { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 10px; border: 1px solid rgba(0, 113, 227, 0.18); border-radius: 999px; padding: 4px 9px; color: #344054; background: #f5fbff; font-size: 12px; }
+    .source-note span { color: #005cb9; font-weight: 700; }
     .badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 8px; font-size: 12px; border: 1px solid var(--border); color: #344054; background: #f9fafb; }
     .badge.connected { color: #05603a; background: #ecfdf3; border-color: #abefc6; }
     .badge.partial { color: #92400e; background: #fffbeb; border-color: #fde68a; }
