@@ -1130,6 +1130,7 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
         const multiInstanceMode = instanceConfigs.instances.length > 1 || instanceConfigs.source !== "fallback";
         if (multiInstanceMode) {
           const requestedInstanceId = normalizeQueryString(url.searchParams.get("instance"), "instance", 120, true);
+          const requestedServerId = normalizeQueryString(url.searchParams.get("server"), "server", 120, true);
           const selectedInstance = requestedInstanceId
             ? instanceConfigs.instances.find((instance) => instance.id === requestedInstanceId)
             : undefined;
@@ -1143,12 +1144,23 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
           );
 
           if (!requestedInstanceId || !selectedInstance) {
-            const warning = requestedInstanceId
+            const scopedSnapshot = requestedServerId ? filterMultiInstanceSnapshotByServer(snapshot, requestedServerId) : snapshot;
+            const warningParts = [
+              requestedInstanceId
               ? pickUiText(language, "Instance not found. Showing the readonly overview.", "未找到该实例，已显示只读总览。")
               : instanceConfigs.issues.length > 0
                 ? instanceConfigs.issues.map((issue) => issue.message).join("; ")
-                : undefined;
-            const html = renderMultiInstanceOverview(snapshot, language, warning);
+                : undefined,
+              requestedServerId && !scopedSnapshot
+                ? pickUiText(language, "Server not found. Showing all readonly instances.", "未找到该服务器，已显示全部只读实例。")
+                : undefined,
+            ].filter((value): value is string => typeof value === "string" && value.length > 0);
+            const html = renderMultiInstanceOverview(
+              scopedSnapshot ?? snapshot,
+              language,
+              warningParts.join("; ") || undefined,
+              scopedSnapshot ? requestedServerId : undefined,
+            );
             return writeText(res, 200, html, "text/html; charset=utf-8");
           }
 
@@ -5900,6 +5912,177 @@ function renderFleetMetricChip(label: string, value: number | string, tone = "")
   return `<div class="status-chip${tone ? ` ${escapeHtml(tone)}` : ""}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></div>`;
 }
 
+interface ServerUiSummary {
+  id: string;
+  name: string;
+  host?: string;
+  region?: string;
+  instances: number;
+  connected: number;
+  partial: number;
+  notConnected: number;
+  sessions: number;
+  running: number;
+  blocked: number;
+  errors: number;
+  pendingApprovals: number;
+}
+
+function instanceServerId(instance: OpenClawInstanceConfig): string {
+  return instance.serverId?.trim() || "local";
+}
+
+function instanceServerName(instance: OpenClawInstanceConfig): string {
+  return instance.serverName?.trim() || "Local server";
+}
+
+function instanceServerHost(instance: OpenClawInstanceConfig): string | undefined {
+  return instance.serverHost?.trim() || undefined;
+}
+
+function instanceServerRegion(instance: OpenClawInstanceConfig): string | undefined {
+  return instance.serverRegion?.trim() || undefined;
+}
+
+function buildServerUiSummaries(items: InstanceSnapshot[]): ServerUiSummary[] {
+  const summaries = new Map<string, ServerUiSummary>();
+  for (const item of items) {
+    const id = instanceServerId(item.instance);
+    const metrics = buildInstanceUiMetrics(item);
+    const current = summaries.get(id) ?? {
+      id,
+      name: instanceServerName(item.instance),
+      host: instanceServerHost(item.instance),
+      region: instanceServerRegion(item.instance),
+      instances: 0,
+      connected: 0,
+      partial: 0,
+      notConnected: 0,
+      sessions: 0,
+      running: 0,
+      blocked: 0,
+      errors: 0,
+      pendingApprovals: 0,
+    };
+    current.name = item.instance.serverName?.trim() || current.name;
+    current.host = instanceServerHost(item.instance) ?? current.host;
+    current.region = instanceServerRegion(item.instance) ?? current.region;
+    current.instances += 1;
+    if (item.status === "connected") current.connected += 1;
+    if (item.status === "partial") current.partial += 1;
+    if (item.status === "not_connected") current.notConnected += 1;
+    current.sessions += metrics.sessions;
+    current.running += metrics.running;
+    current.blocked += metrics.blocked;
+    current.errors += metrics.errors;
+    current.pendingApprovals += metrics.pendingApprovals;
+    summaries.set(id, current);
+  }
+
+  return [...summaries.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function filterMultiInstanceSnapshotByServer(
+  snapshot: MultiInstanceSnapshot,
+  serverId: string,
+): MultiInstanceSnapshot | undefined {
+  const scopedInstances = snapshot.instances.filter((item) => instanceServerId(item.instance) === serverId);
+  if (scopedInstances.length === 0) return undefined;
+  const selectedInstanceId = scopedInstances.some((item) => item.instance.id === snapshot.selectedInstanceId)
+    ? snapshot.selectedInstanceId
+    : scopedInstances[0]?.instance.id ?? "";
+  return {
+    ...snapshot,
+    selectedInstanceId,
+    instances: scopedInstances,
+    totals: buildMultiInstanceTotals(scopedInstances),
+  };
+}
+
+function buildMultiInstanceTotals(instances: InstanceSnapshot[]): MultiInstanceSnapshot["totals"] {
+  const totals: MultiInstanceSnapshot["totals"] = {
+    instances: instances.length,
+    connected: 0,
+    partial: 0,
+    notConnected: 0,
+    sessions: 0,
+    running: 0,
+    blocked: 0,
+    errors: 0,
+    pendingApprovals: 0,
+    cronJobs: 0,
+  };
+  for (const item of instances) {
+    const metrics = buildInstanceUiMetrics(item);
+    if (item.status === "connected") totals.connected += 1;
+    if (item.status === "partial") totals.partial += 1;
+    if (item.status === "not_connected") totals.notConnected += 1;
+    totals.sessions += metrics.sessions;
+    totals.running += metrics.running;
+    totals.blocked += metrics.blocked;
+    totals.errors += metrics.errors;
+    totals.pendingApprovals += metrics.pendingApprovals;
+    totals.cronJobs += metrics.cronJobs;
+  }
+  return totals;
+}
+
+function renderServerHealthPanel(
+  snapshot: MultiInstanceSnapshot,
+  language: UiLanguage,
+  selectedServerId?: string,
+): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const summaries = buildServerUiSummaries(snapshot.instances);
+  const rows = summaries
+    .map((server) => {
+      const href = `/?server=${encodeURIComponent(server.id)}&amp;section=overview&amp;lang=${encodeURIComponent(language)}`;
+      const healthTone = server.notConnected > 0 || server.errors > 0 ? "error" : server.partial > 0 || server.blocked > 0 || server.pendingApprovals > 0 ? "partial" : "connected";
+      const healthLabel = healthTone === "connected" ? t("Healthy", "健康") : healthTone === "partial" ? t("Needs attention", "需关注") : t("Not connected", "未连接");
+      const location = [server.host, server.region].filter(Boolean).join(" · ") || "-";
+      return `<tr>
+        <td><a href="${href}">${escapeHtml(server.name)}</a><div class="meta"><code>${escapeHtml(server.id)}</code>${selectedServerId === server.id ? ` · ${escapeHtml(t("Current", "当前"))}` : ""}</div></td>
+        <td>${badge(healthTone, healthLabel)}</td>
+        <td>${escapeHtml(location)}</td>
+        <td>${server.instances}</td>
+        <td>${server.connected}/${server.instances}</td>
+        <td>${server.sessions}</td>
+        <td>${server.running}</td>
+        <td>${server.blocked}</td>
+        <td>${server.errors}</td>
+        <td>${server.pendingApprovals}</td>
+      </tr>`;
+    })
+    .join("");
+  return `<section class="panel">
+    <div class="panel-head">
+      <h2>${escapeHtml(t("Server health", "服务器健康"))}</h2>
+      <div class="meta">${escapeHtml(t("Readonly grouping by Oracle server registry metadata.", "按 Oracle 服务器 registry 元数据进行只读分组。"))}</div>
+    </div>
+    ${rows ? `<div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Server", "服务器"))}</th><th>${escapeHtml(t("Health", "健康"))}</th><th>${escapeHtml(t("Host / Region", "主机 / 区域"))}</th><th>${escapeHtml(t("Instances", "实例数"))}</th><th>${escapeHtml(t("Connected", "已连接"))}</th><th>${escapeHtml(t("Sessions", "会话"))}</th><th>${escapeHtml(t("Running", "运行中"))}</th><th>${escapeHtml(t("Blocked", "阻塞"))}</th><th>${escapeHtml(t("Errors", "错误"))}</th><th>${escapeHtml(t("Pending", "待审"))}</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-state">${escapeHtml(t("No servers are visible yet.", "暂未看到服务器。"))}</div>`}
+  </section>`;
+}
+
+function renderServerFilterBar(
+  snapshot: MultiInstanceSnapshot,
+  language: UiLanguage,
+  selectedServerId?: string,
+): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const summaries = buildServerUiSummaries(snapshot.instances);
+  if (summaries.length === 0) return "";
+  const allHref = `/?section=overview&amp;lang=${encodeURIComponent(language)}`;
+  const links = [
+    `<a class="server-filter-link${selectedServerId ? "" : " active"}" href="${allHref}"${selectedServerId ? "" : ' aria-current="page"'}>${escapeHtml(t("All servers", "全部服务器"))}</a>`,
+    ...summaries.map((server) => {
+      const href = `/?server=${encodeURIComponent(server.id)}&amp;section=overview&amp;lang=${encodeURIComponent(language)}`;
+      const active = selectedServerId === server.id;
+      return `<a class="server-filter-link${active ? " active" : ""}" href="${href}"${active ? ' aria-current="page"' : ""}>${escapeHtml(server.name)}</a>`;
+    }),
+  ].join("");
+  return `<nav class="server-filter" aria-label="${escapeHtml(t("Servers", "服务器"))}">${links}</nav>`;
+}
+
 function renderDataSourceNote(language: UiLanguage, source: string): string {
   return `<div class="source-note"><span>${escapeHtml(pickUiText(language, "Data source", "数据来源"))}</span>${escapeHtml(source)}</div>`;
 }
@@ -6467,6 +6650,7 @@ function renderMultiInstanceOverview(
   snapshot: MultiInstanceSnapshot,
   language: UiLanguage = "zh",
   warning?: string,
+  selectedServerId?: string,
 ): string {
   const t = (en: string, zh: string): string => pickUiText(language, en, zh);
   const totalChips = [
@@ -6484,6 +6668,12 @@ function renderMultiInstanceOverview(
   const selectedMessage = selectedInstance
     ? `${t("Current instance", "当前实例")}${language === "zh" ? "：" : ": "}${selectedInstance.instance.name}`
     : t("No instance is selected.", "当前未选中实例。");
+  const selectedServer = selectedServerId
+    ? buildServerUiSummaries(snapshot.instances).find((server) => server.id === selectedServerId)
+    : undefined;
+  const selectedServerMessage = selectedServer
+    ? `${t("Current server", "当前服务器")}${language === "zh" ? "：" : ": "}${selectedServer.name}`
+    : `${t("Current server", "当前服务器")}${language === "zh" ? "：" : ": "}${t("All servers", "全部服务器")}`;
   const warningHtml = warning ? `<div class="notice warning">${escapeHtml(warning)}</div>` : "";
 
   return `<!doctype html>
@@ -6532,6 +6722,9 @@ function renderMultiInstanceOverview(
     .attention-list li { align-items: flex-start; border-bottom: 1px solid rgba(17, 24, 39, 0.08); padding-bottom: 8px; }
     .attention-list li:last-child { border-bottom: 0; padding-bottom: 0; }
     .attention-list a { color: #005cb9; font-weight: 600; text-decoration: none; }
+    .server-filter { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; }
+    .server-filter-link { display: inline-flex; align-items: center; border: 1px solid var(--border); border-radius: 999px; padding: 6px 10px; text-decoration: none; color: #344054; background: #fff; font-size: 13px; }
+    .server-filter-link.active { color: #005cb9; border-color: rgba(0, 113, 227, 0.5); background: #eff8ff; }
     .source-note { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 10px; border: 1px solid rgba(0, 113, 227, 0.18); border-radius: 999px; padding: 4px 9px; color: #344054; background: #f5fbff; font-size: 12px; }
     .source-note span { color: #005cb9; font-weight: 700; }
     .table-wrap { overflow-x: auto; }
@@ -6552,9 +6745,12 @@ function renderMultiInstanceOverview(
       <div class="meta">${escapeHtml(t("Readonly monitoring only. No execution, pause, or approval actions are available here.", "仅用于只读监控。这里不提供执行、暂停或审批动作。"))}</div>
       <div class="meta">${escapeHtml(t("Updated", "更新时间"))}${escapeHtml(language === "zh" ? "：" : ": ")}${escapeHtml(formatUiTimestamp(snapshot.generatedAt, language))}</div>
       <div class="meta">${escapeHtml(selectedMessage)}</div>
+      <div class="meta">${escapeHtml(selectedServerMessage)}</div>
+      ${renderServerFilterBar(snapshot, language, selectedServerId)}
     </section>
     ${warningHtml}
     <section class="status-strip">${totalChips}</section>
+    ${renderServerHealthPanel(snapshot, language, selectedServerId)}
     <section class="overview-layout">
       <div>
         ${renderMultiInstanceHealthPanel(snapshot.instances, language)}
@@ -6786,6 +6982,8 @@ function renderMultiInstanceDetail(
       <section class="card">
         <h2>${escapeHtml(t("Instance connection", "实例连接"))}</h2>
         <div class="meta">ID: <code>${escapeHtml(selected?.instance.id ?? selectedInstanceId)}</code></div>
+        <div class="meta">${escapeHtml(t("Server", "服务器"))}: <code>${escapeHtml(selected ? instanceServerName(selected.instance) : "-")}</code>${selected?.instance.serverId ? ` · <code>${escapeHtml(selected.instance.serverId)}</code>` : ""}</div>
+        <div class="meta">${escapeHtml(t("Host / Region", "主机 / 区域"))}: <code>${escapeHtml(selected ? [instanceServerHost(selected.instance), instanceServerRegion(selected.instance)].filter(Boolean).join(" · ") || "-" : "-")}</code></div>
         <div class="meta">Gateway: <code>${escapeHtml(selected?.instance.gatewayUrl ?? "-")}</code></div>
         <div class="meta">OPENCLAW_HOME: <code>${escapeHtml(selected?.instance.openclawHome ?? "-")}</code></div>
         <div class="meta">OPENCLAW_CONFIG_PATH: <code>${escapeHtml(selected?.instance.openclawConfigPath ?? "-")}</code></div>

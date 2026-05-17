@@ -1,9 +1,21 @@
 export type AgentRunState = "idle" | "running" | "blocked" | "waiting_approval" | "error";
 export type InstanceConnectionStatus = "connected" | "partial" | "not_connected";
 
+export interface OpenClawServerConfig {
+  id: string;
+  name: string;
+  host?: string;
+  region?: string;
+  description?: string;
+}
+
 export interface OpenClawInstanceConfig {
   id: string;
   name: string;
+  serverId?: string;
+  serverName?: string;
+  serverHost?: string;
+  serverRegion?: string;
   gatewayUrl: string;
   openclawHome: string;
   openclawConfigPath: string;
@@ -17,6 +29,7 @@ export interface OpenClawInstanceConfigIssue {
 
 export interface OpenClawInstanceConfigLoadResult {
   source: string;
+  servers?: OpenClawServerConfig[];
   instances: OpenClawInstanceConfig[];
   issues: OpenClawInstanceConfigIssue[];
 }

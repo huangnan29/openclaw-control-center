@@ -77,6 +77,54 @@ volumes:
 
 `id` 只允许小写字母、数字、下划线和短横线。`name` 是 UI 显示名。`openclawHome` 用于读取该实例的 OpenClaw 配置，`workspaceRoot` 用于读取 workspace 相关信号。
 
+## 跨服务器 registry
+
+长期管理多台 Oracle 服务器时，推荐把配置升级为 `servers + instances` 模型。控制中心仍然只读：它只是把每个实例归属到某台服务器，并在总览页显示 `服务器健康`、`server=` 筛选链接和实例详情中的服务器元数据。
+
+```json
+{
+  "servers": [
+    {
+      "id": "tom-oracle",
+      "name": "Tom Oracle",
+      "host": "146.235.226.66",
+      "region": "oracle-us",
+      "instances": [
+        {
+          "id": "main",
+          "name": "Main",
+          "openclawHome": "/instances/main/config",
+          "workspaceRoot": "/instances/main/workspace"
+        },
+        {
+          "id": "tom",
+          "name": "Tom / Work",
+          "openclawHome": "/instances/tom/config",
+          "workspaceRoot": "/instances/tom/workspace"
+        }
+      ]
+    },
+    {
+      "id": "second-oracle",
+      "name": "Second Oracle",
+      "host": "10.0.0.12",
+      "instances": [
+        {
+          "id": "second-main",
+          "name": "Second Main",
+          "openclawHome": "/instances/second-main/config",
+          "workspaceRoot": "/instances/second-main/workspace"
+        }
+      ]
+    }
+  ]
+}
+```
+
+解析后，每个实例会携带 `serverId`、`serverName`、`serverHost`、`serverRegion` 等只读元数据。旧版顶层 `instances` 配置继续兼容；没有服务器字段的实例会在 UI 中归入 `Local server`。
+
+当前阶段只是 registry 与 UI 维度升级。跨服务器真实采集仍建议下一阶段通过每台 Oracle 本地 collector 上报快照，而不是让中央控制中心直接拿远端实例目录写权限。
+
 ## 推荐环境变量
 
 ```env

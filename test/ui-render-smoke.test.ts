@@ -6,10 +6,11 @@ import type { AuditTimelineSnapshot } from "../src/runtime/audit-timeline";
 import type { SessionConversationDetailResult } from "../src/runtime/session-conversations";
 import type { MultiInstanceSnapshot, OpenClawInstanceConfig, ReadModelSnapshot } from "../src/types";
 
-function smokeInstance(id: string, name: string): OpenClawInstanceConfig {
+function smokeInstance(id: string, name: string, server: Partial<OpenClawInstanceConfig> = {}): OpenClawInstanceConfig {
   return {
     id,
     name,
+    ...server,
     gatewayUrl: `ws://127.0.0.1:${id === "tom" ? "18789" : "18790"}`,
     openclawHome: `/tmp/openclaw-${id}`,
     openclawConfigPath: `/tmp/openclaw-${id}/openclaw.json`,
@@ -220,13 +221,23 @@ test("multi-instance overview renders status metrics detail links and selected s
     selectedInstanceId: "tom",
     instances: [
       {
-        instance: smokeInstance("tom", "Tom Workspace"),
+        instance: smokeInstance("tom", "Tom Workspace", {
+          serverId: "tom-oracle",
+          serverName: "Tom Oracle",
+          serverHost: "146.235.226.66",
+          serverRegion: "oracle-us",
+        }),
         status: "connected",
         detail: "ok",
         snapshot: tomSnapshot,
       },
       {
-        instance: smokeInstance("jerry", "Jerry Workspace"),
+        instance: smokeInstance("jerry", "Jerry Workspace", {
+          serverId: "jerry-oracle",
+          serverName: "Jerry Oracle",
+          serverHost: "129.146.1.20",
+          serverRegion: "oracle-eu",
+        }),
         status: "not_connected",
         detail: "gateway unavailable <unsafe>",
         snapshot: jerrySnapshot,
@@ -256,6 +267,10 @@ test("multi-instance overview renders status metrics detail links and selected s
   assert(html.includes("待审批"));
   assert(html.includes("错误数"));
   assert(html.includes("实例矩阵"));
+  assert(html.includes("服务器健康"));
+  assert(html.includes("Tom Oracle"));
+  assert(html.includes("Jerry Oracle"));
+  assert(html.includes('href="/?server=tom-oracle&amp;section=overview&amp;lang=zh"'));
   assert(html.includes("关注队列"));
   assert(html.includes("最近活动"));
   assert(html.includes("实例健康"));
@@ -291,7 +306,22 @@ test("multi-instance routes render overview detail and invalid-instance fallback
   const previousInstancesJson = process.env.OPENCLAW_INSTANCES_JSON;
   const previousInstancesFile = process.env.OPENCLAW_INSTANCES_FILE;
   process.env.OPENCLAW_INSTANCES_JSON = JSON.stringify({
-    instances: [smokeInstance("tom", "Tom Workspace"), smokeInstance("jerry", "Jerry Workspace")],
+    servers: [
+      {
+        id: "tom-oracle",
+        name: "Tom Oracle",
+        host: "146.235.226.66",
+        region: "oracle-us",
+        instances: [smokeInstance("tom", "Tom Workspace")],
+      },
+      {
+        id: "jerry-oracle",
+        name: "Jerry Oracle",
+        host: "129.146.1.20",
+        region: "oracle-eu",
+        instances: [smokeInstance("jerry", "Jerry Workspace")],
+      },
+    ],
   });
   delete process.env.OPENCLAW_INSTANCES_FILE;
   const calls: string[] = [];
@@ -318,6 +348,14 @@ test("multi-instance routes render overview detail and invalid-instance fallback
     const overviewHtml = await overviewResponse.text();
     assert(overviewHtml.includes("多实例只读总览"));
     assert(overviewHtml.includes('href="/?instance=tom&amp;section=overview'));
+    assert(overviewHtml.includes('href="/?server=tom-oracle&amp;section=overview&amp;lang=zh"'));
+
+    const serverResponse = await fetch(`${baseUrl}/?server=tom-oracle&section=overview&lang=zh`);
+    assert.equal(serverResponse.status, 200);
+    const serverHtml = await serverResponse.text();
+    assert(serverHtml.includes("当前服务器：Tom Oracle"));
+    assert(serverHtml.includes("Tom Workspace"));
+    assert(!serverHtml.includes("Jerry Workspace"));
 
     const detailResponse = await fetch(`${baseUrl}/?instance=tom&section=projects-tasks&lang=zh`);
     assert.equal(detailResponse.status, 200);
@@ -363,7 +401,7 @@ test("multi-instance routes render overview detail and invalid-instance fallback
     const invalidHtml = await invalidResponse.text();
     assert(invalidHtml.includes("未找到该实例"));
     assert(invalidHtml.includes("多实例只读总览"));
-    assert.deepEqual(calls, ["tom", "tom", "missing"]);
+    assert.deepEqual(calls, ["tom", "tom", "tom", "missing"]);
   } finally {
     if (server.listening) {
       await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));

@@ -70,6 +70,7 @@ check_http_pages() {
   log "检查多实例总览页面"
   curl_to_file "${base}/?section=overview&lang=zh" "${TMP_DIR}/overview.html" "多实例总览页面"
   require_contains "${TMP_DIR}/overview.html" "多实例只读总览" "总览标题"
+  require_contains "${TMP_DIR}/overview.html" "服务器健康" "服务器健康"
   require_contains "${TMP_DIR}/overview.html" "实例矩阵" "实例矩阵"
   require_contains "${TMP_DIR}/overview.html" "关注队列" "关注队列"
   require_contains "${TMP_DIR}/overview.html" "最近活动" "最近活动"

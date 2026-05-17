@@ -5,9 +5,11 @@ import type {
   OpenClawInstanceConfig,
   OpenClawInstanceConfigIssue,
   OpenClawInstanceConfigLoadResult,
+  OpenClawServerConfig,
 } from "../types";
 
 const INSTANCE_ID_PATTERN = /^[a-z0-9_-]+$/;
+const SERVER_ID_PATTERN = INSTANCE_ID_PATTERN;
 const DEFAULT_GATEWAY_URL = "ws://127.0.0.1:18789";
 
 type InstanceConfigEnv = Partial<
@@ -28,7 +30,9 @@ export function parseOpenClawInstanceConfigText(
 ): OpenClawInstanceConfigLoadResult {
   const issues: OpenClawInstanceConfigIssue[] = [];
   const instances: OpenClawInstanceConfig[] = [];
+  const servers: OpenClawServerConfig[] = [];
   const seenIds = new Set<string>();
+  const seenServerIds = new Set<string>();
 
   let parsed: unknown;
   try {
@@ -41,8 +45,9 @@ export function parseOpenClawInstanceConfigText(
     };
   }
 
-  const entries = readInstanceEntries(parsed);
-  if (!entries) {
+  const rootEntries = readRootInstanceEntries(parsed);
+  const serverEntries = readServerEntries(parsed, issues);
+  if (!rootEntries && !serverEntries) {
     return {
       source,
       instances,
@@ -50,40 +55,103 @@ export function parseOpenClawInstanceConfigText(
     };
   }
 
-  for (const entry of entries) {
+  if (rootEntries) {
+    collectInstanceConfigs({
+      entries: rootEntries,
+      instances,
+      issues,
+      seenIds,
+    });
+  }
+
+  for (const serverEntry of serverEntries ?? []) {
+    if (!isRecord(serverEntry)) {
+      issues.push({ message: "server must be an object" });
+      continue;
+    }
+
+    const server = readServerConfig(serverEntry);
+    if (server.issues.length > 0) {
+      issues.push(...server.issues);
+      continue;
+    }
+
+    if (seenServerIds.has(server.config.id)) {
+      issues.push({ message: `duplicate server id: ${server.config.id}` });
+      continue;
+    }
+    seenServerIds.add(server.config.id);
+    servers.push(server.config);
+
+    const entries = Array.isArray(serverEntry.instances) ? serverEntry.instances : undefined;
+    if (!entries) {
+      issues.push({ message: `instances must be an array for server id: ${server.config.id}` });
+      continue;
+    }
+
+    collectInstanceConfigs({
+      entries,
+      instances,
+      issues,
+      seenIds,
+      server: server.config,
+      inheritedGatewayUrl: readTrimmedString(serverEntry.gatewayUrl),
+    });
+  }
+
+  return { source, ...(servers.length > 0 ? { servers } : {}), instances, issues };
+}
+
+function collectInstanceConfigs(input: {
+  entries: unknown[];
+  instances: OpenClawInstanceConfig[];
+  issues: OpenClawInstanceConfigIssue[];
+  seenIds: Set<string>;
+  server?: OpenClawServerConfig;
+  inheritedGatewayUrl?: string;
+}): void {
+  for (const entry of input.entries) {
     if (!isRecord(entry)) {
-      issues.push({ message: "instance must be an object" });
+      input.issues.push({ message: "instance must be an object" });
       continue;
     }
 
     const id = readTrimmedString(entry.id);
     if (!id || !INSTANCE_ID_PATTERN.test(id)) {
-      issues.push({ message: `invalid id: ${id ?? String(entry.id)}` });
+      input.issues.push({ message: `invalid id: ${id ?? String(entry.id)}` });
       continue;
     }
 
-    if (seenIds.has(id)) {
-      issues.push({ message: `duplicate id: ${id}` });
+    if (input.seenIds.has(id)) {
+      input.issues.push({ message: `duplicate id: ${id}` });
       continue;
     }
 
-    seenIds.add(id);
+    input.seenIds.add(id);
 
     const instanceIssues = validateInstanceEntry(entry, id);
     if (instanceIssues.length > 0) {
-      issues.push(...instanceIssues);
+      input.issues.push(...instanceIssues);
       continue;
     }
 
     const name = readTrimmedString(entry.name) ?? readTrimmedString(entry.label) ?? id;
     const openclawHome = readTrimmedString(entry.openclawHome) as string;
-    const gatewayUrl = readTrimmedString(entry.gatewayUrl) ?? DEFAULT_GATEWAY_URL;
+    const gatewayUrl = readTrimmedString(entry.gatewayUrl) ?? input.inheritedGatewayUrl ?? DEFAULT_GATEWAY_URL;
     const openclawConfigPath = readTrimmedString(entry.openclawConfigPath) ?? join(openclawHome, "openclaw.json");
     const workspaceRoot = readTrimmedString(entry.workspaceRoot);
 
-    instances.push({
+    input.instances.push({
       id,
       name,
+      ...(input.server
+        ? {
+            serverId: input.server.id,
+            serverName: input.server.name,
+            ...(input.server.host ? { serverHost: input.server.host } : {}),
+            ...(input.server.region ? { serverRegion: input.server.region } : {}),
+          }
+        : {}),
       gatewayUrl,
       openclawHome,
       openclawConfigPath,
@@ -91,8 +159,6 @@ export function parseOpenClawInstanceConfigText(
       readonly: readBoolean(entry.readonly, true),
     });
   }
-
-  return { source, instances, issues };
 }
 
 export function loadOpenClawInstanceConfigs(
@@ -136,9 +202,16 @@ export function loadOpenClawInstanceConfigs(
   };
 }
 
-function readInstanceEntries(parsed: unknown): unknown[] | undefined {
+function readRootInstanceEntries(parsed: unknown): unknown[] | undefined {
   if (Array.isArray(parsed)) return parsed;
   if (isRecord(parsed) && Array.isArray(parsed.instances)) return parsed.instances;
+  return undefined;
+}
+
+function readServerEntries(parsed: unknown, issues: OpenClawInstanceConfigIssue[]): unknown[] | undefined {
+  if (!isRecord(parsed) || parsed.servers === undefined) return undefined;
+  if (Array.isArray(parsed.servers)) return parsed.servers;
+  issues.push({ message: "servers must be an array" });
   return undefined;
 }
 
@@ -171,6 +244,43 @@ function validateInstanceEntry(entry: Record<string, unknown>, id: string): Open
   }
 
   return issues;
+}
+
+function readServerConfig(entry: Record<string, unknown>): { config: OpenClawServerConfig; issues: OpenClawInstanceConfigIssue[] } {
+  const issues: OpenClawInstanceConfigIssue[] = [];
+  const id = readTrimmedString(entry.id);
+  if (!id || !SERVER_ID_PATTERN.test(id)) {
+    issues.push({ message: `invalid server id: ${id ?? String(entry.id)}` });
+  }
+
+  const name = readTrimmedString(entry.name) ?? readTrimmedString(entry.label);
+  if (!name) {
+    issues.push({ message: `missing server name for id: ${id ?? String(entry.id)}` });
+  }
+
+  if (entry.host !== undefined && readTrimmedString(entry.host) === undefined) {
+    issues.push({ message: `invalid host for server id: ${id ?? String(entry.id)}` });
+  }
+  if (entry.region !== undefined && readTrimmedString(entry.region) === undefined) {
+    issues.push({ message: `invalid region for server id: ${id ?? String(entry.id)}` });
+  }
+  if (entry.description !== undefined && readTrimmedString(entry.description) === undefined) {
+    issues.push({ message: `invalid description for server id: ${id ?? String(entry.id)}` });
+  }
+  if (entry.gatewayUrl !== undefined && readTrimmedString(entry.gatewayUrl) === undefined) {
+    issues.push({ message: `invalid gatewayUrl for server id: ${id ?? String(entry.id)}` });
+  }
+
+  return {
+    config: {
+      id: id ?? "",
+      name: name ?? id ?? "",
+      ...(readTrimmedString(entry.host) ? { host: readTrimmedString(entry.host) } : {}),
+      ...(readTrimmedString(entry.region) ? { region: readTrimmedString(entry.region) } : {}),
+      ...(readTrimmedString(entry.description) ? { description: readTrimmedString(entry.description) } : {}),
+    },
+    issues,
+  };
 }
 
 function readTrimmedString(value: unknown): string | undefined {

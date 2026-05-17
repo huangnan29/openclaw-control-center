@@ -135,9 +135,13 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   const env = readFileSync(path.join(ROOT, ".env.example"), "utf8");
 
   assert(doc.includes("OPENCLAW_INSTANCES_FILE"));
+  assert(doc.includes("\"servers\""));
+  assert(doc.includes("serverId"));
+  assert(doc.includes("服务器健康"));
   assert(doc.includes("/srv/openclaw-work"));
   assert(doc.includes(":ro"));
   assert(doc.includes("不挂载 /var/run/docker.sock"));
   assert(compose.includes("OPENCLAW_INSTANCES_FILE"));
   assert(env.includes("OPENCLAW_INSTANCES_JSON"));
+  assert(env.includes("servers"));
 });

@@ -41,6 +41,40 @@ test("parseOpenClawInstanceConfigText accepts multiple readonly instances", () =
   assert.equal(result.instances[0]?.name, "Main");
 });
 
+test("parseOpenClawInstanceConfigText accepts cross-server registry", () => {
+  const result = parseOpenClawInstanceConfigText(
+    JSON.stringify({
+      servers: [
+        {
+          id: "tom-oracle",
+          name: "Tom Oracle",
+          host: "146.235.226.66",
+          region: "oracle-us",
+          instances: [
+            {
+              id: "tom-main",
+              name: "Tom Main",
+              gatewayUrl: "ws://127.0.0.1:18789",
+              openclawHome: "/instances/main/config",
+              workspaceRoot: "/instances/main/workspace",
+            },
+          ],
+        },
+      ],
+    }),
+    "inline",
+  );
+
+  assert.equal(result.issues.length, 0);
+  assert.equal(result.servers?.[0]?.id, "tom-oracle");
+  assert.equal(result.servers?.[0]?.name, "Tom Oracle");
+  assert.equal(result.instances.length, 1);
+  assert.equal(result.instances[0]?.serverId, "tom-oracle");
+  assert.equal(result.instances[0]?.serverName, "Tom Oracle");
+  assert.equal(result.instances[0]?.serverHost, "146.235.226.66");
+  assert.equal(result.instances[0]?.serverRegion, "oracle-us");
+});
+
 test("parseOpenClawInstanceConfigText rejects duplicate and unsafe ids", () => {
   const result = parseOpenClawInstanceConfigText(
     JSON.stringify({

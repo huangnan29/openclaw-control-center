@@ -2,21 +2,21 @@
 
 ## 当前目标
 
-推进 OpenClaw 控制中心长期方案，但保持节奏不跑偏。当前仍处于第一阶段：**数据可信度增强**。
+推进 OpenClaw 控制中心长期方案，但保持节奏不跑偏。当前推进到第四阶段：**跨服务器 registry（只读）**。
 
 ## 本轮任务
 
-真实日志接入已完成：最近日志已从“快照合成事件流”升级为“真实 runtime 日志优先，合成事件流 fallback”。
+跨服务器 registry 已进入实现：配置层支持 `servers[].instances`，UI 支持服务器健康汇总和 `server=` 只读筛选。
 
 ## 本轮不做
 
-- 不做跨服务器 registry。
 - 不做 collector。
 - 不做任何写操作或管理动作。
+- 不做跨服务器真实采集，只表达服务器与实例的 registry 关系。
 
 ## 当前下一步
 
-跨服务器 registry 设计：把当前单服务器 `instances.json` 升级为能表达多台 Oracle 服务器和其下多实例的配置模型，但仍保持只读。
+完成跨服务器 registry 验证与 Tom 灰度部署；随后进入下一步：中央 collector 架构设计，但仍保持只读。
 
 ## 最近完成
 
@@ -36,7 +36,10 @@
 - 已让只读 snapshot 携带实例级 `runtimeLogs`。
 - 已让 UI 最近日志真实日志优先，无真实日志时 fallback 到合成事件。
 - 已验证 `npm test -- test/runtime-logs.test.ts`。
+- 已新增跨服务器 registry 计划：`docs/superpowers/plans/2026-05-17-cross-server-registry.md`。
+- 已让 `OPENCLAW_INSTANCES_FILE` 支持旧版 `instances` 与新版 `servers[].instances`。
+- 已让 UI 显示服务器健康、服务器筛选和实例详情中的服务器元数据。
 
 ## 阶段完成后的下一步
 
-跨服务器 registry 设计：把当前单服务器 `instances.json` 升级为能表达多台 Oracle 服务器和其下多实例的配置模型，但仍保持只读。
+中央 collector 架构设计：每台 Oracle 本地只读采集，中央 control-center 汇总 collector 快照。
