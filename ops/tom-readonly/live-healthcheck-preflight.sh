@@ -35,11 +35,7 @@ require_command() {
 
 json_field() {
   local field="$1"
-  docker exec -i \
-    -e INSTANCE_ID="$INSTANCE_ID" \
-    -e OPERATOR="$OPERATOR" \
-    "$CONTAINER_NAME" \
-    node -e '
+  docker exec -i "$CONTAINER_NAME" node -e '
 let s = "";
 process.stdin.on("data", d => s += d);
 process.stdin.on("end", () => {
@@ -60,7 +56,11 @@ process.stdin.on("end", () => {
 check_rollout_file() {
   log "检查 rollout 样板：${ROLLOUT_FILE}"
   [ -f "$ROLLOUT_FILE" ] || fail "rollout 文件不存在：${ROLLOUT_FILE}"
-  docker exec -i "$CONTAINER_NAME" node -e '
+  docker exec -i \
+    -e INSTANCE_ID="$INSTANCE_ID" \
+    -e OPERATOR="$OPERATOR" \
+    "$CONTAINER_NAME" \
+    node -e '
 let s = "";
 process.stdin.on("data", d => s += d);
 process.stdin.on("end", () => {
