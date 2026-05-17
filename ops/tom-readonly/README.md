@@ -13,6 +13,8 @@
 - `healthcheck.sh`：检查 gateway 健康、总览页、实例详情页、写接口 403、容器只读安全边界，以及 collector 快照新鲜度。
 - `collector-snapshot.sh`：在 Tom 本地生成 collector JSON 快照，只写控制中心 runtime，不修改任何 OpenClaw 实例目录。
 - `install-collector-cron.sh`：幂等安装 Tom collector 快照定时任务，只更新 crontab 中的 OpenClaw 标记块。
+- `remote-collector-pull.sh`：从其他 Oracle 服务器只读拉取已经生成好的 collector JSON，校验后写入本机 `runtime/collectors`。
+- `remote-collector-pull.sources.example.json`：远端 collector 拉取配置样板，默认 `enabled=false`。
 - `update.sh`：拉取 `multi-instance-readonly-control-center` 分支，重建控制中心容器，随后执行健康检查。
 - `rollback.sh`：回滚到指定提交；如果不传提交，则使用最近一次 `update.sh` 记录的 `previous-good.commit`。
 - `managed-action-healthcheck-rollout.example.json`：只读 healthcheck live 演练的 rollout 样板，不会被默认加载。
@@ -31,6 +33,10 @@ cd /srv/openclaw-control-center-readonly
 ./healthcheck.sh
 ./collector-snapshot.sh
 ./install-collector-cron.sh
+repo/ops/tom-readonly/remote-collector-pull.sh plan runtime/remote-collector-pull.sources.json
+CONFIRM_REMOTE_COLLECTOR_PULL=I_UNDERSTAND_THIS_ONLY_READS_REMOTE_COLLECTOR_SNAPSHOTS \
+repo/ops/tom-readonly/remote-collector-pull.sh pull runtime/remote-collector-pull.sources.json
+repo/ops/tom-readonly/remote-collector-pull.sh status runtime/remote-collector-pull.sources.json
 ./update.sh
 ./rollback.sh <commit>
 repo/ops/tom-readonly/live-healthcheck-approval.sh prepare runtime/live-healthcheck-approval.json
@@ -49,6 +55,12 @@ SERVER_ID=tom-oracle OUTPUT_PATH=/app/runtime/collectors/tom-oracle/snapshot.jso
 OPENCLAW_COLLECTOR_CRON_SCHEDULE="*/2 * * * *" ./install-collector-cron.sh
 COLLECTOR_SNAPSHOT_MAX_AGE_SECONDS=300 ./healthcheck.sh
 BRANCH=multi-instance-readonly-control-center ./update.sh
+```
+
+远端 collector 拉取只读取远端 snapshot 文件，远端服务器必须先自行生成 collector JSON。拉取命令不会执行远端 collector、不会修改远端实例目录，也不会调用 `/api/managed-actions/live`。本地写入路径必须位于：
+
+```bash
+/srv/openclaw-control-center-readonly/runtime/collectors/
 ```
 
 只读 healthcheck live 演练必须先人工准备 live gate、executor 和 rollout 配置；默认 Tom 不启用。确认后才可手动运行：

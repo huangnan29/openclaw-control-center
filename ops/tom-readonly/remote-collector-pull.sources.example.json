@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "sources": [
+    {
+      "serverId": "remote-oracle",
+      "name": "Remote Oracle",
+      "enabled": false,
+      "host": "10.0.0.12",
+      "user": "ubuntu",
+      "port": 22,
+      "sshKey": "/srv/openclaw-control-center-readonly/runtime/ssh/remote-oracle-readonly.key",
+      "knownHostsFile": "/srv/openclaw-control-center-readonly/runtime/ssh/known_hosts",
+      "remoteSnapshotPath": "/srv/openclaw-control-center-readonly/runtime/collectors/remote-oracle/snapshot.json",
+      "localSnapshotPath": "/srv/openclaw-control-center-readonly/runtime/collectors/remote-oracle/snapshot.json",
+      "connectTimeoutSeconds": 10,
+      "strictHostKeyChecking": "accept-new"
+    }
+  ]
+}

@@ -216,6 +216,43 @@ OPENCLAW_COLLECTOR_CRON_SCHEDULE="*/2 * * * *" ./install-collector-cron.sh
 
 `healthcheck.sh` 会读取 server registry 中的 `collectorSnapshotPath`，并用 `COLLECTOR_SNAPSHOT_MAX_AGE_SECONDS` 检查快照是否存在、可解析、包含实例且未过期。默认最大年龄是 300 秒。
 
+### 跨服务器只读拉取
+
+中央节点可以用 Tom 运维脚本拉取其他 Oracle 服务器已经生成好的 collector snapshot。这个步骤只通过 SSH 读取远端 JSON 文件，再写入中央节点自己的 `runtime/collectors` 目录；它不会运行远端 collector，不会修改远端 OpenClaw 实例目录，也不会调用 managed action live API。
+
+配置样板：
+
+```bash
+cp repo/ops/tom-readonly/remote-collector-pull.sources.example.json runtime/remote-collector-pull.sources.json
+```
+
+先只查看计划：
+
+```bash
+repo/ops/tom-readonly/remote-collector-pull.sh plan runtime/remote-collector-pull.sources.json
+```
+
+确认后再拉取：
+
+```bash
+CONFIRM_REMOTE_COLLECTOR_PULL=I_UNDERSTAND_THIS_ONLY_READS_REMOTE_COLLECTOR_SNAPSHOTS \
+repo/ops/tom-readonly/remote-collector-pull.sh pull runtime/remote-collector-pull.sources.json
+```
+
+拉取脚本会校验：
+
+- 远端 JSON `schemaVersion` 必须为 `1`。
+- 远端 JSON `serverId` 必须匹配配置中的 `serverId`。
+- `generatedAt` 必须可解析。
+- `instances` 必须是非空数组。
+- 本地写入路径必须位于中央节点的 `runtime/collectors/` 下。
+
+最近一次拉取结果会写入 `runtime/collector-pull-state/<serverId>.json`，可以用下面命令查看：
+
+```bash
+repo/ops/tom-readonly/remote-collector-pull.sh status runtime/remote-collector-pull.sources.json
+```
+
 ## 推荐环境变量
 
 ```env
