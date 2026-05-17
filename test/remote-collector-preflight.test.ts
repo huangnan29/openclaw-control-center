@@ -107,6 +107,16 @@ test("remote collector preflight plans without ssh", async () => {
     assert(plan.checks.some((check: { id: string }) => check.id === "docker"));
     assert(plan.checks.some((check: { id: string }) => check.id === "gateway_remote-main"));
 
+    const status = JSON.parse(
+      execFileSync(PREFLIGHT, ["status", bundleDir], {
+        env: { ...process.env, DEPLOY_DIR: deployDir, PATH: `${fakeBin}${delimiter}${process.env.PATH ?? ""}` },
+        encoding: "utf8",
+      }),
+    );
+    assert.equal(status.status, "reported");
+    assert.equal(status.state.status, "missing");
+    assert.equal(status.safety.connectsSsh, false);
+
     const logResult = spawnSync("test", ["-e", sshLog]);
     assert.notEqual(logResult.status, 0);
   } finally {
@@ -147,6 +157,22 @@ test("remote collector preflight checks readonly prerequisites with confirmation
     assert.equal(checked.safety.callsLiveApi, false);
     assert.equal(checked.safety.connectsSsh, true);
     assert(checked.results.every((result: { status: string }) => result.status === "pass"));
+    assert.match(checked.stateFile, /remote-preflight-state\/remote-oracle\.json$/);
+
+    const state = JSON.parse(await readFile(checked.stateFile, "utf8"));
+    assert.equal(state.status, "ready");
+    assert.equal(state.serverId, "remote-oracle");
+    assert.equal(state.safety.writesRemoteFiles, false);
+    assert.equal(state.safety.mutatesOpenClawInstance, false);
+
+    const reported = JSON.parse(
+      execFileSync(PREFLIGHT, ["status", bundleDir], {
+        env,
+        encoding: "utf8",
+      }),
+    );
+    assert.equal(reported.state.status, "ready");
+    assert.equal(reported.state.results.length, checked.results.length);
 
     const sshCommands = await readFile(sshLog, "utf8");
     assert.match(sshCommands, /ubuntu@10\.0\.0\.12/);
@@ -180,6 +206,9 @@ test("remote collector preflight blocks when a required readonly check fails", a
     const body = JSON.parse(result.stdout);
     assert.equal(body.status, "blocked");
     assert(body.results.some((item: { id: string; status: string }) => item.id === "workspace_dir_remote-main" && item.status === "fail"));
+    const state = JSON.parse(await readFile(body.stateFile, "utf8"));
+    assert.equal(state.status, "blocked");
+    assert(state.results.some((item: { id: string; status: string }) => item.id === "workspace_dir_remote-main" && item.status === "fail"));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

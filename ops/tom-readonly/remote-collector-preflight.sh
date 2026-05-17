@@ -8,6 +8,7 @@ set +x
 
 DEPLOY_DIR="${DEPLOY_DIR:-/srv/openclaw-control-center-readonly}"
 BUNDLE_DIR="${BUNDLE_DIR:-${DEPLOY_DIR}/runtime/remote-onboarding/remote-oracle}"
+STATE_DIR="${STATE_DIR:-${DEPLOY_DIR}/runtime/remote-preflight-state}"
 CONFIRM_REMOTE_COLLECTOR_PREFLIGHT="${CONFIRM_REMOTE_COLLECTOR_PREFLIGHT:-}"
 
 fail() {
@@ -24,10 +25,12 @@ usage() {
 用法：
   remote-collector-preflight.sh plan <bundle-dir>
   remote-collector-preflight.sh check <bundle-dir>
+  remote-collector-preflight.sh status <bundle-dir>
 
 说明：
   plan 只读取 onboarding bundle，输出将检查的远端 SSH、docker、crontab、实例目录和 gateway 端口，不联网。
   check 通过 SSH 执行只读检查命令；不会写远端文件，不会启动容器，不会修改任何 OpenClaw 实例目录，不会调用 managed-actions live API。
+  status 只读取 Tom 本地 runtime/remote-preflight-state，不联网。
 
 安全确认：
   check 必须设置：
@@ -41,6 +44,7 @@ run_node() {
   MODE="$mode" \
     DEPLOY_DIR="$DEPLOY_DIR" \
     BUNDLE_DIR="$bundle" \
+    STATE_DIR="$STATE_DIR" \
     CONFIRM_REMOTE_COLLECTOR_PREFLIGHT="$CONFIRM_REMOTE_COLLECTOR_PREFLIGHT" \
     node <<'NODE'
 const fs = require("node:fs");
@@ -50,6 +54,7 @@ const { spawnSync } = require("node:child_process");
 const mode = process.env.MODE || "plan";
 const deployDir = path.resolve(process.env.DEPLOY_DIR || "/srv/openclaw-control-center-readonly");
 const bundleDir = resolveBundleDir(process.env.BUNDLE_DIR || path.join(deployDir, "runtime", "remote-onboarding", "remote-oracle"));
+const stateDir = path.resolve(process.env.STATE_DIR || path.join(deployDir, "runtime", "remote-preflight-state"));
 const confirm = process.env.CONFIRM_REMOTE_COLLECTOR_PREFLIGHT || "";
 const idPattern = /^[a-z0-9_-]+$/;
 
@@ -267,6 +272,7 @@ function buildChecks(bundle) {
 function safety(connectsSsh) {
   return {
     readsRemotePrerequisitesOnly: true,
+    writesControlCenterRuntimeState: connectsSsh,
     writesRemoteFiles: false,
     startsContainers: false,
     mutatesOpenClawInstance: false,
@@ -274,6 +280,45 @@ function safety(connectsSsh) {
     callsLiveApi: false,
     connectsSsh,
   };
+}
+
+function stateFileFor(serverId) {
+  return path.join(stateDir, `${serverId}.json`);
+}
+
+function writeState(payload) {
+  fs.mkdirSync(stateDir, { recursive: true });
+  const file = stateFileFor(payload.serverId);
+  fs.writeFileSync(file, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  return file;
+}
+
+function readState(serverId) {
+  const file = stateFileFor(serverId);
+  if (!fs.existsSync(file)) {
+    return {
+      status: "missing",
+      stateFile: file,
+    };
+  }
+  try {
+    const state = JSON.parse(fs.readFileSync(file, "utf8"));
+    return {
+      status: state.status || "unknown",
+      serverId: state.serverId,
+      checkedAt: state.checkedAt,
+      updatedAt: state.updatedAt,
+      bundleDir: state.bundleDir,
+      results: Array.isArray(state.results) ? state.results : [],
+      stateFile: file,
+    };
+  } catch (error) {
+    return {
+      status: "invalid_state",
+      error: formatError(error),
+      stateFile: file,
+    };
+  }
 }
 
 function formatError(error) {
@@ -314,15 +359,33 @@ if (mode === "plan") {
   const failed = results.filter((item) => item.status === "fail");
   const warned = results.filter((item) => item.status === "warn");
   const status = failed.length > 0 ? "blocked" : warned.length > 0 ? "warning" : "ready";
-  console.log(JSON.stringify({
+  const payload = {
+    schemaVersion: 1,
     status,
     bundleDir,
     serverId: bundle.serverId,
     checkedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    remote: {
+      host: bundle.pullSource.host,
+      user: bundle.pullSource.user,
+      port: bundle.pullSource.port || 22,
+      deployDir: bundle.deployDirRemote,
+    },
     results: results.map(({ command, passDetail, planOnlyError, optional, ...result }) => result),
     safety: safety(true),
-  }, null, 2));
+  };
+  const stateFile = writeState(payload);
+  console.log(JSON.stringify({ ...payload, stateFile }, null, 2));
   if (failed.length > 0) process.exit(2);
+} else if (mode === "status") {
+  console.log(JSON.stringify({
+    status: "reported",
+    bundleDir,
+    serverId: bundle.serverId,
+    state: readState(bundle.serverId),
+    safety: safety(false),
+  }, null, 2));
 } else {
   fail(`未知模式：${mode}`);
 }
@@ -338,6 +401,9 @@ main() {
     check)
       require_command ssh
       run_node "check" "${2:-$BUNDLE_DIR}"
+      ;;
+    status)
+      run_node "status" "${2:-$BUNDLE_DIR}"
       ;;
     -h|--help|help)
       usage

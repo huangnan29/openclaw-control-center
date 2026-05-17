@@ -146,6 +146,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   const remoteCollectorOnboarding = path.join(ROOT, "ops", "tom-readonly", "remote-collector-onboarding.sh");
   const remoteCollectorOnboardingExample = path.join(ROOT, "ops", "tom-readonly", "remote-collector-onboarding.example.json");
   const remoteCollectorPreflight = path.join(ROOT, "ops", "tom-readonly", "remote-collector-preflight.sh");
+  const remoteCollectorRollout = path.join(ROOT, "ops", "tom-readonly", "remote-collector-rollout.sh");
   const remoteCollectorPull = path.join(ROOT, "ops", "tom-readonly", "remote-collector-pull.sh");
   const remoteCollectorPullExample = path.join(ROOT, "ops", "tom-readonly", "remote-collector-pull.sources.example.json");
   const registerRemoteCollector = path.join(ROOT, "ops", "tom-readonly", "register-remote-collector.sh");
@@ -163,6 +164,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(doc.includes("remote-collector-onboarding.sh"));
   assert(doc.includes("I_UNDERSTAND_THIS_ONLY_WRITES_REMOTE_ONBOARDING_BUNDLE"));
   assert(doc.includes("remote-collector-preflight.sh"));
+  assert(doc.includes("remote-collector-rollout.sh"));
   assert(doc.includes("I_UNDERSTAND_THIS_ONLY_READS_REMOTE_PREREQUISITES"));
   assert(doc.includes("remote-collector-pull.sh"));
   assert(doc.includes("I_UNDERSTAND_THIS_ONLY_READS_REMOTE_COLLECTOR_SNAPSHOTS"));
@@ -186,6 +188,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(existsSync(remoteCollectorOnboarding));
   assert(existsSync(remoteCollectorOnboardingExample));
   assert(existsSync(remoteCollectorPreflight));
+  assert(existsSync(remoteCollectorRollout));
   assert(existsSync(remoteCollectorPull));
   assert(existsSync(remoteCollectorPullExample));
   assert(existsSync(registerRemoteCollector));
@@ -223,6 +226,17 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(remoteCollectorPreflightText, /mutatesOpenClawInstance: false/);
   assert.match(remoteCollectorPreflightText, /callsLiveApi: false/);
   assert.doesNotMatch(remoteCollectorPreflightText, /api\/managed-actions\/live/);
+  const remoteCollectorRolloutText = readFileSync(remoteCollectorRollout, "utf8");
+  assert.match(remoteCollectorRolloutText, /remote-collector-rollout\.sh status/);
+  assert.match(remoteCollectorRolloutText, /needs_remote_preflight/);
+  assert.match(remoteCollectorRolloutText, /needs_remote_collector_pull/);
+  assert.match(remoteCollectorRolloutText, /needs_registry_register/);
+  assert.match(remoteCollectorRolloutText, /ready_for_healthcheck/);
+  assert.match(remoteCollectorRolloutText, /connectsSsh: false/);
+  assert.match(remoteCollectorRolloutText, /writesActiveRegistry: false/);
+  assert.match(remoteCollectorRolloutText, /mutatesOpenClawInstance: false/);
+  assert.match(remoteCollectorRolloutText, /callsLiveApi: false/);
+  assert.doesNotMatch(remoteCollectorRolloutText, /api\/managed-actions\/live/);
   const remoteCollectorPullText = readFileSync(remoteCollectorPull, "utf8");
   assert.match(remoteCollectorPullText, /CONFIRM_REMOTE_COLLECTOR_PULL/);
   assert.match(remoteCollectorPullText, /I_UNDERSTAND_THIS_ONLY_READS_REMOTE_COLLECTOR_SNAPSHOTS/);
