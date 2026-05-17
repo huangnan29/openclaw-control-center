@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-跨服务器只读 collector 接入增强：已新增远端 collector-only 节点 bootstrap，远端 Oracle 可以先 dry-run 生成 collector-only 部署文件，再自行产出 snapshot；Tom 只读拉取后即可接入中央视图。
+跨服务器只读 collector 接入增强：已新增 Tom registry 注册脚本，远端 snapshot 拉取成功后可以先 `plan` 审查将新增的 server，再显式确认 `apply`，脚本自动备份并只更新 control-center registry。
 
 ## 本轮不做
 
@@ -29,7 +29,11 @@
 - 先执行 `repo/ops/tom-readonly/remote-collector-pull.sh plan runtime/remote-collector-pull.sources.json` 审查来源。
 - 只有确认远端 snapshot 文件存在后，才执行：
   `CONFIRM_REMOTE_COLLECTOR_PULL=I_UNDERSTAND_THIS_ONLY_READS_REMOTE_COLLECTOR_SNAPSHOTS repo/ops/tom-readonly/remote-collector-pull.sh pull runtime/remote-collector-pull.sources.json`
-- 拉取成功后，再把该 server 的 `collectorSnapshotPath` 加入 Tom `config/instances.json` 并运行 `healthcheck.sh`。
+- 拉取成功后，准备 `runtime/register-remote-collector.json`，先执行：
+  `repo/ops/tom-readonly/register-remote-collector.sh plan runtime/register-remote-collector.json`
+- 确认 registry diff 后再执行：
+  `CONFIRM_REMOTE_COLLECTOR_REGISTER=I_UNDERSTAND_THIS_ONLY_UPDATES_CONTROL_CENTER_REGISTRY repo/ops/tom-readonly/register-remote-collector.sh apply runtime/register-remote-collector.json`
+- 最后运行 `./healthcheck.sh` 验收新增 server、collector snapshot 新鲜度和页面只读状态。
 - 远端 server 的实例配置可以只写 `id` 和 `name`；只要 server 配置了 `collectorSnapshotPath`，中央会生成内部 `/collector/<serverId>/<instanceId>/config` 占位路径。
 
 受控管理动作下一步仍是人工批准后执行一次只读 healthcheck live 演练：
@@ -51,6 +55,20 @@
 ## 最近完成
 
 - 已新增长期推进计划：`implementation_plan.md`。
+- 已新增 `ops/tom-readonly/register-remote-collector.sh`，用于把已拉取的远端 collector snapshot 注册到 Tom `config/instances.json`。
+- 已新增 `ops/tom-readonly/register-remote-collector.example.json` 样板。
+- `register-remote-collector.sh plan` 只读取配置、Tom registry 和本机 snapshot，不写文件。
+- `register-remote-collector.sh apply` 必须设置 `CONFIRM_REMOTE_COLLECTOR_REGISTER=I_UNDERSTAND_THIS_ONLY_UPDATES_CONTROL_CENTER_REGISTRY`，会先备份原 registry，再原子写入新 registry。
+- 注册脚本会校验 snapshot `serverId`、`generatedAt`、实例列表、重复 server/instance id，并保证新增实例是 collector-only。
+- 已新增 `test/register-remote-collector.test.ts`，覆盖 plan 不写文件、apply 必须确认、自动备份、collector-only server 写入和 serverId 不匹配失败。
+- 已验证 `bash -n ops/tom-readonly/register-remote-collector.sh`。
+- 已验证 `npm test -- test/register-remote-collector.test.ts test/remote-collector-pull.test.ts test/instance-config.test.ts test/oss-readiness.test.ts`，23/23 通过。
+- 已验证 `npm test -- test/register-remote-collector.test.ts test/remote-collector-pull.test.ts test/collector-node-bootstrap.test.ts test/collector-exporter.test.ts test/multi-instance-readonly.test.ts test/readonly-multi-instance-safety.test.ts`，16/16 通过。
+- 已验证 `npm run build`。
+- 已提交并推送 `d6a332b ops: register remote collector snapshots`。
+- 已部署到 Tom，并验证运行提交 `d6a332b`。
+- 已在 Tom 临时目录验证 `register-remote-collector.sh plan` 返回 `status=planned`、`mutatesOpenClawInstance=false`、`callsLiveApi=false`，未对真实 registry 执行 apply。
+- 已验证 Tom `healthcheck.sh` 通过，现有 5 个实例仍只读；live window status 仍为 `needs_manual_approval`、`READONLY_MODE=true`、`readiness.status=blocked`，未调用 live API。
 - 已新增 `ops/collector-node/bootstrap-collector-node.sh`，用于远端 Oracle collector-only 节点引导。
 - 已新增 `ops/collector-node/collector-node.example.json` 样板。
 - `bootstrap-collector-node.sh plan` 只校验配置并输出将生成的文件，不写入、不启动容器。
