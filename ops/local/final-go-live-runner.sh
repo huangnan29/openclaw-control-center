@@ -299,14 +299,19 @@ function preparedHumanApprovalReport({ stages, writesTomRuntime, safetyExtra = {
   const reviewStatus = approvalReview.report?.status || "unknown";
   const nextCommands = reviewNextCommandsOrFallback(approvalReview, fallbackNextCommands);
   const reviewReady = approvalReview.exitCode === 0 && reviewStatus === "ready_for_human_approval";
+  const reviewApprovedReady = approvalReview.exitCode === 0 && reviewStatus === "approved_ready_for_live_window";
   return {
     schemaVersion: 1,
-    status: reviewReady ? "prepared_waiting_human_approval" : "blocked_approval_review",
+    status: reviewReady
+      ? "prepared_waiting_human_approval"
+      : reviewApprovedReady
+        ? "prepared_approved_ready_for_live_window"
+        : "blocked_approval_review",
     mode,
     topologyMode,
     generatedAt: new Date().toISOString(),
     stages: { ...stages, approvalReview },
-    issues: reviewReady ? [] : [`approval review 未到 ready_for_human_approval：${reviewStatus}`],
+    issues: reviewReady || reviewApprovedReady ? [] : [`approval review 未到 ready_for_human_approval/approved_ready_for_live_window：${reviewStatus}`],
     nextCommands,
     safety: baseSafety({
       connectsTomSsh: true,
@@ -315,6 +320,7 @@ function preparedHumanApprovalReport({ stages, writesTomRuntime, safetyExtra = {
       opensLiveGate: false,
       callsManagedActionsLiveApi: false,
       alreadyAtHumanApprovalBoundary: !writesTomRuntime,
+      alreadyApprovedReadyForLiveWindow: reviewApprovedReady,
       checkRunsHealthcheckOnly: true,
       approvalReviewRunsHealthcheckOnly: true,
       ...safetyExtra,
@@ -383,25 +389,11 @@ function prepare() {
   }
 
   if (!hasPrepareStep && (hasCommand(before.report, "final-go-live-runner.sh run-approved") || hasCommand(before.report, "live-healthcheck-rollout-runner.sh run-approved"))) {
-    return {
-      schemaVersion: 1,
-      status: "prepared_approved_ready_for_live_window",
-      mode,
-      topologyMode,
-      generatedAt: new Date().toISOString(),
+    return preparedHumanApprovalReport({
       stages: { before },
-      issues: [],
-      nextCommands: Array.isArray(before.report?.nextCommands) ? before.report.nextCommands : [],
-      safety: baseSafety({
-        connectsTomSsh: true,
-        writesTomRuntime: false,
-        writesControlCenterRuntimeOnly: false,
-        opensLiveGate: false,
-        callsManagedActionsLiveApi: false,
-        alreadyApprovedReadyForLiveWindow: true,
-        checkRunsHealthcheckOnly: true,
-      }),
-    };
+      writesTomRuntime: false,
+      fallbackNextCommands: nextCommandsFrom(before.report),
+    });
   }
 
   if (!hasPrepareStep) {
@@ -430,25 +422,12 @@ function prepare() {
   }
 
   if (tomStatusBefore.exitCode === 0 && tomReadinessStatus === "approved_ready_for_live_window") {
-    return {
-      schemaVersion: 1,
-      status: "prepared_approved_ready_for_live_window",
-      mode,
-      topologyMode,
-      generatedAt: new Date().toISOString(),
+    return preparedHumanApprovalReport({
       stages: { before, tomStatusBefore },
-      issues: [],
-      nextCommands: Array.isArray(tomStatusBefore.report?.nextCommands) ? tomStatusBefore.report.nextCommands : [],
-      safety: baseSafety({
-        connectsTomSsh: true,
-        writesTomRuntime: false,
-        writesControlCenterRuntimeOnly: false,
-        opensLiveGate: false,
-        callsManagedActionsLiveApi: false,
-        alreadyApprovedReadyForLiveWindow: true,
-        observedTomReadinessStatus: tomReadinessStatus,
-      }),
-    };
+      writesTomRuntime: false,
+      safetyExtra: { observedTomReadinessStatus: tomReadinessStatus },
+      fallbackNextCommands: nextCommandsFrom(tomStatusBefore.report),
+    });
   }
 
   const tomPrepare = runTomRunner("prepare");
