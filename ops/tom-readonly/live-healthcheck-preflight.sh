@@ -35,7 +35,11 @@ require_command() {
 
 json_field() {
   local field="$1"
-  docker exec -i "$CONTAINER_NAME" node -e '
+  docker exec -i \
+    -e INSTANCE_ID="$INSTANCE_ID" \
+    -e OPERATOR="$OPERATOR" \
+    "$CONTAINER_NAME" \
+    node -e '
 let s = "";
 process.stdin.on("data", d => s += d);
 process.stdin.on("end", () => {

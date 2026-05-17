@@ -158,6 +158,8 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(readFileSync(liveHealthcheckPreflight, "utf8"), /api\/managed-actions\/readiness/);
   assert.doesNotMatch(readFileSync(liveHealthcheckPreflight, "utf8"), /api\/managed-actions\/live/);
   assert.match(readFileSync(liveHealthcheckPreflight, "utf8"), /MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED/);
+  assert.match(readFileSync(liveHealthcheckPreflight, "utf8"), /-e INSTANCE_ID=/);
+  assert.match(readFileSync(liveHealthcheckPreflight, "utf8"), /-e OPERATOR=/);
   assert.match(readFileSync(liveHealthcheckPreflight, "utf8"), /managed-action-healthcheck-rollout\.example\.json/);
   assert.match(readFileSync(liveHealthcheckSmoke, "utf8"), /CONFIRM_LIVE_HEALTHCHECK/);
   assert.match(readFileSync(liveHealthcheckSmoke, "utf8"), /LIVE-ACTION-APPROVED/);
