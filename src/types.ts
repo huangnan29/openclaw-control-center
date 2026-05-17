@@ -7,6 +7,7 @@ export interface OpenClawServerConfig {
   host?: string;
   region?: string;
   description?: string;
+  collectorSnapshotPath?: string;
 }
 
 export interface OpenClawInstanceConfig {
@@ -16,6 +17,7 @@ export interface OpenClawInstanceConfig {
   serverName?: string;
   serverHost?: string;
   serverRegion?: string;
+  collectorSnapshotPath?: string;
   gatewayUrl: string;
   openclawHome: string;
   openclawConfigPath: string;

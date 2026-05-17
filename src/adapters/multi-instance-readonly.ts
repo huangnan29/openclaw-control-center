@@ -1,4 +1,8 @@
 import { createScopedToolClient } from "../clients/factory";
+import {
+  loadCollectorSnapshotFile,
+  type CollectorSnapshotLoadResult,
+} from "../runtime/collector-snapshot";
 import { summarizeMultiInstanceSnapshot } from "../runtime/multi-instance-summary";
 import type {
   InstanceSnapshot,
@@ -10,10 +14,12 @@ import { OpenClawReadonlyAdapter } from "./openclaw-readonly";
 
 interface MultiInstanceReadonlyAdapterOptions {
   createSnapshot?: (instance: OpenClawInstanceConfig) => Promise<ReadModelSnapshot>;
+  loadCollectorSnapshot?: (path: string) => Promise<CollectorSnapshotLoadResult>;
 }
 
 export class MultiInstanceReadonlyAdapter {
   private readonly createSnapshot: (instance: OpenClawInstanceConfig) => Promise<ReadModelSnapshot>;
+  private readonly loadCollectorSnapshot: (path: string) => Promise<CollectorSnapshotLoadResult>;
 
   constructor(
     private readonly instances: OpenClawInstanceConfig[],
@@ -22,14 +28,23 @@ export class MultiInstanceReadonlyAdapter {
     this.createSnapshot =
       options.createSnapshot ??
       ((instance) => new OpenClawReadonlyAdapter(createScopedToolClient(instance), instance).snapshot());
+    this.loadCollectorSnapshot = options.loadCollectorSnapshot ?? loadCollectorSnapshotFile;
   }
 
   async snapshot(selectedInstanceId = this.instances[0]?.id ?? ""): Promise<MultiInstanceSnapshot> {
-    const snapshots = await Promise.all(this.instances.map((instance) => this.snapshotInstance(instance)));
+    const collectorCache = new Map<string, Promise<CollectorSnapshotLoadResult>>();
+    const snapshots = await Promise.all(this.instances.map((instance) => this.snapshotInstance(instance, collectorCache)));
     return summarizeMultiInstanceSnapshot(snapshots, selectedInstanceId);
   }
 
-  private async snapshotInstance(instance: OpenClawInstanceConfig): Promise<InstanceSnapshot> {
+  private async snapshotInstance(
+    instance: OpenClawInstanceConfig,
+    collectorCache: Map<string, Promise<CollectorSnapshotLoadResult>>,
+  ): Promise<InstanceSnapshot> {
+    if (instance.collectorSnapshotPath) {
+      return this.snapshotCollectorInstance(instance, collectorCache);
+    }
+
     try {
       return {
         instance,
@@ -46,6 +61,51 @@ export class MultiInstanceReadonlyAdapter {
       };
     }
   }
+
+  private async snapshotCollectorInstance(
+    instance: OpenClawInstanceConfig,
+    collectorCache: Map<string, Promise<CollectorSnapshotLoadResult>>,
+  ): Promise<InstanceSnapshot> {
+    const path = instance.collectorSnapshotPath as string;
+    const collector = await readCachedCollectorSnapshot(path, collectorCache, this.loadCollectorSnapshot);
+    if (collector.status !== "connected") {
+      return {
+        instance,
+        status: "not_connected",
+        detail: collector.detail,
+        snapshot: emptySnapshot(),
+      };
+    }
+
+    const entry = collector.instances.find((item) => item.id === instance.id);
+    if (!entry) {
+      return {
+        instance,
+        status: "not_connected",
+        detail: `collector snapshot missing instance: ${instance.id}`,
+        snapshot: emptySnapshot(),
+      };
+    }
+
+    return {
+      instance,
+      status: entry.status,
+      detail: entry.detail,
+      snapshot: entry.snapshot,
+    };
+  }
+}
+
+function readCachedCollectorSnapshot(
+  path: string,
+  cache: Map<string, Promise<CollectorSnapshotLoadResult>>,
+  loadCollectorSnapshot: (path: string) => Promise<CollectorSnapshotLoadResult>,
+): Promise<CollectorSnapshotLoadResult> {
+  const existing = cache.get(path);
+  if (existing) return existing;
+  const next = loadCollectorSnapshot(path);
+  cache.set(path, next);
+  return next;
 }
 
 export function emptySnapshot(): ReadModelSnapshot {

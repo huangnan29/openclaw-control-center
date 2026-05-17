@@ -125,6 +125,64 @@ volumes:
 
 当前阶段只是 registry 与 UI 维度升级。跨服务器真实采集仍建议下一阶段通过每台 Oracle 本地 collector 上报快照，而不是让中央控制中心直接拿远端实例目录写权限。
 
+## collector 快照文件
+
+中央 collector 架构的第一步是让每台 Oracle 服务器本地生成只读快照文件，中央 control-center 只读取这个文件中的监控数据。这样中央节点不需要直接挂载远端实例目录，也不会获得远端实例的写权限。
+
+在 server registry 中可以为某台服务器声明 `collectorSnapshotPath`：
+
+```json
+{
+  "servers": [
+    {
+      "id": "remote-oracle",
+      "name": "Remote Oracle",
+      "host": "10.0.0.12",
+      "collectorSnapshotPath": "/app/collectors/remote-oracle/snapshot.json",
+      "instances": [
+        {
+          "id": "remote-main",
+          "name": "Remote Main",
+          "openclawHome": "/remote/main/config",
+          "workspaceRoot": "/remote/main/workspace"
+        }
+      ]
+    }
+  ]
+}
+```
+
+当某个 server 配置了 `collectorSnapshotPath` 后，该 server 下的实例会优先使用快照文件中的状态，而不是在中央节点执行本地目录扫描。快照文件示例：
+
+```json
+{
+  "schemaVersion": 1,
+  "serverId": "remote-oracle",
+  "generatedAt": "2026-05-17T04:00:00.000Z",
+  "instances": [
+    {
+      "id": "remote-main",
+      "status": "connected",
+      "detail": "collector ok",
+      "snapshot": {
+        "sessions": [],
+        "statuses": [],
+        "cronJobs": [],
+        "approvals": [],
+        "projects": { "projects": [], "updatedAt": "2026-05-17T04:00:00.000Z" },
+        "projectSummaries": [],
+        "tasks": { "tasks": [], "agentBudgets": [], "updatedAt": "2026-05-17T04:00:00.000Z" },
+        "tasksSummary": { "projects": 0, "tasks": 0, "todo": 0, "inProgress": 0, "blocked": 0, "done": 0, "owners": 0, "artifacts": 0 },
+        "budgetSummary": { "total": 0, "ok": 0, "warn": 0, "over": 0, "evaluations": [] },
+        "generatedAt": "2026-05-17T04:00:00.000Z"
+      }
+    }
+  ]
+}
+```
+
+当前版本只实现中央读取快照文件的能力。下一步才是在每台 Oracle 服务器上实现本地 collector exporter，由 exporter 定期生成上述 JSON。
+
 ## 推荐环境变量
 
 ```env

@@ -153,3 +153,61 @@ test("OpenClawReadonlyAdapter 从实例 workspace 读取真实 runtime 日志", 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("MultiInstanceReadonlyAdapter 优先使用 collector 快照文件", async () => {
+  const root = await mkdtemp(join(tmpdir(), "openclaw-collector-adapter-"));
+  const snapshotPath = join(root, "snapshot.json");
+
+  try {
+    await writeFile(
+      snapshotPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        serverId: "remote-oracle",
+        generatedAt: "2026-05-17T04:05:00.000Z",
+        instances: [
+          {
+            id: "remote-main",
+            status: "connected",
+            detail: "collector supplied",
+            snapshot: readModelSnapshot({
+              sessions: [
+                {
+                  sessionKey: "collector-session",
+                  state: "running",
+                  lastMessageAt: "2026-05-17T04:05:00.000Z",
+                },
+              ],
+            }),
+          },
+        ],
+      }),
+      "utf8",
+    );
+
+    const adapter = new MultiInstanceReadonlyAdapter(
+      [
+        {
+          ...instance("remote-main"),
+          serverId: "remote-oracle",
+          serverName: "Remote Oracle",
+          collectorSnapshotPath: snapshotPath,
+        },
+      ],
+      {
+        async createSnapshot() {
+          throw new Error("local scan should not run");
+        },
+      },
+    );
+
+    const snapshot = await adapter.snapshot("remote-main");
+
+    assert.equal(snapshot.instances[0]?.status, "connected");
+    assert.equal(snapshot.instances[0]?.detail, "collector supplied");
+    assert.equal(snapshot.instances[0]?.snapshot.sessions[0]?.sessionKey, "collector-session");
+    assert.equal(snapshot.totals.running, 1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

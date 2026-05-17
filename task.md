@@ -2,21 +2,22 @@
 
 ## 当前目标
 
-推进 OpenClaw 控制中心长期方案，但保持节奏不跑偏。当前推进到第四阶段：**跨服务器 registry（只读）**。
+推进 OpenClaw 控制中心长期方案，但保持节奏不跑偏。当前推进到第五阶段：**中央 collector 架构（只读）**。
 
 ## 本轮任务
 
-跨服务器 registry 已进入实现：配置层支持 `servers[].instances`，UI 支持服务器健康汇总和 `server=` 只读筛选。
+中央 collector 快照接入已进入实现：server registry 支持 `collectorSnapshotPath`，中央 control-center 可优先读取 collector JSON 快照文件。
 
 ## 本轮不做
 
-- 不做 collector。
 - 不做任何写操作或管理动作。
-- 不做跨服务器真实采集，只表达服务器与实例的 registry 关系。
+- 不做 HTTP collector 服务。
+- 不做服务器本地 collector exporter。
+- 不让中央控制中心直接挂载远端实例目录。
 
 ## 当前下一步
 
-完成跨服务器 registry 验证与 Tom 灰度部署；随后进入下一步：中央 collector 架构设计，但仍保持只读。
+完成 collector 快照文件接入验证与 Tom 灰度部署；随后进入下一步：实现服务器本地 collector exporter，仍保持只读。
 
 ## 最近完成
 
@@ -39,7 +40,11 @@
 - 已新增跨服务器 registry 计划：`docs/superpowers/plans/2026-05-17-cross-server-registry.md`。
 - 已让 `OPENCLAW_INSTANCES_FILE` 支持旧版 `instances` 与新版 `servers[].instances`。
 - 已让 UI 显示服务器健康、服务器筛选和实例详情中的服务器元数据。
+- 已新增 collector 快照接入计划：`docs/superpowers/plans/2026-05-17-collector-snapshot-ingestion.md`。
+- 已让 server registry 支持 `collectorSnapshotPath`。
+- 已新增 collector 快照文件解析器：`src/runtime/collector-snapshot.ts`。
+- 已让多实例只读 adapter 对配置了 `collectorSnapshotPath` 的实例优先使用 collector 快照。
 
 ## 阶段完成后的下一步
 
-中央 collector 架构设计：每台 Oracle 本地只读采集，中央 control-center 汇总 collector 快照。
+服务器本地 collector exporter：每台 Oracle 本地只读采集本机实例，并定期输出 collector JSON 快照。

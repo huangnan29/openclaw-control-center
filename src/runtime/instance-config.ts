@@ -150,6 +150,7 @@ function collectInstanceConfigs(input: {
             serverName: input.server.name,
             ...(input.server.host ? { serverHost: input.server.host } : {}),
             ...(input.server.region ? { serverRegion: input.server.region } : {}),
+            ...(input.server.collectorSnapshotPath ? { collectorSnapshotPath: input.server.collectorSnapshotPath } : {}),
           }
         : {}),
       gatewayUrl,
@@ -267,6 +268,9 @@ function readServerConfig(entry: Record<string, unknown>): { config: OpenClawSer
   if (entry.description !== undefined && readTrimmedString(entry.description) === undefined) {
     issues.push({ message: `invalid description for server id: ${id ?? String(entry.id)}` });
   }
+  if (entry.collectorSnapshotPath !== undefined && readTrimmedString(entry.collectorSnapshotPath) === undefined) {
+    issues.push({ message: `invalid collectorSnapshotPath for server id: ${id ?? String(entry.id)}` });
+  }
   if (entry.gatewayUrl !== undefined && readTrimmedString(entry.gatewayUrl) === undefined) {
     issues.push({ message: `invalid gatewayUrl for server id: ${id ?? String(entry.id)}` });
   }
@@ -278,6 +282,7 @@ function readServerConfig(entry: Record<string, unknown>): { config: OpenClawSer
       ...(readTrimmedString(entry.host) ? { host: readTrimmedString(entry.host) } : {}),
       ...(readTrimmedString(entry.region) ? { region: readTrimmedString(entry.region) } : {}),
       ...(readTrimmedString(entry.description) ? { description: readTrimmedString(entry.description) } : {}),
+      ...(readTrimmedString(entry.collectorSnapshotPath) ? { collectorSnapshotPath: readTrimmedString(entry.collectorSnapshotPath) } : {}),
     },
     issues,
   };

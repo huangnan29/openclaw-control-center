@@ -137,6 +137,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(doc.includes("OPENCLAW_INSTANCES_FILE"));
   assert(doc.includes("\"servers\""));
   assert(doc.includes("serverId"));
+  assert(doc.includes("collectorSnapshotPath"));
   assert(doc.includes("服务器健康"));
   assert(doc.includes("/srv/openclaw-work"));
   assert(doc.includes(":ro"));
@@ -144,4 +145,5 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(compose.includes("OPENCLAW_INSTANCES_FILE"));
   assert(env.includes("OPENCLAW_INSTANCES_JSON"));
   assert(env.includes("servers"));
+  assert(env.includes("collectorSnapshotPath"));
 });

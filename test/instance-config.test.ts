@@ -75,6 +75,33 @@ test("parseOpenClawInstanceConfigText accepts cross-server registry", () => {
   assert.equal(result.instances[0]?.serverRegion, "oracle-us");
 });
 
+test("parseOpenClawInstanceConfigText attaches server collector snapshot path", () => {
+  const result = parseOpenClawInstanceConfigText(
+    JSON.stringify({
+      servers: [
+        {
+          id: "remote-oracle",
+          name: "Remote Oracle",
+          collectorSnapshotPath: "/collectors/remote-oracle/snapshot.json",
+          instances: [
+            {
+              id: "remote-main",
+              name: "Remote Main",
+              openclawHome: "/remote/main/config",
+              workspaceRoot: "/remote/main/workspace",
+            },
+          ],
+        },
+      ],
+    }),
+    "inline",
+  );
+
+  assert.equal(result.issues.length, 0);
+  assert.equal(result.servers?.[0]?.collectorSnapshotPath, "/collectors/remote-oracle/snapshot.json");
+  assert.equal(result.instances[0]?.collectorSnapshotPath, "/collectors/remote-oracle/snapshot.json");
+});
+
 test("parseOpenClawInstanceConfigText rejects duplicate and unsafe ids", () => {
   const result = parseOpenClawInstanceConfigText(
     JSON.stringify({
