@@ -27,6 +27,10 @@
   `CONFIRM_REMOTE_COLLECTOR_ONBOARDING=I_UNDERSTAND_THIS_ONLY_WRITES_REMOTE_ONBOARDING_BUNDLE repo/ops/tom-readonly/remote-collector-onboarding.sh write runtime/remote-collector-onboarding.json`
 - 写入后先执行：
   `repo/ops/tom-readonly/remote-collector-onboarding.sh verify runtime/remote-onboarding/<serverId>`
+- verify 通过后执行远端只读 preflight：
+  `repo/ops/tom-readonly/remote-collector-preflight.sh plan runtime/remote-onboarding/<serverId>`
+- 确认后执行：
+  `CONFIRM_REMOTE_COLLECTOR_PREFLIGHT=I_UNDERSTAND_THIS_ONLY_READS_REMOTE_PREREQUISITES repo/ops/tom-readonly/remote-collector-preflight.sh check runtime/remote-onboarding/<serverId>`
 - 审查 `runtime/remote-onboarding/<serverId>/RUNBOOK.md`、`collector-node.json`、`remote-collector-pull.sources.json`、`register-remote-collector.json`、`build-context-manifest.json` 和 `safety.json`。
 - 将接入包里的 `collector-node.json` 和 `bootstrap-collector-node.sh` 复制到第二台 Oracle。
 - 在第二台 Oracle 上先执行 `./bootstrap-collector-node.sh plan collector-node.json`，确认只写文件、不启动容器、不修改实例。
@@ -99,6 +103,16 @@
 - 已在 Tom 用样板配置执行 onboarding `write`，只写入 `runtime/remote-onboarding/remote-oracle/`，未 SSH、未写 active registry、未修改任何 OpenClaw 实例。
 - 已在 Tom 对样板接入包执行 `verify`，返回 `status=verified`、`bundlesBuildContext=true`、`buildContextFiles=88`、`bootstrapStartsContainers=false`、`writesActiveRegistry=false`、`connectsSsh=false`、`mutatesOpenClawInstance=false`、`callsLiveApi=false`。
 - 已验证 Tom `healthcheck.sh` 通过，现有 5 个实例仍只读；live window status 仍为 `needs_manual_approval`、`READONLY_MODE=true`、`readiness.status=blocked`，未调用 live API。
+- 已新增 `ops/tom-readonly/remote-collector-preflight.sh`，用于在真实复制到远端前做 SSH 只读预检。
+- `remote-collector-preflight.sh plan` 只读取 onboarding bundle，不联网、不写文件。
+- `remote-collector-preflight.sh check` 必须设置 `CONFIRM_REMOTE_COLLECTOR_PREFLIGHT=I_UNDERSTAND_THIS_ONLY_READS_REMOTE_PREREQUISITES`，只通过 SSH 检查远端 docker、docker compose、crontab、deploy 目录或父目录权限、实例目录可读性和 gateway 端口。
+- preflight 不写远端文件、不启动容器、不修改任何 OpenClaw 实例目录、不调用 managed action live API。
+- 已新增 `test/remote-collector-preflight.test.ts`，覆盖 plan 不 SSH、check 必须确认、只读检查成功、必需检查失败时 blocked。
+- 已验证 `bash -n ops/tom-readonly/remote-collector-preflight.sh`。
+- 已验证 `npm test -- test/remote-collector-preflight.test.ts`，3/3 通过。
+- 已验证 `npm test -- test/remote-collector-preflight.test.ts test/remote-collector-onboarding.test.ts test/register-remote-collector.test.ts test/remote-collector-pull.test.ts test/collector-node-bootstrap.test.ts test/oss-readiness.test.ts`，21/21 通过。
+- 已验证 `npm test -- test/multi-instance-readonly.test.ts test/readonly-multi-instance-safety.test.ts test/ui-render-smoke.test.ts`，39/39 通过。
+- 已验证 `npm run build`。
 - 已新增 `ops/tom-readonly/register-remote-collector.sh`，用于把已拉取的远端 collector snapshot 注册到 Tom `config/instances.json`。
 - 已新增 `ops/tom-readonly/register-remote-collector.example.json` 样板。
 - `register-remote-collector.sh plan` 只读取配置、Tom registry 和本机 snapshot，不写文件。

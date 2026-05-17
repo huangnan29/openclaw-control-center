@@ -249,9 +249,12 @@ repo/ops/tom-readonly/remote-collector-onboarding.sh plan runtime/remote-collect
 CONFIRM_REMOTE_COLLECTOR_ONBOARDING=I_UNDERSTAND_THIS_ONLY_WRITES_REMOTE_ONBOARDING_BUNDLE \
 repo/ops/tom-readonly/remote-collector-onboarding.sh write runtime/remote-collector-onboarding.json
 repo/ops/tom-readonly/remote-collector-onboarding.sh verify runtime/remote-onboarding/<serverId>
+repo/ops/tom-readonly/remote-collector-preflight.sh plan runtime/remote-onboarding/<serverId>
+CONFIRM_REMOTE_COLLECTOR_PREFLIGHT=I_UNDERSTAND_THIS_ONLY_READS_REMOTE_PREREQUISITES \
+repo/ops/tom-readonly/remote-collector-preflight.sh check runtime/remote-onboarding/<serverId>
 ```
 
-`plan` 只校验配置并输出将生成的文件；`write` 只写 `runtime/remote-onboarding/<serverId>/` 下的接入包，不会 SSH、不会修改 `config/instances.json`、不会修改任何 OpenClaw 实例目录；`verify` 只读取接入包并离线校验 serverId、safety、pull/register 配置、build-context 和 bootstrap plan。接入包包含：
+`plan` 只校验配置并输出将生成的文件；`write` 只写 `runtime/remote-onboarding/<serverId>/` 下的接入包，不会 SSH、不会修改 `config/instances.json`、不会修改任何 OpenClaw 实例目录；`verify` 只读取接入包并离线校验 serverId、safety、pull/register 配置、build-context 和 bootstrap plan；`remote-collector-preflight.sh check` 才会 SSH 到远端，但只执行只读检查命令，检查 docker、目录可读性、deploy 目录权限和 gateway 端口。接入包包含：
 
 - `collector-node.json`：复制到远端 Oracle 后供 `bootstrap-collector-node.sh` 使用。
 - `bootstrap-collector-node.sh`：远端 collector-only 节点引导脚本。
