@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-Tom collector 定时化：配置定时生成 collector 快照，并增加快照新鲜度检查，确保中央 UI 不会长期读取过期快照。
+Tom collector 定时化已完成并部署到 Tom：Tom 当前会通过 cron 定时生成 collector 快照，`healthcheck.sh` 会检查快照新鲜度，避免中央 UI 长期读取过期快照。
 
 ## 本轮不做
 
@@ -54,6 +54,11 @@ Tom collector 定时化：配置定时生成 collector 快照，并增加快照�
 - 已新增 Tom collector 定时化计划：`docs/superpowers/plans/2026-05-17-collector-snapshot-scheduling.md`。
 - 已新增 `ops/tom-readonly/install-collector-cron.sh`，通过 `OPENCLAW_COLLECTOR_CRON_BEGIN` 标记块幂等安装快照 cron。
 - 已让 `ops/tom-readonly/healthcheck.sh` 检查 `collectorSnapshotPath` 快照新鲜度，默认 `COLLECTOR_SNAPSHOT_MAX_AGE_SECONDS=300`。
+- 已提交并推送 `200660d feat: schedule tom collector snapshots`。
+- 已部署到 Tom，并验证运行代码提交 `200660d`。
+- 已在 Tom 安装 cron：`*/2 * * * *`。
+- 已确认 cron 自动刷新快照：`generatedAt` 从 `2026-05-17T04:58:07.916Z` 更新到 `2026-05-17T05:00:01.779Z`。
+- 已验证 Tom 新版 `healthcheck.sh` 通过，collector 快照检查为 `server=tom-oracle`、`instances=5`。
 
 ## 阶段完成后的下一步
 
