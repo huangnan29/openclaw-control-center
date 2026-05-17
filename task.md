@@ -156,8 +156,17 @@ Tom 单 Oracle 上线下一步：
 - 本地已验证 `npm run build`。
 - 已推送提交 `3d49deda3e0c6626638a3e7499ce57ced12ba59d` 并同步到 Tom `/srv/openclaw-control-center-readonly/repo`。
 - Tom `update.sh` 已完成，只读 healthcheck 通过：5 个实例快照正常，写接口继续被只读闸门拦截。
-- Tom 已执行 `repo/ops/tom-readonly/install-managed-action-inbox-cron.sh status`，当前状态为 `inbox_cron_not_installed`；cron 尚未安装。
-- Tom 已执行 `repo/ops/tom-readonly/install-managed-action-inbox-cron.sh plan`，状态为 `inbox_cron_plan_ready`；计划只安装 `managed-action-inbox-runner.sh run-pending` dry-run 受控块，不调用 live API、不修改实例目录、不重启实例。
+- 已修复 `install-managed-action-inbox-cron.sh` 生成的 crontab 命令，确保 `cd '/srv/openclaw-control-center-readonly' && CONFIRM_MANAGED_ACTION_INBOX_RUNNER=...` 后才执行 runner；新增测试断言防止回归。
+- 已验证 `npm test -- test/managed-action-inbox-cron.test.ts test/managed-action-inbox-runner.test.ts test/managed-action-text-bridge.test.ts test/managed-action-command-runner.test.ts`，22/22 通过。
+- 已验证管理动作和只读安全回归集，39/39 通过。
+- 已验证 `npm run build`。
+- 已推送提交 `b44ca4c50fe90e38fd62ec9e118f83d2c2a50326` 并同步到 Tom。
+- Tom `update.sh` 已完成，只读 healthcheck 通过：5 个实例快照正常，写接口继续被只读闸门拦截。
+- Tom 已刷新 dry-run inbox cron 受控块，当前状态为 `inbox_cron_installed` 且 `needsUpdate=false`。
+- Tom crontab 中 `OPENCLAW_MANAGED_ACTION_INBOX_CRON` 受控块当前只执行 `managed-action-inbox-runner.sh run-pending`，不调用 live API、不修改实例目录、不重启实例。
+- 已向 Tom workspace inbox 写入测试指令 `20260517T171415Z-cron-smoke.txt`，cron 自动消费成功：`pendingCountBefore=1`、`pendingCountAfter=0`、`processedCount=1`。
+- 自动消费生成 dry-run 审计 `b8608cf9-aba0-4f8c-9293-f6816b8d673a`，目标为 `tom` 的 `zhihu-human-ops-writing` `skill_run` dry-run。
+- 本次自动消费安全标记：`callsManagedActionsDryRunApi=true`，`callsManagedActionsLiveApi=false`，`writesOpenClawInstanceDirs=false`，`restartsOpenClawInstances=false`，`mutatesOpenClawInstance=false`，`opensLiveGate=false`。
 - 已为 `ops/local/remote-oracle-intake.sh` 新增 `doctor` 模式。
 - `remote-oracle-intake.sh doctor` 只读取本机 SSH config、host hint 和 key 文件元数据；如果显式提供 `REMOTE_ORACLE_HOST/REMOTE_ORACLE_KEY_PATH`，只离线渲染配置摘要，不写文件、不联网、不连接 Tom、不连接第二台 Oracle。
 - `doctor` 会输出 `needs_remote_host`、`needs_remote_key`、`candidates_found` 或 `ready_for_apply`，并给出下一步 `plan/apply/run` 命令。
@@ -903,7 +912,7 @@ Tom 单 Oracle 上线下一步：
 
 ## 阶段完成后的下一步
 
-当前已经停在人工批准前。下一步有两个可选路径：优先让 Anan 从 Discord 发“控制中心 dry-run：对 tom 运行 zhihu-human-ops-writing dry-run”，完成真实 Discord/OpenClaw inbox smoke；如果要继续 live healthcheck 演练，则必须由 Anan 审查证据包后显式运行 `CONFIRM_APPROVAL_RECORD=I_APPROVE_LIVE_HEALTHCHECK_RECORD APPROVED_BY=Anan repo/ops/tom-readonly/live-healthcheck-approval.sh approve runtime/live-healthcheck-approval.json`，之后才允许执行一次性 `run-approved`。仍不得绕过人工 approval。
+当前 dry-run inbox cron 已安装并通过自动消费 smoke。下一步是重新生成与当前 commit 对齐的 live healthcheck approval packet，并停在人工批准前；如果要继续 live healthcheck 演练，必须由 Anan 审查证据包后显式运行 `CONFIRM_APPROVAL_RECORD=I_APPROVE_LIVE_HEALTHCHECK_RECORD APPROVED_BY=Anan repo/ops/tom-readonly/live-healthcheck-approval.sh approve runtime/live-healthcheck-approval.json`，之后才允许执行一次性 `run-approved`。仍不得绕过人工 approval。
 
 ## 本轮新增（inbox dry-run cron 安装器）
 
@@ -913,14 +922,14 @@ Tom 单 Oracle 上线下一步：
 - `apply/remove` 必须设置 `CONFIRM_MANAGED_ACTION_INBOX_CRON=I_UNDERSTAND_THIS_ONLY_INSTALLS_DRY_RUN_INBOX_CRON`。
 - 安装后的 cron 只调用 `managed-action-inbox-runner.sh run-pending`，并自动带上 `CONFIRM_MANAGED_ACTION_INBOX_RUNNER`、`MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container`、`MANAGED_ACTION_INBOX_SOURCE=control-center-container`、`MANAGED_ACTION_INBOX_MAX_PER_RUN`。
 - 安装器安全字段保持 `callsManagedActionsLiveApi=false`、`writesOpenClawInstanceDirs=false`、`restartsOpenClawInstances=false`、`opensLiveGate=false`。
-- 已新增 `test/managed-action-inbox-cron.test.ts`，覆盖 plan 不写 crontab、apply 缺确认阻断、apply 安装受控块、remove 移除受控块、runner 缺失阻断。
+- 已新增 `test/managed-action-inbox-cron.test.ts`，覆盖 plan 不写 crontab、apply 缺确认阻断、apply 安装受控块、remove 移除受控块、runner 缺失阻断，以及 crontab 命令必须在 `cd ... &&` 后执行 runner。
 - 已更新 `ops/tom-readonly/README.md`、`docs/MULTI_INSTANCE_READONLY.md`、`implementation_plan.md` 和 `test/oss-readiness.test.ts`，记录 cron 安装器和安全边界。
 - 已验证 `bash -n ops/tom-readonly/install-managed-action-inbox-cron.sh`。
 - 已验证 `npm test -- test/managed-action-inbox-cron.test.ts`，4/4 通过。
 
 ## 阶段完成后的下一步
 
-继续验证 cron 安装器相关回归和构建；部署到 Tom 后先执行 `status/plan` 审查，不直接安装 cron。若 plan 结果符合预期，再等待 Anan 确认是否安装 dry-run inbox cron；仍不得执行 approval `approve`、不得打开 live gate。
+cron 安装器已完成部署、受控 crontab 已安装，且 Tom workspace inbox 自动消费 smoke 已通过。继续推进时先重建最终 approval packet，并确认 readiness 仍是 `waiting_human_approval`；仍不得执行 approval `approve`、不得打开 live gate。
 
 ## 本轮新增（inbox dry-run 批处理入口）
 
