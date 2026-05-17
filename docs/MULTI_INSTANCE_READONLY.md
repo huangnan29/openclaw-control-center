@@ -426,7 +426,7 @@ repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh run-approved
 
 `live-healthcheck-rollout-runner.sh prepare` 用于自动推进到人工批准前：如果 dry-run 证据已经 ready，它会准备 approval 模板、生成并校验批准前证据包，再运行 readiness `check`。它只写 control-center runtime 下的模板和证据文件，不批准 approval、不打开 live gate、不调用 managed action live API、不修改任何 OpenClaw 实例目录。
 
-人工 approval 已批准后，`live-healthcheck-rollout-runner.sh run-approved` 会先确认 readiness 为 `approved_ready_for_live_window`，再要求 `CONFIRM_LIVE_HEALTHCHECK_RUNNER` 与 `LOCAL_API_TOKEN`，最后调用一次性演练窗口。窗口脚本仍负责自动恢复只读状态、消费 approval、生成前后影响快照和演练报告。
+人工 approval 已批准后，`live-healthcheck-rollout-runner.sh run-approved` 会先确认 readiness 为 `approved_ready_for_live_window`，再要求 `CONFIRM_LIVE_HEALTHCHECK_RUNNER` 与 `LOCAL_API_TOKEN`，最后调用一次性演练窗口；如果前置条件或人工批准未满足，runner 会返回非 0 退出码并保持 live gate 关闭，避免 openclaw 调度侧把阻断误判成成功。窗口脚本仍负责自动恢复只读状态、消费 approval、生成前后影响快照和演练报告。
 
 ## 推荐环境变量
 

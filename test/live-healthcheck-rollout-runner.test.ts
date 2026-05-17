@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -151,6 +151,24 @@ function runRunner(harness: Awaited<ReturnType<typeof writeHarness>>, mode: "sta
   return JSON.parse(output);
 }
 
+function runRunnerResult(harness: Awaited<ReturnType<typeof writeHarness>>, mode: "status" | "prepare" | "run-approved", extraEnv: Record<string, string> = {}) {
+  const result = spawnSync(SCRIPT, [mode], {
+    env: {
+      ...process.env,
+      DEPLOY_DIR: harness.deployDir,
+      SCRIPT_DIR: harness.scriptDir,
+      OPENCLAW_TOPOLOGY_MODE: "local-only",
+      ...extraEnv,
+    },
+    encoding: "utf8",
+  });
+  return {
+    exitCode: typeof result.status === "number" ? result.status : 1,
+    report: JSON.parse(result.stdout),
+    stderr: result.stderr,
+  };
+}
+
 test("live healthcheck rollout runner status 只读取 readiness", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openclaw-live-rollout-runner-"));
   try {
@@ -198,9 +216,11 @@ test("live healthcheck rollout runner prepare 在 dry-run 不满足时停止", a
   const dir = await mkdtemp(join(tmpdir(), "openclaw-live-rollout-runner-blocked-"));
   try {
     const harness = await writeHarness(dir, { dryRunReady: false });
-    const report = runRunner(harness, "prepare");
+    const result = runRunnerResult(harness, "prepare");
+    const report = result.report;
     const log = await readFile(harness.logFile, "utf8");
 
+    assert.notEqual(result.exitCode, 0);
     assert.equal(report.status, "blocked_dry_run");
     assert(report.issues.some((issue: string) => issue.includes("dry-run 证据未 ready")));
     assert.match(log, /dry-run status/);
@@ -214,9 +234,11 @@ test("live healthcheck rollout runner run-approved 未批准时不会打开窗�
   const dir = await mkdtemp(join(tmpdir(), "openclaw-live-rollout-runner-unapproved-"));
   try {
     const harness = await writeHarness(dir);
-    const report = runRunner(harness, "run-approved");
+    const result = runRunnerResult(harness, "run-approved");
+    const report = result.report;
     const log = await readFile(harness.logFile, "utf8");
 
+    assert.notEqual(result.exitCode, 0);
     assert.equal(report.status, "blocked_not_approved");
     assert.equal(report.safety.opensLiveGate, false);
     assert.equal(report.safety.callsManagedActionsLiveApi, false);
@@ -231,9 +253,11 @@ test("live healthcheck rollout runner run-approved 缺确认时不会打开窗�
   const dir = await mkdtemp(join(tmpdir(), "openclaw-live-rollout-runner-confirm-"));
   try {
     const harness = await writeHarness(dir, { readinessStatus: "approved_ready_for_live_window" });
-    const report = runRunner(harness, "run-approved");
+    const result = runRunnerResult(harness, "run-approved");
+    const report = result.report;
     const log = await readFile(harness.logFile, "utf8");
 
+    assert.notEqual(result.exitCode, 0);
     assert.equal(report.status, "blocked_confirmation_required");
     assert.equal(report.safety.opensLiveGate, false);
     assert.equal(report.safety.callsManagedActionsLiveApi, false);

@@ -351,12 +351,19 @@ function runApproved() {
   };
 }
 
+function emit(report) {
+  console.log(JSON.stringify(report, null, 2));
+  if (mode === "prepare" && report.status === "blocked_dry_run") process.exit(2);
+  if (mode === "run-approved" && String(report.status || "").startsWith("blocked_")) process.exit(2);
+  if (mode === "run-approved" && report.status === "failed_live_healthcheck") process.exit(1);
+}
+
 if (mode === "status") {
-  console.log(JSON.stringify(statusOnly(), null, 2));
+  emit(statusOnly());
 } else if (mode === "prepare") {
-  console.log(JSON.stringify(prepare(), null, 2));
+  emit(prepare());
 } else if (mode === "run-approved") {
-  console.log(JSON.stringify(runApproved(), null, 2));
+  emit(runApproved());
 } else {
   console.error(`[失败] 未知模式：${mode}`);
   process.exit(2);

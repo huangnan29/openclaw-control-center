@@ -43,7 +43,7 @@ Tom 单 Oracle 上线下一步：
   `CONFIRM_APPROVAL_RECORD=I_APPROVE_LIVE_HEALTHCHECK_RECORD APPROVED_BY=Anan repo/ops/tom-readonly/live-healthcheck-approval.sh approve runtime/live-healthcheck-approval.json`
 - 人工 approval 已批准后，自动执行一次性演练：
   `CONFIRM_LIVE_HEALTHCHECK_RUNNER=I_UNDERSTAND_THIS_RUNS_APPROVED_LIVE_HEALTHCHECK LOCAL_API_TOKEN=<本地令牌> repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh run-approved`
-  该模式会先确认 readiness 为 `approved_ready_for_live_window`，否则不会打开 live gate。
+  该模式会先确认 readiness 为 `approved_ready_for_live_window`，否则不会打开 live gate，并以非 0 退出码让 openclaw 调度侧知道本次被人工批准边界挡住。
 
 后续跨服务器扩展预留步骤：
 
