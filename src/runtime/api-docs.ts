@@ -752,9 +752,10 @@ export function buildApiDocs(): ApiDocsPayload {
         },
         response: {
           ok: "false",
-          status: "blocked_disabled|blocked_readonly|blocked_not_whitelisted|blocked_confirmation|blocked_missing_dry_run|blocked_invalid_dry_run|ready_not_implemented",
+          status: "blocked_disabled|blocked_readonly|blocked_not_whitelisted|blocked_confirmation|blocked_missing_dry_run|blocked_invalid_dry_run|blocked_rollout_not_allowed|ready_not_implemented",
           liveExecution: "false",
           dryRunReference: "{ valid, status, operationRequestId, ageMs?, maxAgeMs, matched? }",
+          rollout: "{ allowed, status, message, rule? }",
           gate: "{ enabled, readonlyMode, allowedActions, requiredConfirmationText }",
         },
       },

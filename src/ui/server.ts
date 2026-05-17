@@ -49,6 +49,11 @@ import {
   runtimeManagedActionLiveGate,
 } from "../runtime/managed-action-live";
 import {
+  evaluateManagedActionLiveRollout,
+  loadManagedActionLiveRolloutConfig,
+  type ManagedActionLiveRolloutDecision,
+} from "../runtime/managed-action-live-rollout";
+import {
   buildManagedActionDryRun,
   isManagedActionName,
   listManagedActions,
@@ -1452,12 +1457,20 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
           instanceId,
           action,
         });
+        const rolloutConfig = await loadManagedActionLiveRolloutConfig();
+        const rollout = evaluateManagedActionLiveRollout({
+          config: rolloutConfig,
+          action,
+          instanceId,
+          operator,
+        });
         const gate = runtimeManagedActionLiveGate();
         const decision = evaluateManagedActionLiveGate({
           gate,
           action,
           operationRequestId,
           dryRunReferenceValid: dryRunReference.valid,
+          rolloutAllowed: rollout.allowed,
           confirmedText,
         });
 
@@ -1480,6 +1493,7 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
             operator,
             reason,
             dryRunReference: managedActionDryRunReferenceSummary(dryRunReference),
+            rollout: managedActionRolloutSummary(rollout),
             liveExecution: false,
             gate: {
               enabled: gate.enabled,
@@ -1495,6 +1509,7 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
           message: decision.message,
           liveExecution: false,
           dryRunReference: managedActionDryRunReferenceSummary(dryRunReference),
+          rollout: managedActionRolloutSummary(rollout),
           gate: {
             enabled: gate.enabled,
             readonlyMode: gate.readonlyMode,
@@ -21152,6 +21167,26 @@ function managedActionDryRunReferenceSummary(input: ManagedActionDryRunReference
             targetInstanceId: input.record.targetInstanceId,
             operator: input.record.operator,
             confirmationTextMatched: input.record.confirmationTextMatched,
+          },
+        }
+      : {}),
+  };
+}
+
+function managedActionRolloutSummary(input: ManagedActionLiveRolloutDecision): Record<string, unknown> {
+  return {
+    allowed: input.allowed,
+    status: input.status,
+    message: input.message,
+    ...(input.rule
+      ? {
+          rule: {
+            action: input.rule.action,
+            instanceId: input.rule.instanceId,
+            operators: input.rule.operators,
+            risk: input.rule.risk,
+            enabled: input.rule.enabled,
+            maxDryRunAgeMinutes: input.rule.maxDryRunAgeMinutes,
           },
         }
       : {}),

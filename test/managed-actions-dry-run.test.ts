@@ -124,6 +124,7 @@ test("managed action dry-run previews whitelisted actions without executing in r
       liveExecution: boolean;
       gate: { enabled: boolean };
       dryRunReference: { valid: boolean; status: string; operationRequestId: string };
+      rollout: { allowed: boolean; status: string };
     };
     assert.equal(liveBody.ok, false);
     assert.equal(liveBody.status, "blocked_disabled");
@@ -132,6 +133,8 @@ test("managed action dry-run previews whitelisted actions without executing in r
     assert.equal(liveBody.dryRunReference.valid, true);
     assert.equal(liveBody.dryRunReference.status, "valid");
     assert.equal(liveBody.dryRunReference.operationRequestId, body.review.operationRequestId);
+    assert.equal(liveBody.rollout.allowed, false);
+    assert.equal(liveBody.rollout.status, "disabled");
 
     const invalidReferenceLiveResponse = await fetch(`${baseUrl}/api/managed-actions/live`, {
       method: "POST",

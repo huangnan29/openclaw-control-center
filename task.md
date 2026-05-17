@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-单动作真实执行灰度配置文件：新增默认禁用的灰度配置解析层，限定未来可灰度的动作、实例、操作者、风险等级和 dry-run 有效期；当前仍不接真实执行器。
+rollout 决策接入 live 响应：live 请求会同时返回 dry-run 引用校验和灰度配置匹配结果；当前仍不接真实执行器。
 
 ## 本轮不做
 
@@ -17,11 +17,12 @@
 
 ## 当前下一步
 
-部署灰度配置解析层到 Tom 并验证行为不变：
+部署 rollout 决策接入到 Tom 并验证行为不变：
 
 - Tom 继续保持 `MANAGED_ACTIONS_LIVE_ENABLED=false`。
 - Tom 不配置 `MANAGED_ACTIONS_LIVE_ROLLOUT_FILE`。
 - `/api/managed-actions/live` 继续返回 `blocked_disabled`。
+- live 响应中展示 `rollout.status=disabled`。
 - 页面继续不出现真实执行入口。
 
 ## 最近完成
@@ -166,7 +167,19 @@
 - 已验证可以从 JSON 文件加载灰度配置。
 - 已验证 `npm test -- test/managed-action-live-rollout.test.ts test/managed-actions-dry-run.test.ts test/managed-action-live-audit.test.ts test/managed-action-executor.test.ts test/phase9-routes-commands.test.ts test/readonly-multi-instance-safety.test.ts test/multi-instance-readonly.test.ts test/ui-render-smoke.test.ts`。
 - 已验证 `npm run build`。
+- 已提交并推送 `5a95f91 feat: add managed action live rollout config`。
+- 已部署到 Tom，并验证运行提交 `5a95f91`。
+- 已验证 Tom 没有配置 `MANAGED_ACTIONS_LIVE_ROLLOUT_FILE`。
+- 已验证 Tom `/api/managed-actions/live` 仍返回 `blocked_disabled`、`liveExecution=false`、`enabled=false`。
+- 已验证 Tom 页面仍无真实执行入口。
+- 已将 rollout 决策接入 `/api/managed-actions/live` 响应和 `managed_action_live_blocked` 审计。
+- 已新增 `blocked_rollout_not_allowed` gate 状态。
+- 已验证全部安全检查通过但 rollout 不匹配时会被 `blocked_rollout_not_allowed` 拦截。
+- 已验证全部安全检查和 rollout 都通过时仍返回 `ready_not_implemented`，因为当前没有生产执行器。
+- 已验证 live 响应包含 `rollout.allowed`、`rollout.status`、`rollout.message` 和可选规则摘要。
+- 已验证 `npm test -- test/managed-action-live-gate.test.ts test/managed-action-live-rollout.test.ts test/managed-actions-dry-run.test.ts test/managed-action-live-audit.test.ts test/managed-action-executor.test.ts test/phase9-routes-commands.test.ts test/readonly-multi-instance-safety.test.ts test/multi-instance-readonly.test.ts test/ui-render-smoke.test.ts`。
+- 已验证 `npm run build`。
 
 ## 阶段完成后的下一步
 
-部署 Tom 验证灰度配置解析层不改变运行行为；通过后，下一步把 rollout 决策接入 live gate 响应，但仍默认禁用。
+部署 Tom 验证 rollout 决策接入不改变运行行为；通过后，下一步设计只读页面中的 live readiness 诊断卡，不提供执行按钮。

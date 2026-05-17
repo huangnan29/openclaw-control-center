@@ -27,6 +27,7 @@ export interface ManagedActionLiveGateDecision {
     | "blocked_confirmation"
     | "blocked_missing_dry_run"
     | "blocked_invalid_dry_run"
+    | "blocked_rollout_not_allowed"
     | "ready_not_implemented";
   message: string;
   liveExecution: false;
@@ -46,6 +47,7 @@ export function evaluateManagedActionLiveGate(input: {
   action: ManagedActionName;
   operationRequestId?: string;
   dryRunReferenceValid?: boolean;
+  rolloutAllowed?: boolean;
   confirmedText?: string;
 }): ManagedActionLiveGateDecision {
   if (!input.gate.enabled) {
@@ -69,6 +71,9 @@ export function evaluateManagedActionLiveGate(input: {
       `confirmedText must equal ${input.gate.requiredConfirmationText}.`,
       400,
     );
+  }
+  if (input.rolloutAllowed !== true) {
+    return blocked("blocked_rollout_not_allowed", "Managed action live rollout config does not allow this request.", 403);
   }
 
   return {
