@@ -244,21 +244,14 @@ OPERATOR=Anan \
 更推荐使用一次性演练窗口，脚本会在退出前自动恢复只读状态：
 
 ```bash
-repo/ops/tom-readonly/live-healthcheck-approval.sh prepare runtime/live-healthcheck-approval.json
-repo/ops/tom-readonly/live-healthcheck-approval-packet.sh generate
-repo/ops/tom-readonly/live-healthcheck-approval-packet.sh check
+repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh prepare
 CONFIRM_APPROVAL_RECORD=I_APPROVE_LIVE_HEALTHCHECK_RECORD \
 APPROVED_BY=Anan \
 repo/ops/tom-readonly/live-healthcheck-approval.sh approve runtime/live-healthcheck-approval.json
-repo/ops/tom-readonly/live-healthcheck-approval.sh status runtime/live-healthcheck-approval.json
-repo/ops/tom-readonly/live-healthcheck-approval.sh check runtime/live-healthcheck-approval.json
 
-CONFIRM_LIVE_HEALTHCHECK_WINDOW=I_UNDERSTAND_THIS_TEMPORARILY_ENABLES_LIVE_GATE \
-CONFIRM_LIVE_HEALTHCHECK=I_UNDERSTAND_THIS_CALLS_LIVE_API \
+CONFIRM_LIVE_HEALTHCHECK_RUNNER=I_UNDERSTAND_THIS_RUNS_APPROVED_LIVE_HEALTHCHECK \
 LOCAL_API_TOKEN=<本地令牌> \
-INSTANCE_ID=tom \
-OPERATOR=Anan \
-repo/ops/tom-readonly/live-healthcheck-window.sh run
+repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh run-approved
 ```
 
 `live-healthcheck-rollout-runner.sh prepare` 可以自动推进到人工批准前：先确认 dry-run 证据 ready，再准备 approval 模板，生成并校验批准前证据包，最后运行 readiness `check`。它不会批准 approval、不会打开 live gate、不会调用 managed action live API。`live-healthcheck-rollout-runner.sh status` 只读取 readiness，不写文件。人工 approval 已批准后，`run-approved` 会再次检查 readiness 必须为 `approved_ready_for_live_window`，并要求 `CONFIRM_LIVE_HEALTHCHECK_RUNNER` 和 `LOCAL_API_TOKEN`，随后才调用一次性演练窗口。

@@ -30,12 +30,7 @@ Tom 单 Oracle 上线下一步：
   确认后再运行：
   `CONFIRM_LOCAL_INSTANCE_REGISTER=I_UNDERSTAND_THIS_ONLY_UPDATES_CONTROL_CENTER_LOCAL_REGISTRY repo/ops/tom-readonly/register-local-instance.sh apply runtime/register-local-instance.json`
   然后只重建 control-center 容器、刷新 collector snapshot，并跑 `./healthcheck.sh`。
-- 当前 managed action dry-run 证据已存在；local-only healthcheck 通过后，下一阶段是人工 approval、白名单和一次性 live healthcheck 窗口。
-- 人工批准前先生成证据包：
-  `repo/ops/tom-readonly/live-healthcheck-approval-packet.sh generate`
-  并校验：
-  `repo/ops/tom-readonly/live-healthcheck-approval-packet.sh check`
-  证据包会写入 `runtime/live-healthcheck-approval-packets/`，只写 control-center runtime，不打开 live gate，不调用 live API。
+- 当前 managed action dry-run 证据已存在；local-only healthcheck 通过后，下一阶段统一走 runner 主链路：先自动准备证据包并停在人工 approval 前，人工批准后再显式运行一次性 live healthcheck 演练。
 - 查看 live healthcheck 下一步 readiness：
   `repo/ops/tom-readonly/live-healthcheck-readiness.sh status`
   需要同时验证 Tom 现有实例只读健康时运行：
@@ -44,6 +39,8 @@ Tom 单 Oracle 上线下一步：
 - 自动推进到人工批准前：
   `repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh prepare`
   该 runner 会检查 dry-run、准备 approval 模板、生成并校验证据包、刷新 readiness，然后停在人工批准前；不会批准 approval、不会打开 live gate。
+- 人工批准命令：
+  `CONFIRM_APPROVAL_RECORD=I_APPROVE_LIVE_HEALTHCHECK_RECORD APPROVED_BY=Anan repo/ops/tom-readonly/live-healthcheck-approval.sh approve runtime/live-healthcheck-approval.json`
 - 人工 approval 已批准后，自动执行一次性演练：
   `CONFIRM_LIVE_HEALTHCHECK_RUNNER=I_UNDERSTAND_THIS_RUNS_APPROVED_LIVE_HEALTHCHECK LOCAL_API_TOKEN=<本地令牌> repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh run-approved`
   该模式会先确认 readiness 为 `approved_ready_for_live_window`，否则不会打开 live gate。

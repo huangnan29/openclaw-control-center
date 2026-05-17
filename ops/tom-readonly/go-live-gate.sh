@@ -261,7 +261,7 @@ function summarizeDryRunEvidence(result) {
   };
 }
 
-function buildNextCommands(decision, remoteSummary, dryRunSummary) {
+function buildNextCommands(decision, remoteSummary, dryRunSummary, liveSummary) {
   const runnerCommand = `CONFIRM_REMOTE_COLLECTOR_ROLLOUT_RUNNER=I_UNDERSTAND_THIS_RUNS_SAFE_REMOTE_COLLECTOR_ROLLOUT_STEPS repo/ops/tom-readonly/remote-collector-rollout-runner.sh run ${relativeRuntimePath(bundleDir)}`;
   if (decision === "blocked_existing_instances") {
     return ["./healthcheck.sh"];
@@ -291,16 +291,21 @@ function buildNextCommands(decision, remoteSummary, dryRunSummary) {
     ];
   }
   if (decision === "blocked_managed_actions") {
-    return [
-      "repo/ops/tom-readonly/managed-action-dry-run-gate.sh status",
-      "repo/ops/tom-readonly/live-healthcheck-approval.sh prepare runtime/live-healthcheck-approval.json",
-      "repo/ops/tom-readonly/live-healthcheck-approval-packet.sh generate",
-      "repo/ops/tom-readonly/live-healthcheck-approval-packet.sh check",
-      "CONFIRM_APPROVAL_RECORD=I_APPROVE_LIVE_HEALTHCHECK_RECORD APPROVED_BY=Anan repo/ops/tom-readonly/live-healthcheck-approval.sh approve runtime/live-healthcheck-approval.json",
-      "CONFIRM_LIVE_HEALTHCHECK_WINDOW=I_UNDERSTAND_THIS_TEMPORARILY_ENABLES_LIVE_GATE CONFIRM_LIVE_HEALTHCHECK=I_UNDERSTAND_THIS_CALLS_LIVE_API LOCAL_API_TOKEN=<本地令牌> INSTANCE_ID=tom OPERATOR=Anan repo/ops/tom-readonly/live-healthcheck-window.sh run",
-    ];
+    return buildLiveHealthcheckRunnerCommands(liveSummary);
   }
   return [];
+}
+
+function buildLiveHealthcheckRunnerCommands(live) {
+  const runApproved = "CONFIRM_LIVE_HEALTHCHECK_RUNNER=I_UNDERSTAND_THIS_RUNS_APPROVED_LIVE_HEALTHCHECK LOCAL_API_TOKEN=<本地令牌> repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh run-approved";
+  if (live?.approved === true || live?.approvalStatus === "approved_ready") {
+    return [runApproved];
+  }
+  return [
+    "repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh prepare",
+    "CONFIRM_APPROVAL_RECORD=I_APPROVE_LIVE_HEALTHCHECK_RECORD APPROVED_BY=Anan repo/ops/tom-readonly/live-healthcheck-approval.sh approve runtime/live-healthcheck-approval.json",
+    runApproved,
+  ];
 }
 
 function relativeRuntimePath(file) {
@@ -372,7 +377,7 @@ console.log(JSON.stringify({
     managedActionDryRunEvidence: dryRunSummary,
     managedActions: live,
   },
-  nextCommands: buildNextCommands(decision, remoteSummary, dryRunSummary),
+  nextCommands: buildNextCommands(decision, remoteSummary, dryRunSummary, live),
   safety: {
     readsStatusOnly: mode === "status",
     checkRunsHealthcheckOnly: mode === "check",

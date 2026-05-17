@@ -144,10 +144,9 @@ function buildStatus(runResult) {
     },
     issues: evaluated.issues,
     nextCommands: evaluated.status === "ready" ? [
-      "repo/ops/tom-readonly/live-healthcheck-approval.sh prepare runtime/live-healthcheck-approval.json",
-      "repo/ops/tom-readonly/live-healthcheck-approval-packet.sh generate",
-      "repo/ops/tom-readonly/live-healthcheck-approval-packet.sh check",
+      "repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh prepare",
       "CONFIRM_APPROVAL_RECORD=I_APPROVE_LIVE_HEALTHCHECK_RECORD APPROVED_BY=Anan repo/ops/tom-readonly/live-healthcheck-approval.sh approve runtime/live-healthcheck-approval.json",
+      "CONFIRM_LIVE_HEALTHCHECK_RUNNER=I_UNDERSTAND_THIS_RUNS_APPROVED_LIVE_HEALTHCHECK LOCAL_API_TOKEN=<本地令牌> repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh run-approved",
     ] : [
       "CONFIRM_MANAGED_ACTION_DRY_RUN=I_UNDERSTAND_THIS_ONLY_CREATES_DRY_RUN_AUDIT_RECORD LOCAL_API_TOKEN=<本地令牌> repo/ops/tom-readonly/managed-action-dry-run-gate.sh run",
     ],

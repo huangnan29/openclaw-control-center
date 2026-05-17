@@ -194,6 +194,8 @@ test("go-live gate skips cross-server blockers in local-only topology", async ()
     assert.equal(report.safety.crossServerRequired, false);
     assert.equal(report.safety.writesOpenClawInstanceDirs, false);
     assert.equal(report.safety.callsManagedActionsLiveApi, false);
+    assert(report.nextCommands.some((command: string) => command.includes("live-healthcheck-rollout-runner.sh prepare")));
+    assert(report.nextCommands.some((command: string) => command.includes("live-healthcheck-rollout-runner.sh run-approved")));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -210,9 +212,9 @@ test("go-live gate moves to managed-action blockers after readonly monitoring an
     assert.equal(report.stages.crossServerReadonlyMonitoring.status, "ready_for_healthcheck");
     assert.equal(report.stages.managedActionDryRunEvidence.status, "ready");
     assert.equal(report.stages.managedActions.status, "blocked");
-    assert(report.nextCommands.some((command: string) => command.includes("live-healthcheck-approval-packet.sh generate")));
-    assert(report.nextCommands.some((command: string) => command.includes("live-healthcheck-approval-packet.sh check")));
+    assert(report.nextCommands.some((command: string) => command.includes("live-healthcheck-rollout-runner.sh prepare")));
     assert(report.nextCommands.some((command: string) => command.includes("live-healthcheck-approval.sh approve")));
+    assert(report.nextCommands.some((command: string) => command.includes("live-healthcheck-rollout-runner.sh run-approved")));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
