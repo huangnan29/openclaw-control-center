@@ -86,7 +86,7 @@ async function writeInboxCommand(inbox: string, name: string, text = "对 tom �
 }
 
 function runInbox(
-  mode: "status" | "plan-next" | "run-next",
+  mode: "status" | "plan-next" | "run-next" | "run-pending",
   env: Record<string, string>,
 ) {
   const result = spawnSync(SCRIPT, [mode], {
@@ -134,6 +134,63 @@ test("managed action inbox runner status 只列出待处理请求且不调用桥
   }
 });
 
+test("managed action inbox runner run-pending 一次处理多个待处理 dry-run 请求", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-managed-action-inbox-run-pending-"));
+  try {
+    const inbox = join(dir, "inbox");
+    const runtime = join(dir, "runtime");
+    await writeInboxCommand(inbox, "001.txt");
+    await writeInboxCommand(inbox, "002.txt", "对 tom 运行 zhihu-human-ops-writing dry-run\n");
+    const { bridge, log } = await makeFakeBridge(dir);
+
+    const { exitCode, report, stdout } = runInbox("run-pending", {
+      RUNTIME_DIR: runtime,
+      MANAGED_ACTION_INBOX_DIR: inbox,
+      MANAGED_ACTION_TEXT_BRIDGE: bridge,
+      FAKE_BRIDGE_CALL_LOG: log,
+      CONFIRM_MANAGED_ACTION_INBOX_RUNNER: "I_UNDERSTAND_THIS_READS_OPENCLAW_INBOX_AND_RUNS_DRY_RUN_TEXT",
+      MANAGED_ACTION_COMMAND_TOKEN_SOURCE: "container",
+      LOCAL_API_TOKEN: "test-token",
+    });
+
+    assert.equal(exitCode, 0);
+    assert.equal(report.status, "inbox_run_pending_completed");
+    assert.equal(report.processedCount, 2);
+    assert.equal(report.pendingCountBefore, 2);
+    assert.equal(report.pendingCountAfter, 0);
+    assert.equal(report.safety.callsManagedActionsDryRunApi, true);
+    assert.equal(report.safety.callsManagedActionsLiveApi, false);
+    assert.equal(report.safety.writesControlCenterRuntimeOnly, true);
+    assert.equal(report.safety.writesOpenClawInstanceDirs, false);
+    assert.equal(report.safety.restartsOpenClawInstances, false);
+    assert.doesNotMatch(stdout, /test-token/);
+    assert.doesNotMatch(stdout, /api\/managed-actions\/live/);
+
+    const calls = (await readFile(log, "utf8"))
+      .trim()
+      .split(/\n/)
+      .map((line) => JSON.parse(line));
+    assert.equal(calls.length, 2);
+    assert.deepEqual(calls.map((call) => call.mode), ["dry-run", "dry-run"]);
+
+    const state = JSON.parse(await readFile(join(runtime, "managed-action-inbox-runner", "state.json"), "utf8"));
+    assert.equal(state.processed.length, 2);
+    const results = readdirSync(join(runtime, "managed-action-inbox-runner", "results"));
+    assert.equal(results.length, 2);
+
+    const after = runInbox("status", {
+      RUNTIME_DIR: runtime,
+      MANAGED_ACTION_INBOX_DIR: inbox,
+      MANAGED_ACTION_TEXT_BRIDGE: bridge,
+      FAKE_BRIDGE_CALL_LOG: log,
+    });
+    assert.equal(after.report.status, "inbox_empty");
+    assert.equal(after.report.pendingCount, 0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("managed action inbox runner plan-next 调用桥接层 plan 且不标记已处理", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openclaw-managed-action-inbox-plan-"));
   try {
@@ -172,6 +229,33 @@ test("managed action inbox runner run-next 需要确认，缺确认不会调用�
     const { bridge, log } = await makeFakeBridge(dir);
 
     const { exitCode, report } = runInbox("run-next", {
+      RUNTIME_DIR: runtime,
+      MANAGED_ACTION_INBOX_DIR: inbox,
+      MANAGED_ACTION_TEXT_BRIDGE: bridge,
+      FAKE_BRIDGE_CALL_LOG: log,
+      MANAGED_ACTION_COMMAND_TOKEN_SOURCE: "container",
+    });
+
+    assert.notEqual(exitCode, 0);
+    assert.equal(report.status, "blocked_confirmation_required");
+    assert.equal(report.safety.blockedBeforeBridge, true);
+    assert.equal(report.safety.callsManagedActionsDryRunApi, false);
+    assert.equal(existsSync(log), false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("managed action inbox runner run-pending 需要确认，缺确认不会调用桥接层", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-managed-action-inbox-run-pending-confirm-"));
+  try {
+    const inbox = join(dir, "inbox");
+    const runtime = join(dir, "runtime");
+    await writeInboxCommand(inbox, "001.txt");
+    await writeInboxCommand(inbox, "002.txt");
+    const { bridge, log } = await makeFakeBridge(dir);
+
+    const { exitCode, report } = runInbox("run-pending", {
       RUNTIME_DIR: runtime,
       MANAGED_ACTION_INBOX_DIR: inbox,
       MANAGED_ACTION_TEXT_BRIDGE: bridge,

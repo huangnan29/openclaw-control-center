@@ -424,9 +424,16 @@ MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container \
 MANAGED_ACTION_INBOX_SOURCE=control-center-container \
 MANAGED_ACTION_INBOX_DIR=/instances/tom/workspace/control-center-commands/inbox \
 repo/ops/tom-readonly/managed-action-inbox-runner.sh run-next
+
+CONFIRM_MANAGED_ACTION_INBOX_RUNNER=I_UNDERSTAND_THIS_READS_OPENCLAW_INBOX_AND_RUNS_DRY_RUN_TEXT \
+MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container \
+MANAGED_ACTION_INBOX_SOURCE=control-center-container \
+MANAGED_ACTION_INBOX_DIR=/instances/tom/workspace/control-center-commands/inbox \
+MANAGED_ACTION_INBOX_MAX_PER_RUN=10 \
+repo/ops/tom-readonly/managed-action-inbox-runner.sh run-pending
 ```
 
-`managed-action-inbox-runner.sh` 不移动、不删除、不修改 OpenClaw workspace 中的请求文件；它只把处理状态、结果和已处理 key 写入 control-center runtime 的 `managed-action-inbox-runner/`。重复运行时，同一路径同一内容不会重复执行；如果文本被修改，会作为新的请求重新评估。该方式把“Discord 消息 → Tom workspace 文本 → control-center dry-run 审计”串起来，同时保持 OpenClaw 实例目录只读读取、live gate 关闭、真实 skill 不执行。
+`managed-action-inbox-runner.sh` 不移动、不删除、不修改 OpenClaw workspace 中的请求文件；它只把处理状态、结果和已处理 key 写入 control-center runtime 的 `managed-action-inbox-runner/`。重复运行时，同一路径同一内容不会重复执行；如果文本被修改，会作为新的请求重新评估。`run-pending` 与 `run-next` 一样必须显式确认，只会调用 dry-run，并且最多处理 `MANAGED_ACTION_INBOX_MAX_PER_RUN` 条待处理请求，适合后续接 cron 或手动一键处理。该方式把“Discord 消息 → Tom workspace 文本 → control-center dry-run 审计”串起来，同时保持 OpenClaw 实例目录只读读取、live gate 关闭、真实 skill 不执行。
 
 为了让 Tom 在 Discord 中稳定使用 inbox，可以安装一段受控 `AGENTS.md` 规范：
 

@@ -597,8 +597,10 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(managedActionInboxRunnerText, /managed-action-inbox-runner\.sh status/);
   assert.match(managedActionInboxRunnerText, /managed-action-inbox-runner\.sh plan-next/);
   assert.match(managedActionInboxRunnerText, /managed-action-inbox-runner\.sh run-next/);
+  assert.match(managedActionInboxRunnerText, /managed-action-inbox-runner\.sh run-pending/);
   assert.match(managedActionInboxRunnerText, /MANAGED_ACTION_INBOX_DIR/);
   assert.match(managedActionInboxRunnerText, /MANAGED_ACTION_INBOX_SOURCE/);
+  assert.match(managedActionInboxRunnerText, /MANAGED_ACTION_INBOX_MAX_PER_RUN/);
   assert.match(managedActionInboxRunnerText, /control-center-container/);
   assert.match(managedActionInboxRunnerText, /CONFIRM_MANAGED_ACTION_INBOX_RUNNER/);
   assert.match(managedActionInboxRunnerText, /I_UNDERSTAND_THIS_READS_OPENCLAW_INBOX_AND_RUNS_DRY_RUN_TEXT/);

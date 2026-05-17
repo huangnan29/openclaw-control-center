@@ -10,6 +10,8 @@
 
 补充当前状态：本机已执行 `final-go-live-runner.sh prepare`，Tom 已生成并校验 live healthcheck approval packet，当前 readiness 为 `waiting_human_approval`，approval 文件仍为 `needs_manual_approval`。这一阶段只写 control-center runtime 与 approval 模板/证据包，不批准、不打开 live gate、不调用 managed action live API、不修改 OpenClaw 实例目录、不重启实例。下一步需要 Anan 人工审查后显式执行 approval，或先完成 Discord/OpenClaw 真实消息到 inbox 的 dry-run smoke。
 
+补充 dry-run inbox 状态：`managed-action-inbox-runner.sh run-pending` 已作为 `run-next` 的批处理入口，必须使用同一个显式确认短语，最多处理 `MANAGED_ACTION_INBOX_MAX_PER_RUN` 条待处理请求，只调用文本桥接层 dry-run，只写 control-center runtime，不移动、不删除、不修改 OpenClaw workspace 请求文件。
+
 ## 推进原则
 
 1. 每次只推进一个可验证的小闭环。

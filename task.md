@@ -896,3 +896,23 @@ Tom 单 Oracle 上线下一步：
 ## 阶段完成后的下一步
 
 当前已经停在人工批准前。下一步有两个可选路径：优先让 Anan 从 Discord 发“控制中心 dry-run：对 tom 运行 zhihu-human-ops-writing dry-run”，完成真实 Discord/OpenClaw inbox smoke；如果要继续 live healthcheck 演练，则必须由 Anan 审查证据包后显式运行 `CONFIRM_APPROVAL_RECORD=I_APPROVE_LIVE_HEALTHCHECK_RECORD APPROVED_BY=Anan repo/ops/tom-readonly/live-healthcheck-approval.sh approve runtime/live-healthcheck-approval.json`，之后才允许执行一次性 `run-approved`。仍不得绕过人工 approval。
+
+## 本轮新增（inbox dry-run 批处理入口）
+
+- 已扩展 `ops/tom-readonly/managed-action-inbox-runner.sh`，新增 `run-pending` 模式。
+- `run-pending` 与 `run-next` 使用同一个确认短语：`CONFIRM_MANAGED_ACTION_INBOX_RUNNER=I_UNDERSTAND_THIS_READS_OPENCLAW_INBOX_AND_RUNS_DRY_RUN_TEXT`。
+- `run-pending` 会按顺序处理待处理 inbox 文本，默认最多处理 `MANAGED_ACTION_INBOX_MAX_PER_RUN=10` 条。
+- `run-pending` 只调用 `managed-action-text-bridge.sh dry-run`，只写 `runtime/managed-action-inbox-runner/` 的状态和结果，不移动、不删除、不修改 OpenClaw workspace 请求文件。
+- `run-pending` 安全字段保持 `callsManagedActionsLiveApi=false`、`writesOpenClawInstanceDirs=false`、`restartsOpenClawInstances=false`、`opensLiveGate=false`。
+- 已新增测试覆盖 `run-pending` 一次处理多个 dry-run 请求，并验证结果、state、去重和 token 隐藏。
+- 已新增测试覆盖 `run-pending` 缺确认时阻断且不调用桥接层。
+- 已更新 `ops/tom-readonly/README.md`、`docs/MULTI_INSTANCE_READONLY.md`、`implementation_plan.md` 和 `test/oss-readiness.test.ts`，记录 `run-pending` 的用途和安全边界。
+- 已验证 `bash -n ops/tom-readonly/managed-action-inbox-runner.sh`。
+- 已验证 `npm test -- test/managed-action-inbox-runner.test.ts`，6/6 通过。
+- 已验证 `npm test -- test/managed-action-inbox-runner.test.ts test/managed-action-text-bridge.test.ts test/managed-action-command-runner.test.ts test/oss-readiness.test.ts`，25/25 通过。
+- 已验证 managed-action 安全回归，35/35 通过。
+- 已验证 `npm run build` 与 `git diff --check`。
+
+## 阶段完成后的下一步
+
+部署 `run-pending` 到 Tom 后，用标准 inbox 写入两条不同 dry-run 请求，运行 `run-pending` 验证可一次处理多条且不碰 live。部署会改变 Tom commit，部署后必须重新执行 `ops/local/final-go-live-runner.sh prepare`，让 approval packet 与最新 commit 对齐；仍不得执行 approval `approve`、不得打开 live gate。

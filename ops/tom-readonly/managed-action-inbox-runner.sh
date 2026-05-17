@@ -25,19 +25,21 @@ usage() {
   managed-action-inbox-runner.sh status
   managed-action-inbox-runner.sh plan-next
   managed-action-inbox-runner.sh run-next
+  managed-action-inbox-runner.sh run-pending
 
 常用环境变量：
   MANAGED_ACTION_INBOX_DIR=<inbox 目录>
   MANAGED_ACTION_INBOX_SOURCE=local|control-center-container
   MANAGED_ACTION_TEXT_BRIDGE=<managed-action-text-bridge.sh 路径>
+  MANAGED_ACTION_INBOX_MAX_PER_RUN=10
 
-run-next 必须设置：
+run-next/run-pending 必须设置：
   CONFIRM_MANAGED_ACTION_INBOX_RUNNER=I_UNDERSTAND_THIS_READS_OPENCLAW_INBOX_AND_RUNS_DRY_RUN_TEXT
 
 安全边界：
   - 只读取 inbox 中的 .txt 请求。
   - 结果和处理状态只写 control-center runtime。
-  - run-next 只调用 managed-action-text-bridge.sh dry-run。
+  - run-next/run-pending 只调用 managed-action-text-bridge.sh dry-run。
   - 不修改 OpenClaw 实例目录，不重启实例，不打开 live gate。
 TEXT
 }
@@ -62,6 +64,7 @@ const inboxDir = process.env.MANAGED_ACTION_INBOX_DIR || path.join(runtimeDir, "
 const inboxSource = process.env.MANAGED_ACTION_INBOX_SOURCE || "local";
 const bridgeScript = process.env.MANAGED_ACTION_TEXT_BRIDGE || path.join(deployDir, "repo", "ops", "tom-readonly", "managed-action-text-bridge.sh");
 const confirmRunner = process.env.CONFIRM_MANAGED_ACTION_INBOX_RUNNER || "";
+const maxPerRun = Math.max(1, Number.parseInt(process.env.MANAGED_ACTION_INBOX_MAX_PER_RUN || "10", 10) || 10);
 const runnerConfirmation = "I_UNDERSTAND_THIS_READS_OPENCLAW_INBOX_AND_RUNS_DRY_RUN_TEXT";
 const bridgeConfirmation = "I_UNDERSTAND_THIS_ONLY_RUNS_MANAGED_ACTION_DRY_RUN_TEXT";
 const stateDir = path.join(runtimeDir, "managed-action-inbox-runner");
@@ -107,6 +110,7 @@ function blocked(status, issue, extra = {}, exitCode = 2) {
       "repo/ops/tom-readonly/managed-action-inbox-runner.sh status",
       "repo/ops/tom-readonly/managed-action-inbox-runner.sh plan-next",
       `CONFIRM_MANAGED_ACTION_INBOX_RUNNER=${runnerConfirmation} MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container repo/ops/tom-readonly/managed-action-inbox-runner.sh run-next`,
+      `CONFIRM_MANAGED_ACTION_INBOX_RUNNER=${runnerConfirmation} MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container repo/ops/tom-readonly/managed-action-inbox-runner.sh run-pending`,
     ],
     safety: baseSafety({
       blockedBeforeBridge: true,
@@ -116,8 +120,8 @@ function blocked(status, issue, extra = {}, exitCode = 2) {
 }
 
 function ensureMode() {
-  if (!["status", "plan-next", "run-next"].includes(mode)) {
-    blocked("blocked_invalid_mode", `未知模式：${mode}。支持 status、plan-next、run-next。`);
+  if (!["status", "plan-next", "run-next", "run-pending"].includes(mode)) {
+    blocked("blocked_invalid_mode", `未知模式：${mode}。支持 status、plan-next、run-next、run-pending。`);
   }
 }
 
@@ -351,6 +355,7 @@ function reportStatus() {
       ? [
         "repo/ops/tom-readonly/managed-action-inbox-runner.sh plan-next",
         `CONFIRM_MANAGED_ACTION_INBOX_RUNNER=${runnerConfirmation} MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container repo/ops/tom-readonly/managed-action-inbox-runner.sh run-next`,
+        `CONFIRM_MANAGED_ACTION_INBOX_RUNNER=${runnerConfirmation} MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container repo/ops/tom-readonly/managed-action-inbox-runner.sh run-pending`,
       ]
       : [],
     safety: baseSafety({
@@ -413,8 +418,90 @@ function runNext() {
   emit(report, ok ? 0 : 2);
 }
 
+function runPending() {
+  if (confirmRunner !== runnerConfirmation) {
+    blocked("blocked_confirmation_required", `run-pending 必须设置 CONFIRM_MANAGED_ACTION_INBOX_RUNNER=${runnerConfirmation}。`);
+  }
+  const initial = findNext();
+  if (!initial.next) {
+    emit({
+      schemaVersion: 1,
+      status: "inbox_empty",
+      mode,
+      generatedAt: new Date().toISOString(),
+      pendingCountBefore: 0,
+      pendingCountAfter: 0,
+      processedCount: 0,
+      safety: baseSafety(),
+    });
+  }
+
+  const summaries = [];
+  let processedCount = 0;
+  let blockedReport = null;
+  while (processedCount < maxPerRun) {
+    const { state, next } = findNext();
+    if (!next) break;
+    const inputPath = writeBridgeInput(next);
+    const bridge = runBridge("dry-run", inputPath);
+    const ok = bridge.exitCode === 0 && bridge.report?.status === "bridge_dry_run_completed";
+    const invalidCommandBlocked = bridge.report?.runnerStatus === "blocked_invalid_command";
+    const status = ok ? "inbox_dry_run_completed" : "blocked_inbox_bridge";
+    const resultPath = saveResult(next, bridge, status);
+    if (ok || invalidCommandBlocked) {
+      markProcessed(state, next, bridge, status, resultPath);
+      processedCount += 1;
+    }
+    const item = summary(status, next, bridge, resultPath, {
+      writesControlCenterRuntimeOnly: true,
+    });
+    summaries.push(item);
+    if (!ok && !invalidCommandBlocked) {
+      blockedReport = item;
+      break;
+    }
+  }
+
+  const after = findNext();
+  const callsDryRun = summaries.some((item) => item.safety?.callsManagedActionsDryRunApi === true);
+  emit({
+    schemaVersion: 1,
+    status: blockedReport ? "blocked_inbox_run_pending" : "inbox_run_pending_completed",
+    mode,
+    generatedAt: new Date().toISOString(),
+    pendingCountBefore: initial.pending.length,
+    pendingCountAfter: after.pending.length,
+    processedCount,
+    maxPerRun,
+    results: summaries.map((item) => ({
+      status: item.status,
+      sourcePath: item.sourcePath,
+      sourceKey: item.sourceKey,
+      bridgeStatus: item.bridgeStatus,
+      runnerStatus: item.runnerStatus,
+      bridgeExitCode: item.bridgeExitCode,
+      ...(item.target ? { target: item.target } : {}),
+      ...(item.operationRequestId ? { operationRequestId: item.operationRequestId } : {}),
+      ...(item.commandPreview ? { commandPreview: item.commandPreview } : {}),
+      ...(item.issues ? { issues: item.issues } : {}),
+      ...(item.resultPath ? { resultPath: item.resultPath } : {}),
+    })),
+    safety: baseSafety({
+      invokesTextBridge: summaries.length > 0,
+      writesControlCenterRuntimeOnly: summaries.length > 0,
+      callsManagedActionsDryRunApi: callsDryRun,
+      callsManagedActionsLiveApi: false,
+      writesOpenClawInstanceDirs: false,
+      restartsOpenClawInstances: false,
+      mutatesOpenClawInstance: false,
+      opensLiveGate: false,
+    }),
+  }, blockedReport ? 2 : 0);
+}
+
 ensureMode();
 if (mode === "status") reportStatus();
 if (mode === "plan-next") planNext();
 if (mode === "run-next") runNext();
+if (mode === "run-pending") runPending();
 NODE

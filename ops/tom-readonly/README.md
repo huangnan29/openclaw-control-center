@@ -49,7 +49,7 @@
 - `live-healthcheck-window.sh`：一次性演练窗口脚本；临时启用 control-center 的 healthcheck live 配置，失败或结束后恢复只读状态。
 - `instance-impact-snapshot.sh`：演练前后实例影响留证脚本；只读取 gateway、监听端口、容器挂载和 readiness。
 - `managed-action-text-bridge.sh`：给 OpenClaw/Discord 机器人使用的文本桥接层；把机器人文本写入 control-center runtime，再调用 `managed-action-command-runner.sh parse-text/plan-text/dry-run-text`，输出精简摘要。
-- `managed-action-inbox-runner.sh`：读取 OpenClaw workspace 中的文本请求 inbox，调用文本桥接层，并把结果和处理状态只写入 control-center runtime。
+- `managed-action-inbox-runner.sh`：读取 OpenClaw workspace 中的文本请求 inbox，调用文本桥接层，并把结果和处理状态只写入 control-center runtime；`run-pending` 可一次处理多个待处理 dry-run 请求。
 - `install-managed-action-agents-instructions.sh`：把 Tom `AGENTS.md` 中的 control-center inbox 使用规范安装为受控标记块；`plan/status` 不写文件，`apply` 必须显式确认并备份原文件。
 
 ## Tom 上的常用命令
@@ -145,6 +145,12 @@ MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container \
 MANAGED_ACTION_INBOX_SOURCE=control-center-container \
 MANAGED_ACTION_INBOX_DIR=/instances/tom/workspace/control-center-commands/inbox \
 repo/ops/tom-readonly/managed-action-inbox-runner.sh run-next
+CONFIRM_MANAGED_ACTION_INBOX_RUNNER=I_UNDERSTAND_THIS_READS_OPENCLAW_INBOX_AND_RUNS_DRY_RUN_TEXT \
+MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container \
+MANAGED_ACTION_INBOX_SOURCE=control-center-container \
+MANAGED_ACTION_INBOX_DIR=/instances/tom/workspace/control-center-commands/inbox \
+MANAGED_ACTION_INBOX_MAX_PER_RUN=10 \
+repo/ops/tom-readonly/managed-action-inbox-runner.sh run-pending
 CONFIRM_LIVE_HEALTHCHECK_RUNNER=I_UNDERSTAND_THIS_RUNS_APPROVED_LIVE_HEALTHCHECK \
 LOCAL_API_TOKEN=<本地令牌> \
 repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh run-approved
@@ -173,7 +179,7 @@ BRANCH=multi-instance-readonly-control-center ./update.sh
 
 `managed-action-text-bridge.sh` 是更适合机器人直接调用的一层封装。它可以接收 `<command.txt>`、标准输入、`MANAGED_ACTION_TEXT` 或 `MANAGED_ACTION_TEXT_FILE`，统一写入 `runtime/managed-action-command.txt`，再调用底层 runner 的 `parse-text`、`plan-text` 或 `dry-run-text`，最后返回包含 `runnerStatus`、`target`、`operationRequestId`、`commandPreview` 和安全字段的精简 JSON。`dry-run` 模式必须设置 `CONFIRM_MANAGED_ACTION_TEXT_BRIDGE=I_UNDERSTAND_THIS_ONLY_RUNS_MANAGED_ACTION_DRY_RUN_TEXT`；桥接层只会自动补齐底层 runner 的 dry-run 确认，不会打开 live gate、不修改 OpenClaw 实例目录、不重启实例。
 
-`managed-action-inbox-runner.sh` 是 OpenClaw/Discord 真正接入时的安全收件箱。Tom 机器人只需要在自己的 workspace 写入一条 `.txt` 请求，例如 `/home/node/.openclaw/workspace/control-center-commands/inbox/001.txt`；control-center 通过只读挂载 `/instances/tom/workspace/control-center-commands/inbox` 读取它。`status` 只列出待处理请求；`plan-next` 只调用桥接层 `plan`，不标记处理；`run-next` 必须设置 `CONFIRM_MANAGED_ACTION_INBOX_RUNNER`，只调用桥接层 `dry-run`，并把处理状态和结果写到 `runtime/managed-action-inbox-runner/`。该 runner 不移动、不删除、不修改 OpenClaw workspace 中的请求文件，不打开 live gate、不重启实例。
+`managed-action-inbox-runner.sh` 是 OpenClaw/Discord 真正接入时的安全收件箱。Tom 机器人只需要在自己的 workspace 写入一条 `.txt` 请求，例如 `/home/node/.openclaw/workspace/control-center-commands/inbox/001.txt`；control-center 通过只读挂载 `/instances/tom/workspace/control-center-commands/inbox` 读取它。`status` 只列出待处理请求；`plan-next` 只调用桥接层 `plan`，不标记处理；`run-next` 必须设置 `CONFIRM_MANAGED_ACTION_INBOX_RUNNER`，只调用桥接层 `dry-run`，并把处理状态和结果写到 `runtime/managed-action-inbox-runner/`。`run-pending` 同样必须显式确认，一次最多处理 `MANAGED_ACTION_INBOX_MAX_PER_RUN` 条待处理请求，适合后续接 cron 或手动一键处理，但仍只创建 dry-run 审计。该 runner 不移动、不删除、不修改 OpenClaw workspace 中的请求文件，不打开 live gate、不重启实例。
 
 `install-managed-action-agents-instructions.sh` 用于让 Tom 的 Discord 行为稳定落到上述 inbox。`status/plan` 会读取目标 `AGENTS.md` 并展示受控标记块是否需要更新；`apply` 必须设置 `CONFIRM_MANAGED_ACTION_AGENTS_INSTALL=I_UNDERSTAND_THIS_UPDATES_TOM_AGENTS_INSTRUCTIONS_ONLY`。Tom 上推荐用 `MANAGED_ACTION_AGENTS_TARGET_SOURCE=openclaw-container`，通过 `openclaw-work-openclaw-gateway-1` 容器只更新 `/home/node/.openclaw/workspace/AGENTS.md` 中的 `OPENCLAW_CONTROL_CENTER_MANAGED_ACTIONS` 标记块，并在同目录 `.backup/control-center-agents/` 下备份原文件。它不修改 `openclaw.json`、不重启 OpenClaw、不调用任何 managed action API。
 
