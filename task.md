@@ -37,11 +37,15 @@ Tom 单 Oracle 上线下一步：
   `repo/ops/tom-readonly/live-healthcheck-readiness.sh check`
   readiness 脚本只读汇总总闸门、dry-run、证据包、approval 和 live window；它输出的下一步已统一指向 `live-healthcheck-rollout-runner.sh prepare/run-approved` 主链路，不生成证据包、不写 approval、不打开 live gate。
 - 自动推进到人工批准前：
+  `ops/local/final-go-live-runner.sh prepare`
+  该本机总 runner 会先跑最终上线 `check`，确认 Tom 现有实例健康且下一步确实是 Tom runner prepare 后，才 SSH 到 Tom 执行准备动作并复核最终状态。
+- Tom 侧自动推进到人工批准前：
   `repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh prepare`
   该 runner 会检查 dry-run、准备 approval 模板、生成并校验证据包、刷新 readiness，然后停在人工批准前；不会批准 approval、不会打开 live gate。
 - 人工批准命令：
   `CONFIRM_APPROVAL_RECORD=I_APPROVE_LIVE_HEALTHCHECK_RECORD APPROVED_BY=Anan repo/ops/tom-readonly/live-healthcheck-approval.sh approve runtime/live-healthcheck-approval.json`
 - 人工 approval 已批准后，自动执行一次性演练：
+  `CONFIRM_FINAL_GO_LIVE_RUNNER=I_UNDERSTAND_THIS_RUNS_APPROVED_FINAL_GO_LIVE LOCAL_API_TOKEN=<本地令牌> ops/local/final-go-live-runner.sh run-approved`
   `CONFIRM_LIVE_HEALTHCHECK_RUNNER=I_UNDERSTAND_THIS_RUNS_APPROVED_LIVE_HEALTHCHECK LOCAL_API_TOKEN=<本地令牌> repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh run-approved`
   该模式会先确认 readiness 为 `approved_ready_for_live_window`，否则不会打开 live gate，并以非 0 退出码让 openclaw 调度侧知道本次被人工批准边界挡住。
 

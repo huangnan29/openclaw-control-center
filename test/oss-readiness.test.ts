@@ -151,6 +151,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   const discoverRemoteOracleCredentialsExample = path.join(ROOT, "ops", "local", "discover-remote-oracle-credentials.example.json");
   const remoteOracleIntake = path.join(ROOT, "ops", "local", "remote-oracle-intake.sh");
   const finalGoLiveStatus = path.join(ROOT, "ops", "local", "final-go-live-status.sh");
+  const finalGoLiveRunner = path.join(ROOT, "ops", "local", "final-go-live-runner.sh");
   const remoteCollectorOnboarding = path.join(ROOT, "ops", "tom-readonly", "remote-collector-onboarding.sh");
   const remoteCollectorOnboardingExample = path.join(ROOT, "ops", "tom-readonly", "remote-collector-onboarding.example.json");
   const remoteCollectorCredentials = path.join(ROOT, "ops", "tom-readonly", "remote-collector-credentials.sh");
@@ -333,6 +334,16 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(finalGoLiveStatusText, /writesOpenClawInstanceDirs: false/);
   assert.match(finalGoLiveStatusText, /callsManagedActionsLiveApi: false/);
   assert.doesNotMatch(finalGoLiveStatusText, /api\/managed-actions\/live/);
+  const finalGoLiveRunnerText = readFileSync(finalGoLiveRunner, "utf8");
+  assert.match(finalGoLiveRunnerText, /final-go-live-runner\.sh status/);
+  assert.match(finalGoLiveRunnerText, /final-go-live-runner\.sh prepare/);
+  assert.match(finalGoLiveRunnerText, /final-go-live-runner\.sh run-approved/);
+  assert.match(finalGoLiveRunnerText, /final-go-live-status\.sh check/);
+  assert.match(finalGoLiveRunnerText, /live-healthcheck-rollout-runner\.sh prepare/);
+  assert.match(finalGoLiveRunnerText, /CONFIRM_FINAL_GO_LIVE_RUNNER/);
+  assert.match(finalGoLiveRunnerText, /I_UNDERSTAND_THIS_RUNS_APPROVED_FINAL_GO_LIVE/);
+  assert.match(finalGoLiveRunnerText, /approvesLiveHealthcheck: false/);
+  assert.match(finalGoLiveRunnerText, /writesOpenClawInstanceDirs: false/);
   const pushRemoteCollectorCredentialsText = readFileSync(pushRemoteCollectorCredentials, "utf8");
   assert.match(pushRemoteCollectorCredentialsText, /CONFIRM_PUSH_REMOTE_COLLECTOR_CREDENTIALS/);
   assert.match(pushRemoteCollectorCredentialsText, /I_UNDERSTAND_THIS_ONLY_PUSHES_REMOTE_COLLECTOR_CREDENTIALS_TO_TOM_RUNTIME/);

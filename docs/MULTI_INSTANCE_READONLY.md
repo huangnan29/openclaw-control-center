@@ -272,6 +272,7 @@ docker compose up -d control-center
 # 如果远端只读 SSH key 还在本机，可以先在本机推送到 Tom control-center runtime：
 ops/local/final-go-live-status.sh status
 ops/local/final-go-live-status.sh check
+ops/local/final-go-live-runner.sh prepare
 REMOTE_ORACLE_HOST=<可达候选 host> REMOTE_ORACLE_KEY_PATH=<可达候选 keyPath> \
 ops/local/remote-oracle-intake.sh doctor
 REMOTE_ORACLE_HOST=<可达候选 host> REMOTE_ORACLE_KEY_PATH=<可达候选 keyPath> \
@@ -425,6 +426,8 @@ repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh run-approved
 `live-healthcheck-readiness.sh status/check` 用于 openclaw 或人工查看下一步：它只读取总闸门、dry-run 证据、批准前证据包、approval 和 live window 状态，并把下一步命令统一收敛到 `live-healthcheck-rollout-runner.sh prepare/run-approved` 主链路。它不生成新证据包、不写 approval、不打开 live gate、不调用 managed action live API。`status` 不执行现有实例 healthcheck；`check` 会让总闸门执行只读 healthcheck，确认 Tom 当前实例仍正常。
 
 `live-healthcheck-rollout-runner.sh prepare` 用于自动推进到人工批准前：如果 dry-run 证据已经 ready，它会准备 approval 模板、生成并校验批准前证据包，再运行 readiness `check`。它只写 control-center runtime 下的模板和证据文件，不批准 approval、不打开 live gate、不调用 managed action live API、不修改任何 OpenClaw 实例目录。
+
+`ops/local/final-go-live-runner.sh prepare` 是本机侧总入口：它先运行 `final-go-live-status.sh check`，确认 Tom 当前实例 healthcheck 通过且总闸门下一步确实是 Tom `live-healthcheck-rollout-runner.sh prepare` 后，才 SSH 到 Tom 自动推进到人工批准前。它不批准 approval、不打开 live gate、不调用 managed action live API。`run-approved` 必须额外提供 `CONFIRM_FINAL_GO_LIVE_RUNNER` 和 `LOCAL_API_TOKEN`，并由 Tom runner 再次校验 approval/readiness。
 
 人工 approval 已批准后，`live-healthcheck-rollout-runner.sh run-approved` 会先确认 readiness 为 `approved_ready_for_live_window`，再要求 `CONFIRM_LIVE_HEALTHCHECK_RUNNER` 与 `LOCAL_API_TOKEN`，最后调用一次性演练窗口；如果前置条件或人工批准未满足，runner 会返回非 0 退出码并保持 live gate 关闭，避免 openclaw 调度侧把阻断误判成成功。窗口脚本仍负责自动恢复只读状态、消费 approval、生成前后影响快照和演练报告。
 
