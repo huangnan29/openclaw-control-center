@@ -294,6 +294,8 @@ function buildNextCommands(decision, remoteSummary, dryRunSummary) {
     return [
       "repo/ops/tom-readonly/managed-action-dry-run-gate.sh status",
       "repo/ops/tom-readonly/live-healthcheck-approval.sh prepare runtime/live-healthcheck-approval.json",
+      "repo/ops/tom-readonly/live-healthcheck-approval-packet.sh generate",
+      "repo/ops/tom-readonly/live-healthcheck-approval-packet.sh check",
       "CONFIRM_APPROVAL_RECORD=I_APPROVE_LIVE_HEALTHCHECK_RECORD APPROVED_BY=Anan repo/ops/tom-readonly/live-healthcheck-approval.sh approve runtime/live-healthcheck-approval.json",
       "CONFIRM_LIVE_HEALTHCHECK_WINDOW=I_UNDERSTAND_THIS_TEMPORARILY_ENABLES_LIVE_GATE CONFIRM_LIVE_HEALTHCHECK=I_UNDERSTAND_THIS_CALLS_LIVE_API LOCAL_API_TOKEN=<本地令牌> INSTANCE_ID=tom OPERATOR=Anan repo/ops/tom-readonly/live-healthcheck-window.sh run",
     ];

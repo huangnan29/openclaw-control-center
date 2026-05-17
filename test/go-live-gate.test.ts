@@ -210,6 +210,8 @@ test("go-live gate moves to managed-action blockers after readonly monitoring an
     assert.equal(report.stages.crossServerReadonlyMonitoring.status, "ready_for_healthcheck");
     assert.equal(report.stages.managedActionDryRunEvidence.status, "ready");
     assert.equal(report.stages.managedActions.status, "blocked");
+    assert(report.nextCommands.some((command: string) => command.includes("live-healthcheck-approval-packet.sh generate")));
+    assert(report.nextCommands.some((command: string) => command.includes("live-healthcheck-approval-packet.sh check")));
     assert(report.nextCommands.some((command: string) => command.includes("live-healthcheck-approval.sh approve")));
   } finally {
     await rm(dir, { recursive: true, force: true });

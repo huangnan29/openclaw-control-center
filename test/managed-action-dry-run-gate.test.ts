@@ -69,6 +69,9 @@ test("managed action dry-run gate reports ready when a valid audit exists", asyn
 
     assert.equal(report.status, "ready");
     assert.equal(report.audit.latest.operationRequestId, "dry-run-1");
+    assert(report.nextCommands.some((command: string) => command.includes("live-healthcheck-approval-packet.sh generate")));
+    assert(report.nextCommands.some((command: string) => command.includes("live-healthcheck-approval-packet.sh check")));
+    assert(report.nextCommands.some((command: string) => command.includes("live-healthcheck-approval.sh approve")));
     assert.equal(report.safety.callsManagedActionsLiveApi, false);
     assert.doesNotMatch(calls, /managed-actions\/live/);
   } finally {

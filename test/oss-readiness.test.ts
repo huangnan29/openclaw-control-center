@@ -517,6 +517,8 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(dryRunGateText, /managed-action-dry-run-gate\.sh status/);
   assert.match(dryRunGateText, /CONFIRM_MANAGED_ACTION_DRY_RUN/);
   assert.match(dryRunGateText, /I_UNDERSTAND_THIS_ONLY_CREATES_DRY_RUN_AUDIT_RECORD/);
+  assert.match(dryRunGateText, /live-healthcheck-approval-packet\.sh generate/);
+  assert.match(dryRunGateText, /live-healthcheck-approval-packet\.sh check/);
   assert.match(dryRunGateText, /api\/managed-actions\/dry-run/);
   assert.match(dryRunGateText, /callsManagedActionsLiveApi: false/);
   assert.match(dryRunGateText, /writesOpenClawInstanceDirs: false/);
