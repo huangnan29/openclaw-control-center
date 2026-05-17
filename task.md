@@ -787,7 +787,16 @@ Tom 单 Oracle 上线下一步：
 - 已验证 `npm test -- test/managed-action-text-bridge.test.ts test/managed-action-command-runner.test.ts test/managed-actions-dry-run.test.ts test/managed-action-live-readiness.test.ts test/managed-action-live-gate.test.ts test/oss-readiness.test.ts test/readonly-multi-instance-safety.test.ts`，29/29 通过。
 - 已验证 `npm run build`。
 - 已验证 `git diff --check`。
+- 已提交并推送 `b1d4385 ops: add managed action text bridge` 和 `aa64728 ops: use deploy runtime for text bridge`。
+- 已部署到 Tom，并验证运行提交 `aa64728`。
+- 已验证 Tom `update.sh` 通过，5 个 OpenClaw gateway 健康端口、只读写接口拦截、容器安全边界和 collector 快照均通过。
+- 已在 Tom 真实执行桥接层 smoke：`parse` 返回 `bridge_parse_completed`、`runnerStatus=parsed`，目标为 `tom / skill_run / zhihu-human-ops-writing`，且 `callsManagedActionsDryRunApi=false`、`callsManagedActionsLiveApi=false`、`writesOpenClawInstanceDirs=false`。
+- 已验证 Tom `plan` 返回 `bridge_plan_completed`、`runnerStatus=planned`，仍不调用 dry-run API、不调用 live、不写实例目录。
+- 已验证 Tom `dry-run` 使用 `CONFIRM_MANAGED_ACTION_TEXT_BRIDGE=I_UNDERSTAND_THIS_ONLY_RUNS_MANAGED_ACTION_DRY_RUN_TEXT` 和 `MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container` 成功，返回 `bridge_dry_run_completed`、`runnerStatus=dry_run_completed`，生成 dry-run 审计 `operationRequestId=89c2c8c0-f657-4fcc-8946-5bb48e0b1be9`。
+- 已验证 Tom 桥接层默认写入 `/srv/openclaw-control-center-readonly/runtime/managed-action-command.txt`，没有继续写 `repo/runtime/managed-action-command.txt`。
+- 已验证 Tom 对高风险文本“对 tom 运行 zhihu-human-ops-writing dry-run 后发布”返回 `blocked_bridge_runner`、`runnerStatus=blocked_invalid_command`，在调用 dry-run API 前阻断，安全字段保持 `callsManagedActionsDryRunApi=false`、`callsManagedActionsLiveApi=false`、`writesOpenClawInstanceDirs=false`。
+- 本轮仍未执行 approval `approve`、未打开 live gate、未调用 managed action live API、未修改或重启任何 OpenClaw 实例。
 
 ## 阶段完成后的下一步
 
-下一步把桥接层部署到 Tom，并在 Tom 上真实 smoke：用“对 tom 运行 zhihu-human-ops-writing dry-run”分别测试 `parse`、`plan`、`dry-run`，确认返回摘要中 `callsManagedActionsDryRunApi=true`、`callsManagedActionsLiveApi=false`、`writesOpenClawInstanceDirs=false`、`operationRequestId` 存在；再测试包含“发布”的高风险文本会在调用 API 前被阻断。通过后，才进入人工 approval 和一次只读 healthcheck live 演练；演练前仍不得执行 approval `approve`、不得打开 live gate、不得触发真实 skill。
+下一步可以开始把 openclaw/Discord 机器人实际调用点接到 `managed-action-text-bridge.sh`：机器人收到文本后调用 `parse` 或 `plan` 返回摘要，只有明确 dry-run 指令且带桥接确认时才调用 `dry-run`。通过机器人入口 smoke 后，才进入人工 approval 和一次只读 healthcheck live 演练；演练前仍不得执行 approval `approve`、不得打开 live gate、不得触发真实 skill。
