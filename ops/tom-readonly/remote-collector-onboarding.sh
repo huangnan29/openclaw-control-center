@@ -32,7 +32,7 @@ usage() {
 说明：
   plan 只校验配置并输出将生成的远端 collector 接入包，不写文件。
   write 只写 Tom control-center runtime/remote-onboarding/<serverId> 下的接入包。
-  接入包包含 collector-node.json、bootstrap-collector-node.sh、remote-collector-pull.sources.json、register-remote-collector.json 和 RUNBOOK.md。
+  接入包包含 collector-node.json、bootstrap-collector-node.sh、remote-collector-pull.sources.json、register-remote-collector.json、RUNBOOK.md，并可默认携带远端 Docker build-context。
   本脚本不会 SSH，不会修改 Tom config/instances.json，不会修改任何 OpenClaw 实例目录，不会调用 managed-actions live API。
 
 安全确认：
@@ -149,6 +149,13 @@ function shellQuote(value) {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
 }
 
+function readBoolean(value, fallback) {
+  if (value === undefined) return fallback;
+  if (value === true || value === "true") return true;
+  if (value === false || value === "false") return false;
+  throw new Error("布尔配置只能是 true 或 false");
+}
+
 function normalizeConfig(raw) {
   const config = asRecord(raw);
   if (!config) throw new Error("配置必须是 JSON object");
@@ -190,8 +197,11 @@ function normalizeConfig(raw) {
     "collectorNode.collectorContainerName",
   );
   const buildContext = readOptionalAbsolutePath(collectorNode.buildContext, "collectorNode.buildContext");
+  const bundleBuildContext = !buildContext && readBoolean(collectorNode.bundleBuildContext, true);
+  const bundledRemoteBuildContext = path.join(remoteDeployDir, "build-context");
+  const effectiveBuildContext = buildContext || (bundleBuildContext ? bundledRemoteBuildContext : undefined);
   const warnings = [];
-  if (!buildContext) {
+  if (!effectiveBuildContext) {
     warnings.push("collectorNode.buildContext 未设置；远端 Oracle 必须已经有 collector image，或在配置中填入远端可用的源码目录作为 buildContext。");
   }
 
@@ -241,11 +251,13 @@ function normalizeConfig(raw) {
     collectorNode: {
       deployDir: remoteDeployDir,
       image: collectorImage,
-      ...(buildContext ? { buildContext } : {}),
+      ...(effectiveBuildContext ? { buildContext: effectiveBuildContext } : {}),
       collectorContainerName,
       snapshotOutputPath: collectorSnapshotPath,
       cronSchedule,
     },
+    bundleBuildContext,
+    bundledRemoteBuildContext,
     outputDir,
     collectorSnapshotPath,
     localSnapshotPath: toHostCollectorPath(serverId),
@@ -301,6 +313,59 @@ function buildRegisterConfig(config) {
   };
 }
 
+function listBuildContextFiles() {
+  const roots = [
+    "Dockerfile",
+    ".dockerignore",
+    "package.json",
+    "package-lock.json",
+    "tsconfig.json",
+    ".env.example",
+    "README.md",
+    "README.zh-CN.md",
+    "HALL.md",
+    "src",
+    "scripts",
+    "docs",
+  ];
+  const ignoredNames = new Set(["node_modules", "dist", "runtime", ".git", ".npm-cache", "tmp"]);
+  const files = [];
+  function walk(relativePath) {
+    const fullPath = path.join(repoRoot, relativePath);
+    if (!fs.existsSync(fullPath)) return;
+    const stat = fs.statSync(fullPath);
+    if (stat.isDirectory()) {
+      if (ignoredNames.has(path.basename(relativePath))) return;
+      for (const child of fs.readdirSync(fullPath).sort()) {
+        walk(path.join(relativePath, child));
+      }
+      return;
+    }
+    if (stat.isFile()) files.push(relativePath);
+  }
+  for (const root of roots) walk(root);
+  return files;
+}
+
+function addBuildContextFiles(files, config) {
+  if (!config.bundleBuildContext) return [];
+  const relativeFiles = listBuildContextFiles();
+  if (!relativeFiles.includes("Dockerfile")) throw new Error("构建上下文缺少 Dockerfile");
+  if (!relativeFiles.includes("package.json")) throw new Error("构建上下文缺少 package.json");
+  if (!relativeFiles.includes("package-lock.json")) throw new Error("构建上下文缺少 package-lock.json");
+  for (const relativePath of relativeFiles) {
+    files[path.join(config.outputDir, "build-context", relativePath)] = fs.readFileSync(path.join(repoRoot, relativePath));
+  }
+  files[path.join(config.outputDir, "build-context-manifest.json")] = `${JSON.stringify({
+    schemaVersion: 1,
+    generatedAt: new Date().toISOString(),
+    sourceRepo: repoRoot,
+    remoteBuildContext: config.bundledRemoteBuildContext,
+    files: relativeFiles,
+  }, null, 2)}\n`;
+  return relativeFiles;
+}
+
 function buildRunbook(config) {
   const remoteTarget = `${config.remote.user}@${config.remote.host}`;
   const sshBase = [
@@ -312,10 +377,21 @@ function buildRunbook(config) {
   ].map(shellQuote).join(" ");
   const scpBase = [
     "scp",
+    "-r",
     "-P",
     String(config.remote.port),
     ...(config.remote.sshKey ? ["-i", config.remote.sshKey] : []),
   ].map(shellQuote).join(" ");
+  const scpItems = [
+    path.join(config.outputDir, "collector-node.json"),
+    path.join(config.outputDir, "bootstrap-collector-node.sh"),
+    ...(config.bundleBuildContext ? [path.join(config.outputDir, "build-context")] : []),
+  ].map(shellQuote).join(" ");
+  const buildContextPrep = config.bundleBuildContext
+    ? `mkdir -p ${shellQuote(config.remote.deployDir)}
+rm -rf ${shellQuote(config.bundledRemoteBuildContext)}
+cp -a /tmp/build-context ${shellQuote(config.bundledRemoteBuildContext)}`
+    : `# collector-node.json 未携带 build-context；执行前请确认远端已有 ${config.collectorNode.image} 镜像。`;
 
   return `# ${config.server.name} 只读 collector 接入包
 
@@ -330,7 +406,7 @@ function buildRunbook(config) {
 ## 1. 复制接入包到远端 Oracle
 
 \`\`\`bash
-${scpBase} ${shellQuote(path.join(config.outputDir, "collector-node.json"))} ${shellQuote(path.join(config.outputDir, "bootstrap-collector-node.sh"))} ${shellQuote(`${remoteTarget}:/tmp/`)}
+${scpBase} ${scpItems} ${shellQuote(`${remoteTarget}:/tmp/`)}
 \`\`\`
 
 ## 2. 在远端 Oracle 上生成 collector-only 部署文件
@@ -340,6 +416,7 @@ ${scpBase} ${shellQuote(path.join(config.outputDir, "collector-node.json"))} ${s
 \`\`\`bash
 ${sshBase} <<'REMOTE_OPENCLAW'
 set -euo pipefail
+${buildContextPrep}
 cd /tmp
 ./bootstrap-collector-node.sh plan collector-node.json
 CONFIRM_COLLECTOR_NODE_WRITE=I_UNDERSTAND_THIS_ONLY_WRITES_COLLECTOR_NODE_FILES ./bootstrap-collector-node.sh write collector-node.json
@@ -382,6 +459,8 @@ function buildFiles(config) {
       schemaVersion: 1,
       serverId: config.server.id,
       generatedAt: new Date().toISOString(),
+      bundlesBuildContext: config.bundleBuildContext,
+      remoteBuildContext: config.bundleBuildContext ? config.bundledRemoteBuildContext : undefined,
       writesOnboardingBundleOnly: true,
       writesActiveRegistry: false,
       connectsSsh: false,
@@ -391,14 +470,32 @@ function buildFiles(config) {
       outputDir: config.outputDir,
     }, null, 2)}\n`,
   };
+  const buildContextFiles = addBuildContextFiles(files, config);
   const combined = Object.entries(files)
     .filter(([file]) => !file.endsWith("bootstrap-collector-node.sh"))
+    .filter(([file]) => !file.includes(`${path.sep}build-context${path.sep}`))
     .map(([, content]) => content)
     .join("\n");
   if (combined.includes("/var/run/docker.sock")) throw new Error("接入包不能包含 docker.sock 挂载");
   if (/privileged\s*:\s*true/.test(combined)) throw new Error("接入包不能启用 privileged");
   const liveApiPattern = new RegExp(["api", "managed-actions", "live"].join("\\/"));
   if (liveApiPattern.test(combined)) throw new Error("接入包不能调用 managed action live API");
+  return { files, buildContextFiles };
+}
+
+function summarizeFiles(config) {
+  const files = [
+    path.join(config.outputDir, "collector-node.json"),
+    path.join(config.outputDir, "remote-collector-pull.sources.json"),
+    path.join(config.outputDir, "register-remote-collector.json"),
+    path.join(config.outputDir, "bootstrap-collector-node.sh"),
+    path.join(config.outputDir, "RUNBOOK.md"),
+    path.join(config.outputDir, "safety.json"),
+  ];
+  if (config.bundleBuildContext) {
+    files.push(path.join(config.outputDir, "build-context"));
+    files.push(path.join(config.outputDir, "build-context-manifest.json"));
+  }
   return files;
 }
 
@@ -416,9 +513,12 @@ function formatError(error) {
 
 let config;
 let files;
+let buildContextFiles;
 try {
   config = normalizeConfig(readJsonFile(configFile, "onboarding 配置"));
-  files = buildFiles(config);
+  const built = buildFiles(config);
+  files = built.files;
+  buildContextFiles = built.buildContextFiles;
 } catch (error) {
   fail(formatError(error));
 }
@@ -428,6 +528,9 @@ const summary = {
   deployDir,
   serverId: config.server.id,
   warnings: config.warnings,
+  bundlesBuildContext: config.bundleBuildContext,
+  remoteBuildContext: config.bundleBuildContext ? config.bundledRemoteBuildContext : undefined,
+  buildContextFiles: buildContextFiles.length,
   outputDir: config.outputDir,
   remote: {
     host: config.remote.host,
@@ -437,7 +540,7 @@ const summary = {
     snapshotPath: config.remote.snapshotPath,
   },
   localSnapshotPath: config.localSnapshotPath,
-  files: Object.keys(files),
+  files: summarizeFiles(config),
   safety: {
     writesOnboardingBundleOnly: true,
     writesActiveRegistry: false,

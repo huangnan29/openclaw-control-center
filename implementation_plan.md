@@ -6,7 +6,7 @@
 
 ## 当前阶段
 
-当前阶段并行推进 **跨服务器只读 collector 接入** 与 **人工批准的只读 healthcheck live 演练**：中央 control-center 已完成 registry、collector snapshot 读取、本地 exporter、Tom collector cron、远端 collector 接入包生成器、远端 collector-only 节点 bootstrap、远端 collector snapshot 只读拉取脚本、Tom registry 安全注册脚本、collector-only 远端实例解析、dry-run API、dry-run UI、人工确认字段、审计检索视图、默认关闭的 live gate、测试用 mock executor、真实执行审计结果类型、dry-run 引用校验、灰度配置解析、rollout 决策响应、只读 readiness 卡片、生产执行器最小骨架、显式挂载开关、只读 healthcheck 人工演练材料、Tom preflight、一次性演练窗口脚本、实例影响快照留证、结构化 approval 记录、approval 准备/状态查看、显式 approval `approve` 记录命令、approval 一次性 `consume` 状态和演练报告生成。Tom 仍不默认启用 live gate 或 executor；下一步是在 Tom 先为第二台 Oracle 生成可审查的 onboarding 接入包，再在远端用 bootstrap dry-run 生成 collector-only 节点文件，随后生成 collector JSON，由 Tom 只读拉取并通过 registry 注册脚本先 `plan` 审查、再显式确认 `apply` 写入中央 registry；管理动作侧只有在 approval 文件通过 `approve/check` 校验、且提供本地令牌后，才执行一次 `healthcheck` live 演练。
+当前阶段并行推进 **跨服务器只读 collector 接入** 与 **人工批准的只读 healthcheck live 演练**：中央 control-center 已完成 registry、collector snapshot 读取、本地 exporter、Tom collector cron、远端 collector 接入包生成器、接入包内置可选 Docker build context、远端 collector-only 节点 bootstrap、远端 collector snapshot 只读拉取脚本、Tom registry 安全注册脚本、collector-only 远端实例解析、dry-run API、dry-run UI、人工确认字段、审计检索视图、默认关闭的 live gate、测试用 mock executor、真实执行审计结果类型、dry-run 引用校验、灰度配置解析、rollout 决策响应、只读 readiness 卡片、生产执行器最小骨架、显式挂载开关、只读 healthcheck 人工演练材料、Tom preflight、一次性演练窗口脚本、实例影响快照留证、结构化 approval 记录、approval 准备/状态查看、显式 approval `approve` 记录命令、approval 一次性 `consume` 状态和演练报告生成。Tom 仍不默认启用 live gate 或 executor；下一步是在 Tom 先为第二台 Oracle 生成可审查的 onboarding 接入包，再在远端用 bootstrap dry-run 生成 collector-only 节点文件，随后生成 collector JSON，由 Tom 只读拉取并通过 registry 注册脚本先 `plan` 审查、再显式确认 `apply` 写入中央 registry；管理动作侧只有在 approval 文件通过 `approve/check` 校验、且提供本地令牌后，才执行一次 `healthcheck` live 演练。
 
 ## 推进原则
 
@@ -136,7 +136,7 @@
 19. 远端 collector snapshot 只读拉取：Tom 通过 SSH 只读取远端已经生成好的 JSON，校验后写入本机 `runtime/collectors`，不执行远端 collector，不修改远端实例目录。
 20. collector-only 远端 registry：server 配置 `collectorSnapshotPath` 后，远端实例可只填写 `id/name`，中央不需要远端 `openclawHome` 或 workspace 路径。
 21. 远端 collector-only 节点 bootstrap：在远端 Oracle 上 dry-run 生成 collector-only compose、registry、snapshot 脚本和 cron 脚本，默认不启动容器、不修改实例。
-22. Tom 远端 collector onboarding 接入包：在 Tom runtime 下生成可审查的接入包，包含远端 collector 配置、远端 bootstrap 脚本、Tom 拉取配置、Tom 注册配置和 RUNBOOK；该步骤不 SSH、不写活跃 registry、不修改实例。
+22. Tom 远端 collector onboarding 接入包：在 Tom runtime 下生成可审查的接入包，包含远端 collector 配置、远端 bootstrap 脚本、Tom 拉取配置、Tom 注册配置、RUNBOOK 和默认内置的最小 Docker build context；该步骤不 SSH、不写活跃 registry、不修改实例。
 23. Tom registry 安全注册：读取已拉取的远端 collector snapshot，先 `plan` 审查将新增的 server 和实例，确认后 `apply` 备份并原子更新 `config/instances.json`；该步骤只更新 control-center registry，不修改远端或本地 OpenClaw 实例。
 24. 第二台 Oracle 接入中央视图：在远端生成 collector JSON，在 Tom 只读拉取后，通过注册脚本把对应 server 的 `collectorSnapshotPath` 写入 registry，再通过 `healthcheck.sh` 验收。
 25. 白名单真实执行灰度：默认关闭，只在单实例、单动作、人工确认下开启。

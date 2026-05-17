@@ -257,6 +257,7 @@ repo/ops/tom-readonly/remote-collector-onboarding.sh write runtime/remote-collec
 - `remote-collector-pull.sources.json`：Tom 只读拉取配置。
 - `register-remote-collector.json`：Tom registry 注册配置。
 - `RUNBOOK.md`：从复制接入包到远端、生成 snapshot、Tom 拉取、Tom 注册、健康检查的顺序命令。
+- `build-context/`：当没有显式配置 `collectorNode.buildContext` 时自动生成，包含构建 collector image 所需的最小源码与 Dockerfile，远端不必预先克隆完整仓库。
 
 配置样板：
 

@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-跨服务器只读 collector 接入增强：已新增 Tom 远端 collector onboarding 接入包生成器，第二台 Oracle 信息确定后可以先生成可审查接入包，再按 RUNBOOK 走远端 bootstrap、Tom pull、Tom register 和 healthcheck。
+跨服务器只读 collector 接入增强：已让 Tom 远端 collector onboarding 接入包默认携带最小 Docker build context，第二台 Oracle 不必预先有 collector image 或完整克隆仓库，也能按 RUNBOOK 走远端 bootstrap、Tom pull、Tom register 和 healthcheck。
 
 ## 本轮不做
 
@@ -21,10 +21,11 @@
 
 - 为第二台 Oracle 服务器准备本地 collector exporter，让该服务器自行生成 collector JSON。
 - 在 Tom 先复制 `repo/ops/tom-readonly/remote-collector-onboarding.example.json` 到 `runtime/remote-collector-onboarding.json`，填入第二台 Oracle 的 SSH 信息和实例路径。
+- 如果远端已经有可用的 control-center 源码目录，可以设置 `collectorNode.buildContext`；否则保持默认 `collectorNode.bundleBuildContext=true`，让接入包携带最小构建上下文。
 - 先执行 `repo/ops/tom-readonly/remote-collector-onboarding.sh plan runtime/remote-collector-onboarding.json`，确认只生成接入包计划、不写文件。
 - 确认后执行：
   `CONFIRM_REMOTE_COLLECTOR_ONBOARDING=I_UNDERSTAND_THIS_ONLY_WRITES_REMOTE_ONBOARDING_BUNDLE repo/ops/tom-readonly/remote-collector-onboarding.sh write runtime/remote-collector-onboarding.json`
-- 审查 `runtime/remote-onboarding/<serverId>/RUNBOOK.md`、`collector-node.json`、`remote-collector-pull.sources.json` 和 `register-remote-collector.json`。
+- 审查 `runtime/remote-onboarding/<serverId>/RUNBOOK.md`、`collector-node.json`、`remote-collector-pull.sources.json`、`register-remote-collector.json`、`build-context-manifest.json` 和 `safety.json`。
 - 将接入包里的 `collector-node.json` 和 `bootstrap-collector-node.sh` 复制到第二台 Oracle。
 - 在第二台 Oracle 上先执行 `./bootstrap-collector-node.sh plan collector-node.json`，确认只写文件、不启动容器、不修改实例。
 - 确认后执行：
@@ -76,6 +77,14 @@
 - 已部署到 Tom，并验证运行提交 `43a6abc`。
 - 已在 Tom 验证 `remote-collector-onboarding.sh plan` 返回 `writesActiveRegistry=false`、`connectsSsh=false`、`mutatesOpenClawInstance=false`、`callsLiveApi=false`，未执行 write，未生成真实接入包。
 - 已验证 Tom `healthcheck.sh` 通过，现有 5 个实例仍只读；live window status 仍为 `needs_manual_approval`、`READONLY_MODE=true`、`readiness.status=blocked`，未调用 live API。
+- 已让 `remote-collector-onboarding.sh` 在未配置 `collectorNode.buildContext` 时默认生成 `build-context/` 和 `build-context-manifest.json`，并把生成的 `collector-node.json` 指向远端 `/srv/openclaw-collector-node/build-context`。
+- build context 只包含构建 collector image 所需的最小文件：`Dockerfile`、`.dockerignore`、`package.json`、`package-lock.json`、`tsconfig.json`、`.env.example`、`README*`、`HALL.md`、`src/`、`scripts/` 和 `docs/`。
+- 已更新 onboarding RUNBOOK，复制接入包时会带上 `build-context/`，远端执行前会放入 collector deploy 目录。
+- 已新增测试覆盖无显式 `buildContext` 时自动打包 build context、生成 manifest、更新 collector-node `buildContext` 和 safety 记录。
+- 已验证 `ops/tom-readonly/remote-collector-onboarding.sh plan ops/tom-readonly/remote-collector-onboarding.example.json` 返回 `warnings=[]`、`bundlesBuildContext=true`、`remoteBuildContext=/srv/openclaw-collector-node/build-context`、`buildContextFiles=88`。
+- 已验证 `npm test -- test/remote-collector-onboarding.test.ts test/register-remote-collector.test.ts test/remote-collector-pull.test.ts test/collector-node-bootstrap.test.ts test/oss-readiness.test.ts`，17/17 通过。
+- 已验证 `npm test -- test/multi-instance-readonly.test.ts test/readonly-multi-instance-safety.test.ts test/ui-render-smoke.test.ts`，39/39 通过。
+- 已验证 `npm run build`。
 - 已新增 `ops/tom-readonly/register-remote-collector.sh`，用于把已拉取的远端 collector snapshot 注册到 Tom `config/instances.json`。
 - 已新增 `ops/tom-readonly/register-remote-collector.example.json` 样板。
 - `register-remote-collector.sh plan` 只读取配置、Tom registry 和本机 snapshot，不写文件。

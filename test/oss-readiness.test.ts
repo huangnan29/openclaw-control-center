@@ -199,6 +199,8 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   const remoteCollectorOnboardingText = readFileSync(remoteCollectorOnboarding, "utf8");
   assert.match(remoteCollectorOnboardingText, /CONFIRM_REMOTE_COLLECTOR_ONBOARDING/);
   assert.match(remoteCollectorOnboardingText, /I_UNDERSTAND_THIS_ONLY_WRITES_REMOTE_ONBOARDING_BUNDLE/);
+  assert.match(remoteCollectorOnboardingText, /bundleBuildContext/);
+  assert.match(remoteCollectorOnboardingText, /build-context-manifest\.json/);
   assert.match(remoteCollectorOnboardingText, /writesActiveRegistry: false/);
   assert.match(remoteCollectorOnboardingText, /connectsSsh: false/);
   assert.match(remoteCollectorOnboardingText, /mutatesOpenClawInstance: false/);
@@ -206,6 +208,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.doesNotMatch(remoteCollectorOnboardingText, /api\/managed-actions\/live/);
   const remoteCollectorOnboardingConfig = JSON.parse(readFileSync(remoteCollectorOnboardingExample, "utf8"));
   assert.equal(remoteCollectorOnboardingConfig.server.id, "remote-oracle");
+  assert.equal(remoteCollectorOnboardingConfig.collectorNode.bundleBuildContext, true);
   const remoteCollectorPullText = readFileSync(remoteCollectorPull, "utf8");
   assert.match(remoteCollectorPullText, /CONFIRM_REMOTE_COLLECTOR_PULL/);
   assert.match(remoteCollectorPullText, /I_UNDERSTAND_THIS_ONLY_READS_REMOTE_COLLECTOR_SNAPSHOTS/);

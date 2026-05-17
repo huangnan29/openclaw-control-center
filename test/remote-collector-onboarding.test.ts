@@ -143,6 +143,57 @@ test("remote collector onboarding writes a reviewable bundle only after confirma
   }
 });
 
+test("remote collector onboarding bundles a build context when no remote buildContext is provided", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-remote-onboarding-"));
+  try {
+    const { configFile, deployDir, outputDir } = await writeConfig(dir);
+    const raw = JSON.parse(await readFile(configFile, "utf8"));
+    delete raw.collectorNode.buildContext;
+    await writeFile(configFile, `${JSON.stringify(raw, null, 2)}\n`, "utf8");
+
+    const plan = JSON.parse(
+      execFileSync(SCRIPT, ["plan", configFile], {
+        env: { ...process.env, DEPLOY_DIR: deployDir },
+        encoding: "utf8",
+      }),
+    );
+    assert.equal(plan.bundlesBuildContext, true);
+    assert.equal(plan.remoteBuildContext, "/srv/openclaw-collector-node/build-context");
+    assert.equal(plan.warnings.length, 0);
+    assert(plan.buildContextFiles > 10);
+    assert(plan.files.includes(join(outputDir, "build-context")));
+
+    execFileSync(SCRIPT, ["write", configFile], {
+      env: {
+        ...process.env,
+        DEPLOY_DIR: deployDir,
+        CONFIRM_REMOTE_COLLECTOR_ONBOARDING: "I_UNDERSTAND_THIS_ONLY_WRITES_REMOTE_ONBOARDING_BUNDLE",
+      },
+      encoding: "utf8",
+    });
+
+    const collectorNode = JSON.parse(await readFile(join(outputDir, "collector-node.json"), "utf8"));
+    const manifest = JSON.parse(await readFile(join(outputDir, "build-context-manifest.json"), "utf8"));
+    const safety = JSON.parse(await readFile(join(outputDir, "safety.json"), "utf8"));
+    const runbook = await readFile(join(outputDir, "RUNBOOK.md"), "utf8");
+
+    assert.equal(collectorNode.buildContext, "/srv/openclaw-collector-node/build-context");
+    assert.equal(existsSync(join(outputDir, "build-context", "Dockerfile")), true);
+    assert.equal(existsSync(join(outputDir, "build-context", "package.json")), true);
+    assert.equal(existsSync(join(outputDir, "build-context", "src", "index.ts")), true);
+    assert(manifest.files.includes("Dockerfile"));
+    assert(manifest.files.includes("package-lock.json"));
+    assert.equal(manifest.remoteBuildContext, "/srv/openclaw-collector-node/build-context");
+    assert.equal(safety.bundlesBuildContext, true);
+    assert.equal(safety.remoteBuildContext, "/srv/openclaw-collector-node/build-context");
+    assert.match(runbook, /scp' '-r'/);
+    assert.match(runbook, /cp -a \/tmp\/build-context/);
+    assert.doesNotMatch(runbook, /api\/managed-actions\/live/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("remote collector onboarding refuses output outside the control-center onboarding directory", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openclaw-remote-onboarding-"));
   try {

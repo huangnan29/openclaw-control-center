@@ -19,6 +19,7 @@
   },
   "collectorNode": {
     "image": "openclaw-control-center:collector-node",
+    "bundleBuildContext": true,
     "collectorContainerName": "openclaw-collector-remote-oracle",
     "cronSchedule": "*/2 * * * *"
   },
