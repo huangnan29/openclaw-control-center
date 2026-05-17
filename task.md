@@ -711,6 +711,11 @@ Tom 单 Oracle 上线下一步：
 - 已再次验证 `npm test -- test/final-go-live-runner.test.ts test/final-go-live-status.test.ts test/live-healthcheck-rollout-runner.test.ts test/go-live-gate.test.ts test/oss-readiness.test.ts`。
 - 已再次验证 `npm run build`。
 - 已再次验证 `git diff --check`。
+- 已提交并推送 `8b9cfef ops: make final go live prepare idempotent`、`024cf55 ops: prefer tom prepare before approval boundary`、`a3d3a30 ops: make final prepare check tom readiness first`。
+- 已部署到 Tom，并验证运行提交 `a3d3a30`。
+- 已验证 Tom `update.sh` 通过，5 个 OpenClaw gateway 健康端口、只读写接口拦截、容器安全边界和 collector 快照均通过。
+- 已真实连续执行两次本机侧 `ops/local/final-go-live-runner.sh prepare`：第一次在 Tom readiness 尚未到批准边界时执行 Tom `prepare`，返回 `prepared_waiting_human_approval`，`writesTomRuntime=true` 且只写 control-center runtime；第二次只读识别 `waiting_human_approval`，返回 `prepared_waiting_human_approval`，`writesTomRuntime=false`、`opensLiveGate=false`、`callsManagedActionsLiveApi=false`。
+- 当前 Tom 下一步仍是人工 approval：`CONFIRM_APPROVAL_RECORD=I_APPROVE_LIVE_HEALTHCHECK_RECORD APPROVED_BY=Anan repo/ops/tom-readonly/live-healthcheck-approval.sh approve runtime/live-healthcheck-approval.json`。
 - 本轮仍未执行 approval `approve`、未打开 live gate、未调用 `/api/managed-actions/live`、未修改或重启任何 OpenClaw 实例。
 
 ## 阶段完成后的下一步
