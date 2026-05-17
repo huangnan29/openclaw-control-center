@@ -721,17 +721,19 @@ Tom 单 Oracle 上线下一步：
 ## 本轮新增
 
 - 已新增 OpenClaw/Discord 可调用的 Tom 侧管理动作命令入口：`ops/tom-readonly/managed-action-command-runner.sh`。
-- `managed-action-command-runner.sh status` 只读取 `/api/managed-actions` 与 `/api/managed-actions/readiness`；`plan <command.json>` 只校验命令 JSON，不联网、不写审计；`dry-run <command.json>` 必须设置 `CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN=I_UNDERSTAND_THIS_ONLY_CALLS_MANAGED_ACTION_DRY_RUN_API` 和 `LOCAL_API_TOKEN`，只调用 `/api/managed-actions/dry-run`。
+- `managed-action-command-runner.sh status` 只读取 `/api/managed-actions` 与 `/api/managed-actions/readiness`；`plan <command.json>` 只校验命令 JSON，不联网、不写审计；`dry-run <command.json>` 必须设置 `CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN=I_UNDERSTAND_THIS_ONLY_CALLS_MANAGED_ACTION_DRY_RUN_API`，并通过 `LOCAL_API_TOKEN` 或显式 `MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container` 取得本地令牌，只调用 `/api/managed-actions/dry-run`。
 - 该入口支持 `healthcheck`、`collector_refresh`、`skill_run` 的 dry-run，其中 `skill_run` 必须显式提供 `skillName`；当前仍只生成预览和审计，不调用 OpenClaw skill，不修改实例目录，不重启实例，不打开 live gate。
 - 已更新 `ops/tom-readonly/README.md`，加入机器人调用入口的常用命令与安全边界说明。
 - 已更新 `implementation_plan.md`，将 OpenClaw/Discord dry-run 命令入口写入当前阶段能力。
 - 已新增 `test/managed-action-command-runner.test.ts`，覆盖 plan 不联网、dry-run 缺确认不调用 API、dry-run 只调用 dry-run API 且不泄露本地令牌。
 - 已更新 `test/oss-readiness.test.ts`，断言该入口包含确认短语、只调用 dry-run API，并且不包含 managed-actions live API 路径。
 - 已验证 `bash -n ops/tom-readonly/managed-action-command-runner.sh`。
-- 已验证 `npm test -- test/managed-action-command-runner.test.ts`。
-- 已验证 `npm test -- test/managed-action-command-runner.test.ts test/managed-actions-dry-run.test.ts test/managed-action-live-readiness.test.ts test/managed-action-live-gate.test.ts test/oss-readiness.test.ts test/readonly-multi-instance-safety.test.ts`。
-- 已验证 `npm run build`。
-- 已验证 `git diff --check`。
+- 已发现 Tom 宿主机没有 `.env`，但 control-center 容器内存在 `LOCAL_API_TOKEN`；已为 runner 增加显式 `MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container`，只在 dry-run 模式读取容器令牌，不输出、不落盘。
+- 已重新验证 `bash -n ops/tom-readonly/managed-action-command-runner.sh`。
+- 已重新验证 `npm test -- test/managed-action-command-runner.test.ts test/oss-readiness.test.ts`。
+- 已重新验证 `npm test -- test/managed-action-command-runner.test.ts test/managed-actions-dry-run.test.ts test/managed-action-live-readiness.test.ts test/managed-action-live-gate.test.ts test/oss-readiness.test.ts test/readonly-multi-instance-safety.test.ts`。
+- 已重新验证 `npm run build`。
+- 已重新验证 `git diff --check`。
 - 本轮仍未执行 approval `approve`、未打开 live gate、未调用 `/api/managed-actions/live`、未修改或重启任何 OpenClaw 实例。
 
 ## 阶段完成后的下一步

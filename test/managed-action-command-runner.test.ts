@@ -207,6 +207,7 @@ test("managed action command runner dry-run 只调用 dry-run API 并隐藏令�
       assert.equal(report.safety.callsManagedActionsLiveApi, false);
       assert.equal(report.safety.writesOpenClawInstanceDirs, false);
       assert.equal(report.safety.restartsOpenClawInstances, false);
+      assert.equal(report.safety.localApiTokenSource, "env");
       assert.equal(requests.length, 1);
       assert.equal(requests[0]?.method, "POST");
       assert.equal(requests[0]?.url, "/api/managed-actions/dry-run");

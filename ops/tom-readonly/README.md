@@ -114,6 +114,10 @@ repo/ops/tom-readonly/managed-action-command-runner.sh plan runtime/managed-acti
 CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN=I_UNDERSTAND_THIS_ONLY_CALLS_MANAGED_ACTION_DRY_RUN_API \
 LOCAL_API_TOKEN=<本地令牌> \
 repo/ops/tom-readonly/managed-action-command-runner.sh dry-run runtime/managed-action-command.json
+# 如果 LOCAL_API_TOKEN 只在 control-center 容器里：
+CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN=I_UNDERSTAND_THIS_ONLY_CALLS_MANAGED_ACTION_DRY_RUN_API \
+MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container \
+repo/ops/tom-readonly/managed-action-command-runner.sh dry-run runtime/managed-action-command.json
 CONFIRM_LIVE_HEALTHCHECK_RUNNER=I_UNDERSTAND_THIS_RUNS_APPROVED_LIVE_HEALTHCHECK \
 LOCAL_API_TOKEN=<本地令牌> \
 repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh run-approved
@@ -138,7 +142,7 @@ BRANCH=multi-instance-readonly-control-center ./update.sh
 
 `ops/local/final-go-live-runner.sh prepare` 是给 openclaw 调用的本机侧总 runner：它先执行 `final-go-live-status.sh check`，只有当总闸门下一步是 Tom `live-healthcheck-rollout-runner.sh prepare` 时，才 SSH 到 Tom 准备 approval 模板和批准前证据包，然后重新检查最终状态并停在人工批准前。如果总闸门仍提示 `prepare`，本机 runner 会先只读询问 Tom runner 当前 readiness；已经处在人工批准边界或已批准待执行边界时，重复执行 `prepare` 会幂等返回当前边界，不会再次写 Tom runtime。它不会批准 approval、不会打开 live gate、不会调用 managed action live API。`run-approved` 还必须显式设置 `CONFIRM_FINAL_GO_LIVE_RUNNER` 和 `LOCAL_API_TOKEN`，并会继续交给 Tom runner 再校验 approval/readiness。
 
-`managed-action-command-runner.sh` 是给 OpenClaw/Discord 机器人调用的 dry-run 命令入口。`plan` 只读取命令 JSON 并校验字段，不联网、不写审计；`dry-run` 必须设置 `CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN` 和 `LOCAL_API_TOKEN`，只调用 `/api/managed-actions/dry-run` 生成预览与审计记录，不打开 live gate、不执行实例命令。`skill_run` 命令必须带 `skillName`，当前仍只是预览未来 skill 调用，不会真正调 OpenClaw skill。
+`managed-action-command-runner.sh` 是给 OpenClaw/Discord 机器人调用的 dry-run 命令入口。`plan` 只读取命令 JSON 并校验字段，不联网、不写审计；`dry-run` 必须设置 `CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN`，并通过 `LOCAL_API_TOKEN` 或显式 `MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container` 取得本地令牌，只调用 `/api/managed-actions/dry-run` 生成预览与审计记录，不打开 live gate、不执行实例命令。`skill_run` 命令必须带 `skillName`，当前仍只是预览未来 skill 调用，不会真正调 OpenClaw skill。
 
 当前只有一台 Oracle 时，新增实例优先走本机注册入口：
 

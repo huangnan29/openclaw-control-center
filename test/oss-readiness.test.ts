@@ -559,6 +559,8 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(commandRunnerText, /managed-action-command-runner\.sh dry-run/);
   assert.match(commandRunnerText, /CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN/);
   assert.match(commandRunnerText, /I_UNDERSTAND_THIS_ONLY_CALLS_MANAGED_ACTION_DRY_RUN_API/);
+  assert.match(commandRunnerText, /MANAGED_ACTION_COMMAND_TOKEN_SOURCE/);
+  assert.match(commandRunnerText, /RESOLVED_LOCAL_API_TOKEN_SOURCE/);
   assert.match(commandRunnerText, /api\/managed-actions\/dry-run/);
   assert.match(commandRunnerText, /callsManagedActionsLiveApi: false/);
   assert.match(commandRunnerText, /writesOpenClawInstanceDirs: false/);

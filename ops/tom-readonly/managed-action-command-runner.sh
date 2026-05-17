@@ -12,6 +12,8 @@ DEPLOY_DIR="${DEPLOY_DIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 CONTROL_CENTER_BASE_URL="${CONTROL_CENTER_BASE_URL:-http://127.0.0.1:4311}"
 CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN="${CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN:-}"
 LOCAL_API_TOKEN="${LOCAL_API_TOKEN:-}"
+MANAGED_ACTION_COMMAND_TOKEN_SOURCE="${MANAGED_ACTION_COMMAND_TOKEN_SOURCE:-env}"
+RESOLVED_LOCAL_API_TOKEN_SOURCE="${LOCAL_API_TOKEN:+env}"
 COMMAND_FILE="${2:-${MANAGED_ACTION_COMMAND_FILE:-}}"
 
 fail() {
@@ -42,12 +44,35 @@ command.json 示例：
 dry-run 必须设置：
   CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN=I_UNDERSTAND_THIS_ONLY_CALLS_MANAGED_ACTION_DRY_RUN_API
   LOCAL_API_TOKEN=<本地令牌>
+  # 如果令牌只在 control-center 容器环境中，可以显式使用：
+  MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container
 
 安全边界：
   - plan 不联网、不写文件。
   - dry-run 只调用 /api/managed-actions/dry-run，不执行 OpenClaw 实例命令。
   - 不打开 live gate，不修改 OpenClaw 实例目录，不重启实例。
 TEXT
+}
+
+resolve_local_api_token_for_dry_run() {
+  if [ -n "$LOCAL_API_TOKEN" ]; then
+    RESOLVED_LOCAL_API_TOKEN_SOURCE="env"
+    return
+  fi
+  if [ "$MANAGED_ACTION_COMMAND_TOKEN_SOURCE" != "container" ]; then
+    RESOLVED_LOCAL_API_TOKEN_SOURCE="missing"
+    return
+  fi
+  require_command docker
+  LOCAL_API_TOKEN="$(
+    cd "$DEPLOY_DIR" &&
+      docker compose exec -T control-center sh -lc 'printf "%s" "$LOCAL_API_TOKEN"'
+  )"
+  if [ -n "$LOCAL_API_TOKEN" ]; then
+    RESOLVED_LOCAL_API_TOKEN_SOURCE="container"
+  else
+    RESOLVED_LOCAL_API_TOKEN_SOURCE="missing"
+  fi
 }
 
 run_node() {
@@ -57,6 +82,7 @@ run_node() {
     CONTROL_CENTER_BASE_URL="$CONTROL_CENTER_BASE_URL" \
     CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN="$CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN" \
     LOCAL_API_TOKEN="$LOCAL_API_TOKEN" \
+    RESOLVED_LOCAL_API_TOKEN_SOURCE="$RESOLVED_LOCAL_API_TOKEN_SOURCE" \
     COMMAND_FILE="$COMMAND_FILE" \
     node <<'NODE'
 const fs = require("node:fs");
@@ -66,6 +92,7 @@ const commandFile = process.env.COMMAND_FILE || "";
 const baseUrl = normalizeBaseUrl(process.env.CONTROL_CENTER_BASE_URL || "http://127.0.0.1:4311");
 const confirmDryRun = process.env.CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN || "";
 const localApiToken = process.env.LOCAL_API_TOKEN || "";
+const localApiTokenSource = process.env.RESOLVED_LOCAL_API_TOKEN_SOURCE || "missing";
 const dryRunConfirmation = "DRY-RUN-ONLY";
 const allowedActions = new Set(["healthcheck", "collector_refresh", "skill_run"]);
 
@@ -238,6 +265,7 @@ async function dryRunReport(payload) {
       safety: baseSafety({
         blockedBeforeApi: true,
         requiresLocalApiToken: true,
+        localApiTokenSource,
       }),
     };
   }
@@ -274,6 +302,7 @@ async function dryRunReport(payload) {
       createsDryRunAuditOnly: ok,
       requiresDryRunConfirmation: true,
       requiresLocalApiToken: true,
+      localApiTokenSource,
     }),
   };
 }
@@ -320,6 +349,7 @@ main() {
       ;;
     dry-run)
       [ -n "$COMMAND_FILE" ] || fail "dry-run 必须提供 command.json 路径"
+      resolve_local_api_token_for_dry_run
       run_node "dry-run"
       ;;
     -h|--help|help)
