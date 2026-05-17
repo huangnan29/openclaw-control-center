@@ -145,6 +145,8 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   const liveHealthcheckRollout = path.join(ROOT, "ops", "tom-readonly", "managed-action-healthcheck-rollout.example.json");
   const remoteCollectorPull = path.join(ROOT, "ops", "tom-readonly", "remote-collector-pull.sh");
   const remoteCollectorPullExample = path.join(ROOT, "ops", "tom-readonly", "remote-collector-pull.sources.example.json");
+  const registerRemoteCollector = path.join(ROOT, "ops", "tom-readonly", "register-remote-collector.sh");
+  const registerRemoteCollectorExample = path.join(ROOT, "ops", "tom-readonly", "register-remote-collector.example.json");
   const collectorNodeBootstrap = path.join(ROOT, "ops", "collector-node", "bootstrap-collector-node.sh");
   const collectorNodeExample = path.join(ROOT, "ops", "collector-node", "collector-node.example.json");
 
@@ -157,6 +159,8 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(doc.includes("I_UNDERSTAND_THIS_ONLY_WRITES_COLLECTOR_NODE_FILES"));
   assert(doc.includes("remote-collector-pull.sh"));
   assert(doc.includes("I_UNDERSTAND_THIS_ONLY_READS_REMOTE_COLLECTOR_SNAPSHOTS"));
+  assert(doc.includes("register-remote-collector.sh"));
+  assert(doc.includes("I_UNDERSTAND_THIS_ONLY_UPDATES_CONTROL_CENTER_REGISTRY"));
   assert(doc.includes("install-collector-cron.sh"));
   assert(doc.includes("服务器健康"));
   assert(doc.includes("/srv/openclaw-work"));
@@ -174,6 +178,8 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(existsSync(liveHealthcheckRollout));
   assert(existsSync(remoteCollectorPull));
   assert(existsSync(remoteCollectorPullExample));
+  assert(existsSync(registerRemoteCollector));
+  assert(existsSync(registerRemoteCollectorExample));
   assert(existsSync(collectorNodeBootstrap));
   assert(existsSync(collectorNodeExample));
   const collectorNodeBootstrapText = readFileSync(collectorNodeBootstrap, "utf8");
@@ -192,6 +198,14 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(remoteCollectorPullText, /runtime.*collectors/);
   const remoteCollectorExample = JSON.parse(readFileSync(remoteCollectorPullExample, "utf8"));
   assert.equal(remoteCollectorExample.sources[0]?.enabled, false);
+  const registerRemoteCollectorText = readFileSync(registerRemoteCollector, "utf8");
+  assert.match(registerRemoteCollectorText, /CONFIRM_REMOTE_COLLECTOR_REGISTER/);
+  assert.match(registerRemoteCollectorText, /I_UNDERSTAND_THIS_ONLY_UPDATES_CONTROL_CENTER_REGISTRY/);
+  assert.match(registerRemoteCollectorText, /updatesControlCenterRegistryOnly: true/);
+  assert.match(registerRemoteCollectorText, /mutatesOpenClawInstance: false/);
+  assert.doesNotMatch(registerRemoteCollectorText, /api\/managed-actions\/live/);
+  const registerRemoteCollectorConfig = JSON.parse(readFileSync(registerRemoteCollectorExample, "utf8"));
+  assert.equal(registerRemoteCollectorConfig.server.id, "remote-oracle");
   assert.match(readFileSync(cron, "utf8"), /OPENCLAW_COLLECTOR_CRON_BEGIN/);
   const impactText = readFileSync(instanceImpactSnapshot, "utf8");
   assert.match(impactText, /instance-impact-snapshot\.sh snapshot/);

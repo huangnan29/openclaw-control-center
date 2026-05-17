@@ -274,6 +274,18 @@ repo/ops/tom-readonly/remote-collector-pull.sh pull runtime/remote-collector-pul
 repo/ops/tom-readonly/remote-collector-pull.sh status runtime/remote-collector-pull.sources.json
 ```
 
+拉取成功后，再把这个 collector server 注册进 Tom 的 `config/instances.json`。注册脚本会读取本机已拉取的 snapshot，校验 `serverId` 与实例列表，并在写入前备份原 registry：
+
+```bash
+cp repo/ops/tom-readonly/register-remote-collector.example.json runtime/register-remote-collector.json
+repo/ops/tom-readonly/register-remote-collector.sh plan runtime/register-remote-collector.json
+CONFIRM_REMOTE_COLLECTOR_REGISTER=I_UNDERSTAND_THIS_ONLY_UPDATES_CONTROL_CENTER_REGISTRY \
+repo/ops/tom-readonly/register-remote-collector.sh apply runtime/register-remote-collector.json
+./healthcheck.sh
+```
+
+`plan` 不写文件；`apply` 只更新 control-center registry，不修改任何 OpenClaw 实例目录，不重启实例，不调用 managed action live API。
+
 ## 推荐环境变量
 
 ```env

@@ -15,6 +15,8 @@
 - `install-collector-cron.sh`：幂等安装 Tom collector 快照定时任务，只更新 crontab 中的 OpenClaw 标记块。
 - `remote-collector-pull.sh`：从其他 Oracle 服务器只读拉取已经生成好的 collector JSON，校验后写入本机 `runtime/collectors`。
 - `remote-collector-pull.sources.example.json`：远端 collector 拉取配置样板，默认 `enabled=false`。
+- `register-remote-collector.sh`：把已经拉取并校验过的远端 collector snapshot 注册到 Tom `config/instances.json`，默认 `plan` 不写入。
+- `register-remote-collector.example.json`：远端 collector 注册配置样板。
 - `update.sh`：拉取 `multi-instance-readonly-control-center` 分支，重建控制中心容器，随后执行健康检查。
 - `rollback.sh`：回滚到指定提交；如果不传提交，则使用最近一次 `update.sh` 记录的 `previous-good.commit`。
 - `managed-action-healthcheck-rollout.example.json`：只读 healthcheck live 演练的 rollout 样板，不会被默认加载。
@@ -37,6 +39,9 @@ repo/ops/tom-readonly/remote-collector-pull.sh plan runtime/remote-collector-pul
 CONFIRM_REMOTE_COLLECTOR_PULL=I_UNDERSTAND_THIS_ONLY_READS_REMOTE_COLLECTOR_SNAPSHOTS \
 repo/ops/tom-readonly/remote-collector-pull.sh pull runtime/remote-collector-pull.sources.json
 repo/ops/tom-readonly/remote-collector-pull.sh status runtime/remote-collector-pull.sources.json
+repo/ops/tom-readonly/register-remote-collector.sh plan runtime/register-remote-collector.json
+CONFIRM_REMOTE_COLLECTOR_REGISTER=I_UNDERSTAND_THIS_ONLY_UPDATES_CONTROL_CENTER_REGISTRY \
+repo/ops/tom-readonly/register-remote-collector.sh apply runtime/register-remote-collector.json
 ./update.sh
 ./rollback.sh <commit>
 repo/ops/tom-readonly/live-healthcheck-approval.sh prepare runtime/live-healthcheck-approval.json
@@ -62,6 +67,8 @@ BRANCH=multi-instance-readonly-control-center ./update.sh
 ```bash
 /srv/openclaw-control-center-readonly/runtime/collectors/
 ```
+
+拉取成功后，用 `register-remote-collector.sh plan` 审查将要加入 `config/instances.json` 的 server 和实例；`apply` 会先备份原 registry，再原子写入新 registry。该脚本只更新 control-center registry，不修改 OpenClaw 实例目录。
 
 只读 healthcheck live 演练必须先人工准备 live gate、executor 和 rollout 配置；默认 Tom 不启用。确认后才可手动运行：
 

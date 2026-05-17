@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "server": {
+    "id": "remote-oracle",
+    "name": "Remote Oracle",
+    "host": "10.0.0.12",
+    "region": "oracle"
+  },
+  "collectorSnapshotPath": "/app/runtime/collectors/remote-oracle/snapshot.json",
+  "replaceExisting": false,
+  "instances": [
+    {
+      "id": "remote-main",
+      "name": "Remote Main"
+    }
+  ]
+}
