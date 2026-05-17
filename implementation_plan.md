@@ -6,7 +6,7 @@
 
 ## 当前阶段
 
-当前阶段推进 **真实执行审计结果类型**：中央 control-center 已完成 dry-run API、dry-run UI、人工确认字段、审计检索视图、默认关闭的 live gate 和测试用 mock executor。当前只定义未来真实执行的审计结果结构，覆盖成功、失败、回滚、跳过；Tom 不接入执行器、不开启真实执行、不调用 OpenClaw 实例命令。
+当前阶段推进 **真实执行前置 dry-run 申请有效性校验**：中央 control-center 已完成 dry-run API、dry-run UI、人工确认字段、审计检索视图、默认关闭的 live gate、测试用 mock executor 和真实执行审计结果类型。当前让 live 请求必须引用有效 dry-run 申请，并校验动作、目标、确认状态和有效期；Tom 不接入执行器、不开启真实执行、不调用 OpenClaw 实例命令。
 
 ## 推进原则
 

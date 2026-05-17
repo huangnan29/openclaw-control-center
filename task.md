@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-真实执行审计结果类型：定义未来真实执行的审计条目结构，覆盖执行成功、执行失败、已回滚、已跳过四类结果；当前不接真实执行器。
+真实执行前置 dry-run 申请有效性校验：live 请求必须引用仍有效的 dry-run 申请，并校验动作、目标实例、确认状态和有效期；当前仍不启用真实执行。
 
 ## 本轮不做
 
@@ -17,10 +17,11 @@
 
 ## 当前下一步
 
-部署审计结果类型到 Tom 并验证行为不变：
+部署 dry-run 引用校验到 Tom 并验证行为不变：
 
 - Tom 继续保持 `MANAGED_ACTIONS_LIVE_ENABLED=false`。
 - `/api/managed-actions/live` 继续返回 `blocked_disabled`。
+- live 响应中展示 `dryRunReference` 校验结果。
 - 页面继续不出现真实执行入口。
 - `healthcheck.sh` 继续通过。
 
@@ -139,7 +140,17 @@
 - 已验证 `skipped` 不标记真实执行，`executed/failed/rolled_back` 标记 `liveExecution=true`。
 - 已验证 `npm test -- test/managed-action-live-audit.test.ts test/managed-action-executor.test.ts test/managed-actions-dry-run.test.ts test/phase9-routes-commands.test.ts test/readonly-multi-instance-safety.test.ts test/multi-instance-readonly.test.ts test/ui-render-smoke.test.ts`。
 - 已验证 `npm run build`。
+- 已新增 dry-run 引用校验：按 `operationRequestId` 查找 `managed_action_dry_run` 审计记录。
+- 已校验 live 请求引用的 dry-run 动作一致、目标实例一致、确认短语已通过、未超过默认 24 小时有效期。
+- 已让 `/api/managed-actions/live` 返回 `dryRunReference` 摘要，包含 `valid`、`status`、`operationRequestId`、`ageMs`、`maxAgeMs` 和匹配记录摘要。
+- 已让 live 阻断审计记录包含 `dryRunReference` 摘要。
+- 已验证有效引用时 `dryRunReference.status=valid`。
+- 已验证缺失引用时 `dryRunReference.status=missing`。
+- 已验证动作不一致时 `dryRunReference.status=action_mismatch`。
+- 已验证目标实例不一致时 `dryRunReference.status=target_mismatch`。
+- 已验证 `npm test -- test/managed-actions-dry-run.test.ts test/managed-action-live-audit.test.ts test/managed-action-executor.test.ts test/phase9-routes-commands.test.ts test/readonly-multi-instance-safety.test.ts test/multi-instance-readonly.test.ts test/ui-render-smoke.test.ts`。
+- 已验证 `npm run build`。
 
 ## 阶段完成后的下一步
 
-部署 Tom 验证审计结果类型不会改变运行行为；通过后，下一步设计真实执行前置 dry-run 申请有效性校验，仍不启用真实执行。
+部署 Tom 验证 dry-run 引用校验不会改变运行行为；通过后，下一步设计单动作真实执行灰度配置文件，但仍不启用真实执行。

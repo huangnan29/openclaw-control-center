@@ -7,6 +7,7 @@ export interface ManagedActionAuditFilters {
   instanceId?: string;
   operator?: string;
   action?: ManagedActionName;
+  operationRequestId?: string;
 }
 
 export interface ManagedActionAuditRecord {
@@ -32,6 +33,26 @@ export interface ManagedActionAuditSnapshot {
   count: number;
   records: ManagedActionAuditRecord[];
 }
+
+export type ManagedActionDryRunReferenceStatus =
+  | "valid"
+  | "missing"
+  | "action_mismatch"
+  | "target_mismatch"
+  | "confirmation_missing"
+  | "expired";
+
+export interface ManagedActionDryRunReferenceValidation {
+  valid: boolean;
+  status: ManagedActionDryRunReferenceStatus;
+  operationRequestId: string;
+  message: string;
+  ageMs?: number;
+  maxAgeMs: number;
+  record?: ManagedActionAuditRecord;
+}
+
+export const MANAGED_ACTION_DRY_RUN_REFERENCE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 export async function readManagedActionDryRunAudits(
   filters: ManagedActionAuditFilters = {},
@@ -96,10 +117,98 @@ function toManagedActionAuditRecord(entry: OperationAuditEntry): ManagedActionAu
 }
 
 function matchesFilter(record: ManagedActionAuditRecord, filters: ManagedActionAuditFilters): boolean {
+  if (filters.operationRequestId && record.operationRequestId !== filters.operationRequestId) return false;
   if (filters.instanceId && record.targetInstanceId !== filters.instanceId) return false;
   if (filters.operator && record.operator !== filters.operator) return false;
   if (filters.action && record.action !== filters.action) return false;
   return true;
+}
+
+export async function validateManagedActionDryRunReference(input: {
+  operationRequestId: string;
+  instanceId: string;
+  action: ManagedActionName;
+  nowMs?: number;
+  maxAgeMs?: number;
+}): Promise<ManagedActionDryRunReferenceValidation> {
+  const maxAgeMs = input.maxAgeMs ?? MANAGED_ACTION_DRY_RUN_REFERENCE_MAX_AGE_MS;
+  const audit = await readManagedActionDryRunAudits({
+    limit: 1,
+    operationRequestId: input.operationRequestId,
+  });
+  const record = audit.records[0];
+  if (!record) {
+    return invalidReference("missing", input.operationRequestId, "Referenced dry-run request was not found.", maxAgeMs);
+  }
+  if (record.action !== input.action) {
+    return invalidReference(
+      "action_mismatch",
+      input.operationRequestId,
+      "Referenced dry-run action does not match the live request.",
+      maxAgeMs,
+      record,
+    );
+  }
+  if (record.targetInstanceId !== input.instanceId) {
+    return invalidReference(
+      "target_mismatch",
+      input.operationRequestId,
+      "Referenced dry-run target instance does not match the live request.",
+      maxAgeMs,
+      record,
+    );
+  }
+  if (record.confirmationTextMatched !== true) {
+    return invalidReference(
+      "confirmation_missing",
+      input.operationRequestId,
+      "Referenced dry-run request did not pass confirmation.",
+      maxAgeMs,
+      record,
+    );
+  }
+
+  const nowMs = input.nowMs ?? Date.now();
+  const ageMs = Math.max(0, nowMs - Date.parse(record.timestamp));
+  if (!Number.isFinite(ageMs) || ageMs > maxAgeMs) {
+    return invalidReference(
+      "expired",
+      input.operationRequestId,
+      "Referenced dry-run request is expired.",
+      maxAgeMs,
+      record,
+      Number.isFinite(ageMs) ? ageMs : undefined,
+    );
+  }
+
+  return {
+    valid: true,
+    status: "valid",
+    operationRequestId: input.operationRequestId,
+    message: "Referenced dry-run request is valid.",
+    ageMs,
+    maxAgeMs,
+    record,
+  };
+}
+
+function invalidReference(
+  status: Exclude<ManagedActionDryRunReferenceStatus, "valid">,
+  operationRequestId: string,
+  message: string,
+  maxAgeMs: number,
+  record?: ManagedActionAuditRecord,
+  ageMs?: number,
+): ManagedActionDryRunReferenceValidation {
+  return {
+    valid: false,
+    status,
+    operationRequestId,
+    message,
+    maxAgeMs,
+    ...(ageMs !== undefined ? { ageMs } : {}),
+    ...(record ? { record } : {}),
+  };
 }
 
 function parseManagedActionFromDetail(detail: string): ManagedActionName | undefined {

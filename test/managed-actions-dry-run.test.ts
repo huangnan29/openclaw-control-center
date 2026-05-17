@@ -123,11 +123,76 @@ test("managed action dry-run previews whitelisted actions without executing in r
       status: string;
       liveExecution: boolean;
       gate: { enabled: boolean };
+      dryRunReference: { valid: boolean; status: string; operationRequestId: string };
     };
     assert.equal(liveBody.ok, false);
     assert.equal(liveBody.status, "blocked_disabled");
     assert.equal(liveBody.liveExecution, false);
     assert.equal(liveBody.gate.enabled, false);
+    assert.equal(liveBody.dryRunReference.valid, true);
+    assert.equal(liveBody.dryRunReference.status, "valid");
+    assert.equal(liveBody.dryRunReference.operationRequestId, body.review.operationRequestId);
+
+    const invalidReferenceLiveResponse = await fetch(`${baseUrl}/api/managed-actions/live`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        instanceId: "tom",
+        action: "healthcheck",
+        operator: "Anan",
+        reason: "确认真实执行引用无效申请时会标记",
+        operationRequestId: "missing-dry-run-request",
+        confirmedText: "LIVE-ACTION-APPROVED",
+      }),
+    });
+    assert.equal(invalidReferenceLiveResponse.status, 403);
+    const invalidReferenceLiveBody = await invalidReferenceLiveResponse.json() as {
+      status: string;
+      liveExecution: boolean;
+      dryRunReference: { valid: boolean; status: string };
+    };
+    assert.equal(invalidReferenceLiveBody.status, "blocked_disabled");
+    assert.equal(invalidReferenceLiveBody.liveExecution, false);
+    assert.equal(invalidReferenceLiveBody.dryRunReference.valid, false);
+    assert.equal(invalidReferenceLiveBody.dryRunReference.status, "missing");
+
+    const actionMismatchLiveResponse = await fetch(`${baseUrl}/api/managed-actions/live`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        instanceId: "tom",
+        action: "collector_refresh",
+        operator: "Anan",
+        reason: "确认真实执行引用动作必须一致",
+        operationRequestId: body.review.operationRequestId,
+        confirmedText: "LIVE-ACTION-APPROVED",
+      }),
+    });
+    assert.equal(actionMismatchLiveResponse.status, 403);
+    const actionMismatchLiveBody = await actionMismatchLiveResponse.json() as {
+      dryRunReference: { valid: boolean; status: string };
+    };
+    assert.equal(actionMismatchLiveBody.dryRunReference.valid, false);
+    assert.equal(actionMismatchLiveBody.dryRunReference.status, "action_mismatch");
+
+    const targetMismatchLiveResponse = await fetch(`${baseUrl}/api/managed-actions/live`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        instanceId: "main",
+        action: "healthcheck",
+        operator: "Anan",
+        reason: "确认真实执行引用目标必须一致",
+        operationRequestId: body.review.operationRequestId,
+        confirmedText: "LIVE-ACTION-APPROVED",
+      }),
+    });
+    assert.equal(targetMismatchLiveResponse.status, 403);
+    const targetMismatchLiveBody = await targetMismatchLiveResponse.json() as {
+      dryRunReference: { valid: boolean; status: string };
+    };
+    assert.equal(targetMismatchLiveBody.dryRunReference.valid, false);
+    assert.equal(targetMismatchLiveBody.dryRunReference.status, "target_mismatch");
 
     const blockedResponse = await fetch(`${baseUrl}/api/managed-actions/dry-run`, {
       method: "POST",

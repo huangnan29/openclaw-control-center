@@ -38,7 +38,12 @@ import { buildHealthzPayload } from "../runtime/healthz";
 import { loadOpenClawInstanceConfigs } from "../runtime/instance-config";
 import { applyImportMutation, readImportMutationGuardState } from "../runtime/import-live";
 import { validateExportBundleDryRun, validateExportFileDryRun } from "../runtime/import-dry-run";
-import { readManagedActionDryRunAudits, type ManagedActionAuditRecord } from "../runtime/managed-action-audit";
+import {
+  readManagedActionDryRunAudits,
+  validateManagedActionDryRunReference,
+  type ManagedActionAuditRecord,
+  type ManagedActionDryRunReferenceValidation,
+} from "../runtime/managed-action-audit";
 import {
   evaluateManagedActionLiveGate,
   runtimeManagedActionLiveGate,
@@ -1442,11 +1447,17 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
         const reason = requiredBoundedString(payload.reason, "reason", 240);
         const operationRequestId = requiredBoundedString(payload.operationRequestId, "operationRequestId", 120);
         const confirmedText = requiredBoundedString(payload.confirmedText, "confirmedText", 80);
+        const dryRunReference = await validateManagedActionDryRunReference({
+          operationRequestId,
+          instanceId,
+          action,
+        });
         const gate = runtimeManagedActionLiveGate();
         const decision = evaluateManagedActionLiveGate({
           gate,
           action,
           operationRequestId,
+          dryRunReferenceValid: dryRunReference.valid,
           confirmedText,
         });
 
@@ -1468,6 +1479,7 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
             operationRequestId,
             operator,
             reason,
+            dryRunReference: managedActionDryRunReferenceSummary(dryRunReference),
             liveExecution: false,
             gate: {
               enabled: gate.enabled,
@@ -1482,6 +1494,7 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
           status: decision.status,
           message: decision.message,
           liveExecution: false,
+          dryRunReference: managedActionDryRunReferenceSummary(dryRunReference),
           gate: {
             enabled: gate.enabled,
             readonlyMode: gate.readonlyMode,
@@ -21121,6 +21134,28 @@ function readonlyMutationError(routeLabel: string, language: UiLanguage): string
     "控制中心正以只读多实例模式运行，修改类接口已禁用。",
   );
   return `${message} ${routeLabel}`;
+}
+
+function managedActionDryRunReferenceSummary(input: ManagedActionDryRunReferenceValidation): Record<string, unknown> {
+  return {
+    valid: input.valid,
+    status: input.status,
+    operationRequestId: input.operationRequestId,
+    message: input.message,
+    maxAgeMs: input.maxAgeMs,
+    ...(input.ageMs !== undefined ? { ageMs: input.ageMs } : {}),
+    ...(input.record
+      ? {
+          matched: {
+            timestamp: input.record.timestamp,
+            action: input.record.action,
+            targetInstanceId: input.record.targetInstanceId,
+            operator: input.record.operator,
+            confirmationTextMatched: input.record.confirmationTextMatched,
+          },
+        }
+      : {}),
+  };
 }
 
 function readHeaderValue(req: IncomingMessage, name: string): string | undefined {

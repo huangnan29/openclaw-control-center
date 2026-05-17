@@ -20,7 +20,14 @@ export interface ManagedActionLiveGate {
 export interface ManagedActionLiveGateDecision {
   ok: boolean;
   statusCode: number;
-  status: "blocked_disabled" | "blocked_readonly" | "blocked_not_whitelisted" | "blocked_confirmation" | "blocked_missing_dry_run" | "ready_not_implemented";
+  status:
+    | "blocked_disabled"
+    | "blocked_readonly"
+    | "blocked_not_whitelisted"
+    | "blocked_confirmation"
+    | "blocked_missing_dry_run"
+    | "blocked_invalid_dry_run"
+    | "ready_not_implemented";
   message: string;
   liveExecution: false;
 }
@@ -38,6 +45,7 @@ export function evaluateManagedActionLiveGate(input: {
   gate: ManagedActionLiveGate;
   action: ManagedActionName;
   operationRequestId?: string;
+  dryRunReferenceValid?: boolean;
   confirmedText?: string;
 }): ManagedActionLiveGateDecision {
   if (!input.gate.enabled) {
@@ -51,6 +59,9 @@ export function evaluateManagedActionLiveGate(input: {
   }
   if (!input.operationRequestId) {
     return blocked("blocked_missing_dry_run", "A prior dry-run operationRequestId is required before live execution.", 400);
+  }
+  if (input.dryRunReferenceValid !== true) {
+    return blocked("blocked_invalid_dry_run", "The referenced dry-run request is not valid for live execution.", 400);
   }
   if (input.confirmedText !== input.gate.requiredConfirmationText) {
     return blocked(
