@@ -2,22 +2,22 @@
 
 ## 当前目标
 
-推进 OpenClaw 控制中心长期方案，但保持节奏不跑偏。当前推进到第五阶段：**中央 collector 架构（只读）**。
+最终上线 OpenClaw 控制中心：先完成不影响现有 OpenClaw 实例的跨服务器只读监控上线，再以 dry-run、人工确认、审计日志和白名单方式逐步上线受控管理动作。每个步骤验证通过后直接进入下一步。
 
 ## 本轮任务
 
-Tom collector 定时化已完成并部署到 Tom：Tom 当前会通过 cron 定时生成 collector 快照，`healthcheck.sh` 会检查快照新鲜度，避免中央 UI 长期读取过期快照。
+UI collector 可见性增强：在总览和详情页展示 collector 快照生成时间、来源路径、新鲜度和最大允许年龄，方便从页面上判断数据是否仍然可信。
 
 ## 本轮不做
 
 - 不做任何写操作或管理动作。
-- 不做 HTTP collector 服务。
+- 不修改任何 OpenClaw 实例目录。
 - 不接入 Tom 之外的其他 Oracle 服务器。
 - 不让中央控制中心直接挂载远端实例目录。
 
 ## 当前下一步
 
-将 collector 快照时间、来源和过期状态更明确地显示到 UI 中，方便从页面上判断数据是否仍然可信。
+接入第二台 Oracle 服务器的本地 collector：仍使用只读 exporter + collector 快照文件，先验证单台新增服务器不影响 Tom 和现有 OpenClaw 实例。
 
 ## 最近完成
 
@@ -59,7 +59,11 @@ Tom collector 定时化已完成并部署到 Tom：Tom 当前会通过 cron 定�
 - 已在 Tom 安装 cron：`*/2 * * * *`。
 - 已确认 cron 自动刷新快照：`generatedAt` 从 `2026-05-17T04:58:07.916Z` 更新到 `2026-05-17T05:00:01.779Z`。
 - 已验证 Tom 新版 `healthcheck.sh` 通过，collector 快照检查为 `server=tom-oracle`、`instances=5`。
+- 已让 `InstanceSnapshot` 携带 collector 元数据：`sourcePath`、`serverId`、`generatedAt`、`status`、`detail`。
+- 已在多实例总览和实例详情页新增 `Collector 快照` 面板，展示来源路径、生成时间、年龄/上限和新鲜度。
+- 已验证 `npm test -- test/multi-instance-readonly.test.ts test/ui-render-smoke.test.ts`。
+- 已验证 `npm run build`。
 
 ## 阶段完成后的下一步
 
-UI collector 可见性增强：在总览和详情页展示 collector 快照生成时间、最大允许年龄和来源状态。
+跨服务器 collector 接入：选择 Tom 之外的一台 Oracle，部署只读 collector exporter，中央 registry 增加该服务器的 `collectorSnapshotPath`，并通过页面与 `healthcheck.sh` 验证不影响现有实例。

@@ -6087,6 +6087,125 @@ function renderDataSourceNote(language: UiLanguage, source: string): string {
   return `<div class="source-note"><span>${escapeHtml(pickUiText(language, "Data source", "数据来源"))}</span>${escapeHtml(source)}</div>`;
 }
 
+interface CollectorSnapshotUiState {
+  tone: string;
+  label: string;
+  mode: string;
+  generatedAtLabel: string;
+  ageLabel: string;
+  sourcePath: string;
+  detail: string;
+}
+
+function collectorSnapshotMaxAgeSeconds(): number {
+  const value = Number(process.env.COLLECTOR_SNAPSHOT_MAX_AGE_SECONDS ?? "300");
+  return Number.isFinite(value) && value > 0 ? value : 300;
+}
+
+function buildCollectorSnapshotUiState(
+  item: InstanceSnapshot,
+  language: UiLanguage,
+  nowIso: string,
+): CollectorSnapshotUiState {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  if (!item.collector) {
+    return {
+      tone: "connected",
+      label: t("Direct readonly", "本地直读"),
+      mode: t("Mounted readonly instance path", "只读挂载实例目录"),
+      generatedAtLabel: "-",
+      ageLabel: "-",
+      sourcePath: item.instance.openclawHome,
+      detail: t("No collectorSnapshotPath configured; data comes from local readonly scans.", "未配置 collectorSnapshotPath；数据来自本地只读扫描。"),
+    };
+  }
+
+  if (item.collector.status !== "connected") {
+    return {
+      tone: "error",
+      label: t("Unavailable", "不可用"),
+      mode: t("Collector snapshot", "Collector 快照"),
+      generatedAtLabel: item.collector.generatedAt ? formatUiTimestamp(item.collector.generatedAt, language) : "-",
+      ageLabel: "-",
+      sourcePath: item.collector.sourcePath,
+      detail: item.collector.detail,
+    };
+  }
+
+  const generatedAtMs = Date.parse(item.collector.generatedAt ?? "");
+  const nowMs = Date.parse(nowIso);
+  if (!Number.isFinite(generatedAtMs) || !Number.isFinite(nowMs)) {
+    return {
+      tone: "partial",
+      label: t("Unknown freshness", "新鲜度未知"),
+      mode: t("Collector snapshot", "Collector 快照"),
+      generatedAtLabel: item.collector.generatedAt ? formatUiTimestamp(item.collector.generatedAt, language) : "-",
+      ageLabel: "-",
+      sourcePath: item.collector.sourcePath,
+      detail: item.collector.detail,
+    };
+  }
+
+  const ageSeconds = Math.max(0, Math.round((nowMs - generatedAtMs) / 1000));
+  const maxAgeSeconds = collectorSnapshotMaxAgeSeconds();
+  const isFresh = ageSeconds <= maxAgeSeconds;
+  return {
+    tone: isFresh ? "connected" : "partial",
+    label: isFresh ? t("Fresh snapshot", "快照新鲜") : t("Stale snapshot", "快照过期"),
+    mode: t("Collector snapshot", "Collector 快照"),
+    generatedAtLabel: formatUiTimestamp(item.collector.generatedAt ?? "", language),
+    ageLabel: `${formatDurationSeconds(ageSeconds, language)} / ${formatDurationSeconds(maxAgeSeconds, language)}`,
+    sourcePath: item.collector.sourcePath,
+    detail: item.collector.detail,
+  };
+}
+
+function formatDurationSeconds(seconds: number, language: UiLanguage): string {
+  if (!Number.isFinite(seconds)) return "-";
+  if (seconds < 60) return language === "zh" ? `${seconds} 秒` : `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  if (minutes < 60) {
+    if (remainingSeconds === 0) return language === "zh" ? `${minutes} 分钟` : `${minutes}m`;
+    return language === "zh" ? `${minutes} 分 ${remainingSeconds} 秒` : `${minutes}m ${remainingSeconds}s`;
+  }
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  if (remainingMinutes === 0) return language === "zh" ? `${hours} 小时` : `${hours}h`;
+  return language === "zh" ? `${hours} 小时 ${remainingMinutes} 分钟` : `${hours}h ${remainingMinutes}m`;
+}
+
+function renderCollectorSnapshotPanel(
+  items: InstanceSnapshot[],
+  language: UiLanguage,
+  generatedAt: string,
+  title?: string,
+): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const rows = items
+    .map((item) => {
+      const state = buildCollectorSnapshotUiState(item, language, generatedAt);
+      const displayPath = state.sourcePath ? `${basenameForUi(state.sourcePath)} · ${state.sourcePath}` : "-";
+      return `<tr>
+        <td>${escapeHtml(item.instance.name)}<div class="meta"><code>${escapeHtml(item.instance.id)}</code></div></td>
+        <td>${badge(state.tone, state.label)}<div class="meta">${escapeHtml(state.mode)}</div></td>
+        <td>${escapeHtml(state.generatedAtLabel)}</td>
+        <td>${escapeHtml(state.ageLabel)}</td>
+        <td><code>${escapeHtml(displayPath)}</code></td>
+        <td>${escapeHtml(state.detail)}</td>
+      </tr>`;
+    })
+    .join("");
+  return `<section class="panel">
+    <div class="panel-head">
+      <h2>${escapeHtml(title ?? t("Collector snapshots", "Collector 快照"))}</h2>
+      <div class="meta">${escapeHtml(t("Shows where each instance snapshot came from and whether collector data is fresh.", "展示每个实例快照来源，以及 collector 数据是否仍然新鲜。"))}</div>
+    </div>
+    ${renderDataSourceNote(language, t("Collector JSON snapshot metadata; readonly source time and freshness check.", "collector JSON 快照元数据；只读来源时间与过期判断"))}
+    ${rows ? `<div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Instance", "实例"))}</th><th>${escapeHtml(t("Freshness", "新鲜度"))}</th><th>${escapeHtml(t("Generated", "生成时间"))}</th><th>${escapeHtml(t("Age / Max", "年龄 / 上限"))}</th><th>${escapeHtml(t("Source path", "来源路径"))}</th><th>${escapeHtml(t("Detail", "详情"))}</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-state">${escapeHtml(t("No instances configured.", "尚未配置实例。"))}</div>`}
+  </section>`;
+}
+
 function renderMiniSessions(item: InstanceSnapshot, language: UiLanguage, limit = 3): string {
   const t = (en: string, zh: string): string => pickUiText(language, en, zh);
   const sessions = [...item.snapshot.sessions]
@@ -6751,6 +6870,7 @@ function renderMultiInstanceOverview(
     ${warningHtml}
     <section class="status-strip">${totalChips}</section>
     ${renderServerHealthPanel(snapshot, language, selectedServerId)}
+    ${renderCollectorSnapshotPanel(snapshot.instances, language, snapshot.generatedAt)}
     <section class="overview-layout">
       <div>
         ${renderMultiInstanceHealthPanel(snapshot.instances, language)}
@@ -6973,6 +7093,7 @@ function renderMultiInstanceDetail(
     </section>
     ${notFound}
     <section class="status-strip">${metrics}</section>
+    ${selected ? renderCollectorSnapshotPanel([selected], language, snapshot.generatedAt) : ""}
     ${selected ? renderMultiInstanceHealthPanel([selected], language) : ""}
     ${selected ? renderMultiInstanceUsagePanel([selected], language) : ""}
     ${selected ? renderMultiInstanceAgentRosterPanel([selected], language) : ""}

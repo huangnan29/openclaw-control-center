@@ -5,6 +5,7 @@ import {
 } from "../runtime/collector-snapshot";
 import { summarizeMultiInstanceSnapshot } from "../runtime/multi-instance-summary";
 import type {
+  CollectorSnapshotSource,
   InstanceSnapshot,
   MultiInstanceSnapshot,
   OpenClawInstanceConfig,
@@ -68,11 +69,13 @@ export class MultiInstanceReadonlyAdapter {
   ): Promise<InstanceSnapshot> {
     const path = instance.collectorSnapshotPath as string;
     const collector = await readCachedCollectorSnapshot(path, collectorCache, this.loadCollectorSnapshot);
+    const collectorSource = toCollectorSnapshotSource(collector);
     if (collector.status !== "connected") {
       return {
         instance,
         status: "not_connected",
         detail: collector.detail,
+        collector: collectorSource,
         snapshot: emptySnapshot(),
       };
     }
@@ -83,6 +86,7 @@ export class MultiInstanceReadonlyAdapter {
         instance,
         status: "not_connected",
         detail: `collector snapshot missing instance: ${instance.id}`,
+        collector: collectorSource,
         snapshot: emptySnapshot(),
       };
     }
@@ -91,9 +95,20 @@ export class MultiInstanceReadonlyAdapter {
       instance,
       status: entry.status,
       detail: entry.detail,
+      collector: collectorSource,
       snapshot: entry.snapshot,
     };
   }
+}
+
+function toCollectorSnapshotSource(collector: CollectorSnapshotLoadResult): CollectorSnapshotSource {
+  return {
+    status: collector.status,
+    sourcePath: collector.sourcePath,
+    ...(collector.serverId ? { serverId: collector.serverId } : {}),
+    ...(collector.generatedAt ? { generatedAt: collector.generatedAt } : {}),
+    detail: collector.detail,
+  };
 }
 
 function readCachedCollectorSnapshot(

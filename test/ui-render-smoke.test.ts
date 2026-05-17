@@ -135,6 +135,17 @@ function routeSmokeMultiSnapshot(
       status,
       detail: `${instance.name} route detail`,
       snapshot,
+      ...(instance.collectorSnapshotPath
+        ? {
+            collector: {
+              status: "connected" as const,
+              sourcePath: instance.collectorSnapshotPath,
+              serverId: instance.serverId,
+              generatedAt: "2026-03-03T09:01:30.000Z",
+              detail: "loaded route collector snapshot",
+            },
+          }
+        : {}),
     };
   });
   return {
@@ -226,10 +237,18 @@ test("multi-instance overview renders status metrics detail links and selected s
           serverName: "Tom Oracle",
           serverHost: "146.235.226.66",
           serverRegion: "oracle-us",
+          collectorSnapshotPath: "/app/runtime/collectors/tom-oracle/snapshot.json",
         }),
         status: "connected",
         detail: "ok",
         snapshot: tomSnapshot,
+        collector: {
+          status: "connected",
+          sourcePath: "/app/runtime/collectors/tom-oracle/snapshot.json",
+          serverId: "tom-oracle",
+          generatedAt: "2026-03-03T09:00:30.000Z",
+          detail: "loaded 1 collector snapshot instance.",
+        },
       },
       {
         instance: smokeInstance("jerry", "Jerry Workspace", {
@@ -268,6 +287,9 @@ test("multi-instance overview renders status metrics detail links and selected s
   assert(html.includes("错误数"));
   assert(html.includes("实例矩阵"));
   assert(html.includes("服务器健康"));
+  assert(html.includes("Collector 快照"));
+  assert(html.includes("快照新鲜"));
+  assert(html.includes("snapshot.json"));
   assert(html.includes("Tom Oracle"));
   assert(html.includes("Jerry Oracle"));
   assert(html.includes('href="/?server=tom-oracle&amp;section=overview&amp;lang=zh"'));
@@ -312,6 +334,7 @@ test("multi-instance routes render overview detail and invalid-instance fallback
         name: "Tom Oracle",
         host: "146.235.226.66",
         region: "oracle-us",
+        collectorSnapshotPath: "/app/runtime/collectors/tom-oracle/snapshot.json",
         instances: [smokeInstance("tom", "Tom Workspace")],
       },
       {
@@ -365,6 +388,9 @@ test("multi-instance routes render overview detail and invalid-instance fallback
     assert(detailHtml.includes("tom-route-session"));
     assert(detailHtml.includes("运行态分布"));
     assert(detailHtml.includes("实例健康"));
+    assert(detailHtml.includes("Collector 快照"));
+    assert(detailHtml.includes("快照新鲜"));
+    assert(detailHtml.includes("snapshot.json"));
     assert(detailHtml.includes("Agent 名录"));
     assert(detailHtml.includes("用量"));
     assert(detailHtml.includes("最近日志"));

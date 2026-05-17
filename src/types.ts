@@ -36,10 +36,19 @@ export interface OpenClawInstanceConfigLoadResult {
   issues: OpenClawInstanceConfigIssue[];
 }
 
+export interface CollectorSnapshotSource {
+  status: "connected" | "not_connected";
+  sourcePath: string;
+  serverId?: string;
+  generatedAt?: string;
+  detail: string;
+}
+
 export interface InstanceSnapshot {
   instance: OpenClawInstanceConfig;
   status: InstanceConnectionStatus;
   detail: string;
+  collector?: CollectorSnapshotSource;
   snapshot: ReadModelSnapshot;
 }
 

@@ -206,6 +206,10 @@ test("MultiInstanceReadonlyAdapter 优先使用 collector 快照文件", async (
     assert.equal(snapshot.instances[0]?.status, "connected");
     assert.equal(snapshot.instances[0]?.detail, "collector supplied");
     assert.equal(snapshot.instances[0]?.snapshot.sessions[0]?.sessionKey, "collector-session");
+    assert.equal(snapshot.instances[0]?.collector?.status, "connected");
+    assert.equal(snapshot.instances[0]?.collector?.sourcePath, snapshotPath);
+    assert.equal(snapshot.instances[0]?.collector?.serverId, "remote-oracle");
+    assert.equal(snapshot.instances[0]?.collector?.generatedAt, "2026-05-17T04:05:00.000Z");
     assert.equal(snapshot.totals.running, 1);
   } finally {
     await rm(root, { recursive: true, force: true });
