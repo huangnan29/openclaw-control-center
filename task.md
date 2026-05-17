@@ -685,7 +685,19 @@ Tom 单 Oracle 上线下一步：
 - 已验证 Tom `bash -n repo/ops/tom-readonly/live-healthcheck-report.sh` 通过。
 - 已验证 Tom `live-healthcheck-window.sh status` 仍显示未检测到临时 override，`READONLY_MODE=true`，live gate 与 executor 未启用，readiness 仍为 `blocked`。
 - 本轮未执行 `enable` 或 `run`，未调用 `/api/managed-actions/live`。
+- 已根据当前只有一台 Oracle 的生产约束，将当前上线口径收束为 `OPENCLAW_TOPOLOGY_MODE=local-only`：先管理 Tom 当前 Oracle 上的多套 OpenClaw 实例，未来扩展第二台 Oracle 时再显式打开 `cross-server` 链路。
+- 已让 `ops/local/final-go-live-runner.sh prepare` 在已经处于人工批准边界时幂等返回 `prepared_waiting_human_approval`，并声明 `writesTomRuntime=false`、`opensLiveGate=false`、`callsManagedActionsLiveApi=false`。
+- 已让 `ops/local/final-go-live-runner.sh prepare` 在已经处于批准后待执行边界时幂等返回 `prepared_approved_ready_for_live_window`，不再次准备 Tom runtime。
+- 已更新 `ops/tom-readonly/README.md`，说明 OpenClaw 可重复调用本机侧 `prepare`，重复执行不会批准 approval、不会打开 live gate、不会调用 live API。
+- 已更新 `implementation_plan.md`，把 final runner 重复 `prepare` 幂等语义写入当前阶段。
+- 已新增 `test/final-go-live-runner.test.ts` 覆盖重复 `prepare` 场景，验证第二次调用不会再次 SSH 执行 Tom `prepare`。
+- 已验证 `bash -n ops/local/final-go-live-runner.sh`。
+- 已验证 `npm test -- test/final-go-live-runner.test.ts`。
+- 已验证 `npm test -- test/final-go-live-runner.test.ts test/final-go-live-status.test.ts test/live-healthcheck-rollout-runner.test.ts test/go-live-gate.test.ts test/oss-readiness.test.ts`。
+- 已验证 `npm run build`。
+- 已验证 `git diff --check`。
+- 本轮仍未执行 approval `approve`、未打开 live gate、未调用 `/api/managed-actions/live`、未修改或重启任何 OpenClaw 实例。
 
 ## 阶段完成后的下一步
 
-人工填写并校验 `/srv/openclaw-control-center-readonly/runtime/live-healthcheck-approval.json` 后，执行一次只读 healthcheck live 演练；演练前后都必须确认现有 OpenClaw 实例未被重启、未被写入、未被触发任务。若演练通过，再进入单动作灰度策略收口；若失败，保持只读并先修复失败点。
+先提交并部署这次 final runner 幂等更新到 Tom，然后执行本机侧 `final-go-live-runner.sh prepare` 复核真实 Tom 状态是否仍停在人工批准前。人工填写并校验 `/srv/openclaw-control-center-readonly/runtime/live-healthcheck-approval.json` 后，才能执行一次只读 healthcheck live 演练；演练前后都必须确认现有 OpenClaw 实例未被重启、未被写入、未被触发任务。若演练通过，再进入单动作灰度策略收口；若失败，保持只读并先修复失败点。

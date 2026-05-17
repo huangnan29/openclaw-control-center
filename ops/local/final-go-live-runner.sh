@@ -288,6 +288,50 @@ function prepare() {
     };
   }
 
+  if (hasCommand(before.report, "live-healthcheck-approval.sh approve")) {
+    return {
+      schemaVersion: 1,
+      status: "prepared_waiting_human_approval",
+      mode,
+      topologyMode,
+      generatedAt: new Date().toISOString(),
+      stages: { before },
+      issues: [],
+      nextCommands: Array.isArray(before.report?.nextCommands) ? before.report.nextCommands : [],
+      safety: baseSafety({
+        connectsTomSsh: true,
+        writesTomRuntime: false,
+        writesControlCenterRuntimeOnly: false,
+        opensLiveGate: false,
+        callsManagedActionsLiveApi: false,
+        alreadyAtHumanApprovalBoundary: true,
+        checkRunsHealthcheckOnly: true,
+      }),
+    };
+  }
+
+  if (hasCommand(before.report, "final-go-live-runner.sh run-approved") || hasCommand(before.report, "live-healthcheck-rollout-runner.sh run-approved")) {
+    return {
+      schemaVersion: 1,
+      status: "prepared_approved_ready_for_live_window",
+      mode,
+      topologyMode,
+      generatedAt: new Date().toISOString(),
+      stages: { before },
+      issues: [],
+      nextCommands: Array.isArray(before.report?.nextCommands) ? before.report.nextCommands : [],
+      safety: baseSafety({
+        connectsTomSsh: true,
+        writesTomRuntime: false,
+        writesControlCenterRuntimeOnly: false,
+        opensLiveGate: false,
+        callsManagedActionsLiveApi: false,
+        alreadyApprovedReadyForLiveWindow: true,
+        checkRunsHealthcheckOnly: true,
+      }),
+    };
+  }
+
   if (!hasCommand(before.report, "live-healthcheck-rollout-runner.sh prepare")) {
     return {
       schemaVersion: 1,

@@ -218,6 +218,29 @@ test("final go-live runner prepare 自动推进到人工批准前", async () => 
   }
 });
 
+test("final go-live runner prepare 已在人工批准边界时幂等返回", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-final-go-live-runner-prepare-idempotent-"));
+  try {
+    const harness = await writeHarness(dir);
+    const first = runRunner(harness, "prepare");
+    const second = runRunner(harness, "prepare");
+    const sshLog = await readFile(harness.sshCalls, "utf8");
+    const prepareCalls = sshLog.match(/live-healthcheck-rollout-runner\.sh prepare/g) ?? [];
+
+    assert.equal(first.exitCode, 0);
+    assert.equal(second.exitCode, 0);
+    assert.equal(second.report.status, "prepared_waiting_human_approval");
+    assert.equal(second.report.safety.writesTomRuntime, false);
+    assert.equal(second.report.safety.opensLiveGate, false);
+    assert.equal(second.report.safety.callsManagedActionsLiveApi, false);
+    assert.equal(second.report.safety.alreadyAtHumanApprovalBoundary, true);
+    assert(second.report.nextCommands.some((command: string) => command.includes("live-healthcheck-approval.sh approve")));
+    assert.equal(prepareCalls.length, 1);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("final go-live runner prepare 没有 prepare 下一步时阻塞", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openclaw-final-go-live-runner-blocked-"));
   try {
