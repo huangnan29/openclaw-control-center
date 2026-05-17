@@ -25,5 +25,22 @@
     "understandsAutoRollback": false,
     "understandsImpactSnapshot": false
   },
+  "approvalPacket": {
+    "status": "",
+    "packetFile": "",
+    "generatedAt": "",
+    "checkedAt": "",
+    "topologyMode": "",
+    "target": {
+      "instanceId": "",
+      "action": "",
+      "operator": ""
+    },
+    "commit": {
+      "packet": "",
+      "current": ""
+    },
+    "maxAgeSeconds": null
+  },
   "notes": "人工确认后，将 approved 改为 true，填写 approvedAt 与 approvedBy，并将 checklist 全部改为 true。"
 }

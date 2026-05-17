@@ -68,6 +68,23 @@ const approval = {
     understandsAutoRollback: false,
     understandsImpactSnapshot: false
   },
+  approvalPacket: {
+    status: "",
+    packetFile: "",
+    generatedAt: "",
+    checkedAt: "",
+    topologyMode: "",
+    target: {
+      instanceId: "",
+      action: "",
+      operator: ""
+    },
+    commit: {
+      packet: "",
+      current: ""
+    },
+    maxAgeSeconds: null
+  },
   notes: "人工确认后，将 approved 改为 true，填写 approvedAt 与 approvedBy，并将 checklist 全部改为 true。"
 };
 
@@ -87,7 +104,7 @@ prepare_template() {
   show_status "$output"
 }
 
-check_approval_packet() {
+run_approval_packet_check() {
   [ -x "$APPROVAL_PACKET_SCRIPT" ] || fail "批准前证据包校验脚本不可执行：${APPROVAL_PACKET_SCRIPT}"
 
   local packet_output
@@ -104,6 +121,26 @@ check_approval_packet() {
     fi
   fi
   printf '%s\n' "$packet_output" >&2
+  printf '%s\n' "$packet_output"
+}
+
+check_approval_packet() {
+  run_approval_packet_check >/dev/null
+}
+
+read_packet_status_for_report() {
+  if [ ! -x "$APPROVAL_PACKET_SCRIPT" ]; then
+    printf '{"schemaVersion":1,"status":"missing_packet_script","issues":["approval packet script is not executable"]}\n'
+    return 0
+  fi
+
+  local packet_output
+  if [ -n "$APPROVAL_PACKET_FILE" ]; then
+    packet_output="$(INSTANCE_ID="$INSTANCE_ID" ACTION="healthcheck" OPERATOR="$OPERATOR" "$APPROVAL_PACKET_SCRIPT" check "$APPROVAL_PACKET_FILE" 2>&1)" || true
+  else
+    packet_output="$(INSTANCE_ID="$INSTANCE_ID" ACTION="healthcheck" OPERATOR="$OPERATOR" "$APPROVAL_PACKET_SCRIPT" check 2>&1)" || true
+  fi
+  printf '%s\n' "$packet_output"
 }
 
 approve_record() {
@@ -111,13 +148,16 @@ approve_record() {
   [ "$CONFIRM_APPROVAL_RECORD" = "I_APPROVE_LIVE_HEALTHCHECK_RECORD" ] || \
     fail "必须设置 CONFIRM_APPROVAL_RECORD=I_APPROVE_LIVE_HEALTHCHECK_RECORD"
   [ -n "$APPROVED_BY" ] || fail "必须设置 APPROVED_BY=<批准人>"
-  check_approval_packet
+  # check_approval_packet 的实际校验由 run_approval_packet_check 执行，并返回绑定 JSON。
+  local packet_report
+  packet_report="$(run_approval_packet_check)"
 
   mkdir -p "$(dirname "$output")"
   APPROVAL_FILE="$output" \
     INSTANCE_ID="$INSTANCE_ID" \
     OPERATOR="$OPERATOR" \
     APPROVED_BY="$APPROVED_BY" \
+    APPROVAL_PACKET_CHECK_JSON="$packet_report" \
     node <<'NODE'
 const fs = require("node:fs");
 const crypto = require("node:crypto");
@@ -126,6 +166,21 @@ const file = process.env.APPROVAL_FILE;
 const expectedInstanceId = process.env.INSTANCE_ID || "tom";
 const expectedOperator = process.env.OPERATOR || "Anan";
 const approvedBy = String(process.env.APPROVED_BY || "").trim();
+const packetReport = parsePacketReport(process.env.APPROVAL_PACKET_CHECK_JSON || "");
+
+function parsePacketReport(raw) {
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed.status !== "ready") {
+      console.error(`[失败] 批准前证据包状态不是 ready：${parsed.status || "unknown"}`);
+      process.exit(2);
+    }
+    return parsed;
+  } catch (error) {
+    console.error(`[失败] 批准前证据包校验输出无法解析：${error instanceof Error ? error.message : String(error)}`);
+    process.exit(2);
+  }
+}
 
 let approval = {};
 if (fs.existsSync(file)) {
@@ -164,6 +219,23 @@ const next = {
     understandsLocalTokenRequired: true,
     understandsAutoRollback: true,
     understandsImpactSnapshot: true,
+  },
+  approvalPacket: {
+    status: packetReport.status || "",
+    packetFile: packetReport.packetFile || "",
+    generatedAt: packetReport.generatedAt || "",
+    checkedAt: packetReport.checkedAt || "",
+    topologyMode: packetReport.topologyMode || "",
+    target: {
+      instanceId: packetReport.target?.instanceId || "",
+      action: packetReport.target?.action || "",
+      operator: packetReport.target?.operator || "",
+    },
+    commit: {
+      packet: packetReport.commit?.packet || "",
+      current: packetReport.commit?.current || "",
+    },
+    maxAgeSeconds: Number.isFinite(Number(packetReport.maxAgeSeconds)) ? Number(packetReport.maxAgeSeconds) : null,
   },
   notes: "已通过 live-healthcheck-approval.sh approve 记录人工批准；该动作只写批准文件，不会启用 live gate。",
 };
@@ -246,17 +318,24 @@ check_approval() {
   local input="${1:-$APPROVAL_FILE}"
   [ -f "$input" ] || fail "批准文件不存在：${input}。请先运行：$0 template ${input}"
 
+  local packet_status
+  packet_status="$(read_packet_status_for_report)"
   APPROVAL_FILE="$input" \
     INSTANCE_ID="$INSTANCE_ID" \
     OPERATOR="$OPERATOR" \
     APPROVAL_MAX_AGE_HOURS="$APPROVAL_MAX_AGE_HOURS" \
+    DEPLOY_DIR="$DEPLOY_DIR" \
+    APPROVAL_PACKET_STATUS_JSON="$packet_status" \
     node <<'NODE'
 const fs = require("node:fs");
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
 
 const file = process.env.APPROVAL_FILE;
 const expectedInstanceId = process.env.INSTANCE_ID || "tom";
 const expectedOperator = process.env.OPERATOR || "Anan";
 const maxAgeHours = Number(process.env.APPROVAL_MAX_AGE_HOURS || "24");
+const deployDir = process.env.DEPLOY_DIR || "/srv/openclaw-control-center-readonly";
 const failures = [];
 
 function fail(message) {
@@ -269,6 +348,64 @@ function readJson(path) {
   } catch (error) {
     fail(`批准文件无法解析：${error instanceof Error ? error.message : String(error)}`);
     return {};
+  }
+}
+
+function parseJsonText(raw, label) {
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    fail(`${label} 无法解析：${error instanceof Error ? error.message : String(error)}`);
+    return {};
+  }
+}
+
+function currentCommit() {
+  const result = spawnSync("git", ["-C", path.join(deployDir, "repo"), "rev-parse", "HEAD"], {
+    encoding: "utf8",
+  });
+  return result.status === 0 ? result.stdout.trim() : "";
+}
+
+function validateApprovalPacketBinding(approval) {
+  const binding = approval.approvalPacket;
+  const packetStatus = parseJsonText(process.env.APPROVAL_PACKET_STATUS_JSON || "{}", "当前批准前证据包状态");
+  if (!binding || typeof binding !== "object" || Array.isArray(binding)) {
+    fail("approvalPacket 必须记录本次批准绑定的证据包");
+    return;
+  }
+  if (binding.status !== "ready") fail("approvalPacket.status 必须为 ready");
+  if (typeof binding.packetFile !== "string" || binding.packetFile.trim() === "") {
+    fail("approvalPacket.packetFile 必须填写");
+  }
+  if (binding.target?.instanceId !== expectedInstanceId) fail(`approvalPacket.target.instanceId 必须为 ${expectedInstanceId}`);
+  if (binding.target?.action !== "healthcheck") fail("approvalPacket.target.action 必须为 healthcheck");
+  if (binding.target?.operator !== expectedOperator) fail(`approvalPacket.target.operator 必须为 ${expectedOperator}`);
+
+  const approvedPacketCommit = binding.commit?.packet || "";
+  const approvedCurrentCommit = binding.commit?.current || "";
+  const head = currentCommit();
+  if (!approvedPacketCommit || !approvedCurrentCommit) {
+    fail("approvalPacket.commit.packet/current 必须填写");
+  }
+  if (approvedPacketCommit && approvedCurrentCommit && approvedPacketCommit !== approvedCurrentCommit) {
+    fail("approvalPacket.commit.packet 必须等于 approvalPacket.commit.current");
+  }
+  if (head && approvedCurrentCommit && approvedCurrentCommit !== head) {
+    fail(`approvalPacket.commit.current 与当前部署提交不一致：approval=${approvedCurrentCommit.slice(0, 12)} current=${head.slice(0, 12)}`);
+  }
+
+  if (packetStatus.status !== "ready") {
+    fail(`当前批准前证据包未 ready：${packetStatus.status || "unknown"}`);
+  }
+  if (packetStatus.packetFile && binding.packetFile && packetStatus.packetFile !== binding.packetFile) {
+    fail("approvalPacket.packetFile 与当前通过校验的证据包不一致");
+  }
+  if (packetStatus.commit?.current && approvedCurrentCommit && packetStatus.commit.current !== approvedCurrentCommit) {
+    fail("approvalPacket.commit.current 与当前通过校验的证据包提交不一致");
+  }
+  if (packetStatus.target?.instanceId && packetStatus.target.instanceId !== expectedInstanceId) {
+    fail(`当前批准前证据包 instanceId 必须为 ${expectedInstanceId}`);
   }
 }
 
@@ -299,6 +436,8 @@ if (approval.liveConfirmationText !== "I_UNDERSTAND_THIS_CALLS_LIVE_API") {
 }
 if (approval.scope?.mutatesOpenClawInstance !== false) fail("scope.mutatesOpenClawInstance 必须为 false");
 if (approval.scope?.allowedAction !== "healthcheck") fail("scope.allowedAction 必须为 healthcheck");
+
+validateApprovalPacketBinding(approval);
 
 const checklist = approval.checklist || {};
 for (const key of [
@@ -331,17 +470,24 @@ NODE
 
 show_status() {
   local input="${1:-$APPROVAL_FILE}"
+  local packet_status
+  packet_status="$(read_packet_status_for_report)"
   APPROVAL_FILE="$input" \
     INSTANCE_ID="$INSTANCE_ID" \
     OPERATOR="$OPERATOR" \
     APPROVAL_MAX_AGE_HOURS="$APPROVAL_MAX_AGE_HOURS" \
+    DEPLOY_DIR="$DEPLOY_DIR" \
+    APPROVAL_PACKET_STATUS_JSON="$packet_status" \
     node <<'NODE'
 const fs = require("node:fs");
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
 
 const file = process.env.APPROVAL_FILE;
 const expectedInstanceId = process.env.INSTANCE_ID || "tom";
 const expectedOperator = process.env.OPERATOR || "Anan";
 const maxAgeHours = Number(process.env.APPROVAL_MAX_AGE_HOURS || "24");
+const deployDir = process.env.DEPLOY_DIR || "/srv/openclaw-control-center-readonly";
 
 function print(status, extra = {}) {
   console.log(JSON.stringify({ status, file, ...extra }, null, 2));
@@ -382,6 +528,8 @@ if (approval.action !== "healthcheck") issues.push("action is not healthcheck");
 if (approval.operator !== expectedOperator) issues.push(`operator is not ${expectedOperator}`);
 if (approval.risk !== "low") issues.push("risk is not low");
 if (approval.scope?.mutatesOpenClawInstance !== false) issues.push("scope.mutatesOpenClawInstance is not false");
+const packetStatus = parsePacketStatus();
+if (approval.approved === true && !consumed) validateApprovalPacketBinding(approval, packetStatus, issues);
 const checklist = approval.checklist || {};
 for (const key of [
   "understandsTemporaryLiveGate",
@@ -403,8 +551,65 @@ print(consumed ? "consumed" : issues.length === 0 ? "approved" : "needs_manual_a
   instanceId: approval.instanceId,
   action: approval.action,
   operator: approval.operator,
+  approvalPacket: approval.approvalPacket && typeof approval.approvalPacket === "object" ? {
+    packetFile: approval.approvalPacket.packetFile || "",
+    generatedAt: approval.approvalPacket.generatedAt || "",
+    checkedAt: approval.approvalPacket.checkedAt || "",
+    commit: approval.approvalPacket.commit || {},
+  } : undefined,
   issues,
 });
+
+function parsePacketStatus() {
+  try {
+    return JSON.parse(process.env.APPROVAL_PACKET_STATUS_JSON || "{}");
+  } catch {
+    return { status: "invalid_packet_status" };
+  }
+}
+
+function currentCommit() {
+  const result = spawnSync("git", ["-C", path.join(deployDir, "repo"), "rev-parse", "HEAD"], {
+    encoding: "utf8",
+  });
+  return result.status === 0 ? result.stdout.trim() : "";
+}
+
+function validateApprovalPacketBinding(approval, packetStatus, issues) {
+  const binding = approval.approvalPacket;
+  if (!binding || typeof binding !== "object" || Array.isArray(binding)) {
+    issues.push("approvalPacket is missing; re-approve against the current packet");
+    return;
+  }
+  if (binding.status !== "ready") issues.push("approvalPacket.status is not ready");
+  if (typeof binding.packetFile !== "string" || binding.packetFile.trim() === "") {
+    issues.push("approvalPacket.packetFile is empty");
+  }
+  if (binding.target?.instanceId !== expectedInstanceId) issues.push(`approvalPacket.target.instanceId is not ${expectedInstanceId}`);
+  if (binding.target?.action !== "healthcheck") issues.push("approvalPacket.target.action is not healthcheck");
+  if (binding.target?.operator !== expectedOperator) issues.push(`approvalPacket.target.operator is not ${expectedOperator}`);
+  const approvedPacketCommit = binding.commit?.packet || "";
+  const approvedCurrentCommit = binding.commit?.current || "";
+  const head = currentCommit();
+  if (!approvedPacketCommit || !approvedCurrentCommit) {
+    issues.push("approvalPacket.commit.packet/current is empty");
+  }
+  if (approvedPacketCommit && approvedCurrentCommit && approvedPacketCommit !== approvedCurrentCommit) {
+    issues.push("approvalPacket.commit.packet does not match approvalPacket.commit.current");
+  }
+  if (head && approvedCurrentCommit && approvedCurrentCommit !== head) {
+    issues.push(`approvalPacket commit is not current deploy commit: approval=${approvedCurrentCommit.slice(0, 12)} current=${head.slice(0, 12)}`);
+  }
+  if (packetStatus.status !== "ready") {
+    issues.push(`current approval packet is not ready: ${packetStatus.status || "unknown"}`);
+  }
+  if (packetStatus.packetFile && binding.packetFile && packetStatus.packetFile !== binding.packetFile) {
+    issues.push("approvalPacket.packetFile does not match current checked packet");
+  }
+  if (packetStatus.commit?.current && approvedCurrentCommit && packetStatus.commit.current !== approvedCurrentCommit) {
+    issues.push("approvalPacket commit does not match current checked packet");
+  }
+}
 NODE
 }
 

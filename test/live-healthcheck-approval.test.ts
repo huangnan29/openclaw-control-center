@@ -20,16 +20,25 @@ async function writeReadyPacketScript(file: string, logFile: string) {
     `#!/usr/bin/env bash
 set -euo pipefail
 printf 'packet %s\\n' "$*" >> "${logFile}"
+commit="test-commit-1234567890"
 cat <<'JSON'
 {
   "schemaVersion": 1,
   "status": "ready",
   "packetFile": "fake-packet.json",
+  "generatedAt": "2026-05-17T18:00:00.000Z",
+  "checkedAt": "2026-05-17T18:01:00.000Z",
+  "topologyMode": "local-only",
   "target": {
     "instanceId": "tom",
     "action": "healthcheck",
     "operator": "Anan"
   },
+  "commit": {
+    "packet": "test-commit-1234567890",
+    "current": "test-commit-1234567890"
+  },
+  "maxAgeSeconds": 21600,
   "safety": {
     "callsManagedActionsLiveApi": false,
     "writesOpenClawInstanceDirs": false,
@@ -64,6 +73,14 @@ async function prepareApprovalFile(dir: string) {
   const deployDir = join(dir, "deploy");
   const approvalFile = join(deployDir, "runtime", "live-healthcheck-approval.json");
   await mkdir(join(deployDir, "runtime"), { recursive: true });
+  await mkdir(join(deployDir, "repo", ".git"), { recursive: true });
+  await writeExecutable(
+    join(deployDir, "repo", "git"),
+    `#!/usr/bin/env bash
+set -euo pipefail
+printf 'test-commit-1234567890\\n'
+`,
+  );
   execFileSync(SCRIPT, ["template", approvalFile], {
     env: {
       ...process.env,
@@ -104,6 +121,8 @@ test("live healthcheck approval approve requires and runs approval packet check"
     assert.equal(approval.approved, true);
     assert.equal(approval.approvedBy, "Anan");
     assert.equal(approval.consumed, false);
+    assert.equal(approval.approvalPacket.status, "ready");
+    assert.equal(approval.approvalPacket.commit.current, "test-commit-1234567890");
     assert.match(log, /packet check .*packet\.json/);
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -140,6 +159,45 @@ test("live healthcheck approval approve does not write approval when packet chec
     assert.equal(approval.approved, false);
     assert.equal(approval.approvedBy, "");
     assert.match(log, /packet check .*stale-packet\.json/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("live healthcheck approval check rejects approved records without packet binding", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-live-approval-unbound-"));
+  try {
+    const { deployDir, approvalFile } = await prepareApprovalFile(dir);
+    const logFile = join(dir, "packet.log");
+    const packetScript = join(dir, "approval-packet.sh");
+    await writeReadyPacketScript(packetScript, logFile);
+    const approval = JSON.parse(await readFile(approvalFile, "utf8"));
+    approval.approved = true;
+    approval.approvedAt = new Date().toISOString();
+    approval.approvedBy = "Anan";
+    approval.checklist = {
+      understandsTemporaryLiveGate: true,
+      understandsLocalTokenRequired: true,
+      understandsAutoRollback: true,
+      understandsImpactSnapshot: true,
+    };
+    delete approval.approvalPacket;
+    await writeFile(approvalFile, `${JSON.stringify(approval, null, 2)}\n`, "utf8");
+
+    const result = spawnSync(SCRIPT, ["check", approvalFile], {
+      env: {
+        ...process.env,
+        DEPLOY_DIR: deployDir,
+        APPROVAL_PACKET_SCRIPT: packetScript,
+        APPROVAL_PACKET_FILE: join(dir, "packet.json"),
+        INSTANCE_ID: "tom",
+        OPERATOR: "Anan",
+      },
+      encoding: "utf8",
+    });
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /approvalPacket 必须记录本次批准绑定的证据包/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
