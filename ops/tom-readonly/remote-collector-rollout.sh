@@ -388,6 +388,8 @@ function buildCommands(bundle, stage) {
   if (stage === "needs_remote_credentials") {
     return [
       "# 如果远端只读 SSH key 在本机：先在本机把真实第二台 Oracle 的 host/user/port/sourceSshKeyPath 写入 push 配置",
+      "ops/local/discover-remote-oracle-credentials.sh scan ops/local/discover-remote-oracle-credentials.example.json",
+      "CONFIRM_REMOTE_ORACLE_PUSH_CONFIG_WRITE=I_UNDERSTAND_THIS_ONLY_WRITES_LOCAL_PUSH_CONFIG REMOTE_ORACLE_HOST=<真实第二台Oracle公网IP> REMOTE_ORACLE_KEY_PATH=<本机只读key路径> ops/local/discover-remote-oracle-credentials.sh write-push-config ops/local/discover-remote-oracle-credentials.example.json",
       "cp ops/local/push-remote-collector-credentials.example.json runtime/push-remote-collector-credentials.json",
       "ops/local/push-remote-collector-credentials.sh plan runtime/push-remote-collector-credentials.json",
       "CONFIRM_PUSH_REMOTE_COLLECTOR_CREDENTIALS=I_UNDERSTAND_THIS_ONLY_PUSHES_REMOTE_COLLECTOR_CREDENTIALS_TO_TOM_RUNTIME ops/local/push-remote-collector-credentials.sh apply runtime/push-remote-collector-credentials.json",

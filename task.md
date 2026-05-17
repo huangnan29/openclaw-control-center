@@ -103,9 +103,12 @@
 - 已增强 `ops/local/discover-remote-oracle-credentials.sh`，新增 `write-push-config` 模式。
 - `write-push-config` 必须设置 `CONFIRM_REMOTE_ORACLE_PUSH_CONFIG_WRITE=I_UNDERSTAND_THIS_ONLY_WRITES_LOCAL_PUSH_CONFIG`，只根据显式 `REMOTE_ORACLE_HOST` 和 `REMOTE_ORACLE_KEY_PATH` 写本机 `runtime/push-remote-collector-credentials.json`。
 - `write-push-config` 不联网、不连接 Tom、不连接第二台 Oracle、不写 Tom runtime、不写 registry、不修改任何 OpenClaw 实例目录，也不输出私钥内容。
+- `remote-collector-rollout.sh` 的 `needs_remote_credentials` 下一步提示已同步加入 `write-push-config`，避免总闸门继续引导手工复制样板。
 - 已扩展 `test/discover-remote-oracle-credentials.test.ts`，覆盖 `write-push-config` 缺确认被拒、显式确认后只写本机 push 配置且不泄露 key 内容。
 - 已验证 `bash -n ops/local/discover-remote-oracle-credentials.sh`。
 - 已验证 `npm test -- test/discover-remote-oracle-credentials.test.ts test/push-remote-collector-credentials.test.ts test/oss-readiness.test.ts`，17/17 通过。
+- 已验证 `bash -n ops/tom-readonly/remote-collector-rollout.sh`。
+- 已验证 `npm test -- test/remote-collector-rollout.test.ts test/remote-collector-rollout-runner.test.ts test/discover-remote-oracle-credentials.test.ts test/oss-readiness.test.ts`，18/18 通过。
 - 已验证跨服务器只读上线相关回归集，46/46 通过。
 - 已验证 `npm run build`。
 - 已新增 `ops/tom-readonly/managed-action-dry-run-gate.sh`，作为管理动作 dry-run 证据闸门。
