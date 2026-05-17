@@ -379,6 +379,8 @@ function runApproved() {
     nextCommands: completed && afterNextCommands.length > 0 ? afterNextCommands : tomNextCommands,
     safety: baseSafety({
       connectsTomSsh: true,
+      writesTomRuntime: completed,
+      writesControlCenterRuntimeOnly: completed,
       opensLiveGate: completed,
       callsManagedActionsLiveApi: completed,
       requiresFinalRunnerConfirmation: true,

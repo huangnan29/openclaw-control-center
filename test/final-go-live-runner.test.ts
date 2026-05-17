@@ -261,6 +261,8 @@ test("final go-live runner run-approved 透传 Tom 阻断并返回非零", async
 
     assert.notEqual(exitCode, 0);
     assert.equal(report.status, "blocked_not_approved");
+    assert.equal(report.safety.writesTomRuntime, false);
+    assert.equal(report.safety.writesControlCenterRuntimeOnly, false);
     assert.equal(report.safety.opensLiveGate, false);
     assert.equal(report.safety.callsManagedActionsLiveApi, false);
     assert(report.nextCommands.some((command: string) => command.includes("live-healthcheck-approval.sh approve")));
