@@ -17,12 +17,12 @@
 
 ## 当前下一步
 
-下一步进入真实执行前的最后安全层设计：
+设计单个低风险动作的 mock executor 测试：
 
-- 部署 Tom 并验证 `/api/managed-actions/live` 默认返回阻断。
-- 验证 Tom `MANAGED_ACTIONS_LIVE_ENABLED` 未开启。
-- 验证页面不出现真实执行按钮。
-- Tom `healthcheck.sh` 继续通过。
+- 只在测试环境验证执行器接口形状。
+- 证明真实执行链必须经过 dry-run 申请、live gate、白名单和二次确认。
+- 不在 Tom 开启真实执行。
+- 不调用任何 OpenClaw 实例命令。
 
 ## 最近完成
 
@@ -114,7 +114,13 @@
 - 已让 live gate 阻断记录写入 `managed_action_live_blocked` 审计。
 - 已验证 `npm test -- test/managed-actions-dry-run.test.ts test/phase9-routes-commands.test.ts test/readonly-multi-instance-safety.test.ts test/multi-instance-readonly.test.ts test/ui-render-smoke.test.ts`。
 - 已验证 `npm run build`。
+- 已提交并推送 `0f26baa feat: add disabled managed action live gate`。
+- 已部署到 Tom，并验证运行提交 `0f26baa`。
+- 已验证 Tom `/api/managed-actions/live` 在带本地令牌和 `LIVE-ACTION-APPROVED` 时仍返回 `blocked_disabled`。
+- 已验证 Tom live gate 返回 `liveExecution=false`、`enabled=false`、`readonlyMode=true`、`allowedActions=[]`。
+- 已验证 Tom 页面仍只有 `管理动作预览` 与 `管理动作审计`，没有真实执行入口。
+- 已验证 Tom 审计日志写入 `managed_action_live_blocked`，且 `liveExecution=false`。
 
 ## 阶段完成后的下一步
 
-部署 Tom 验证真实执行白名单闸门默认关闭；通过后，下一步才考虑设计单个低风险动作的 mock executor 测试，不在 Tom 开启真实执行。
+mock executor 测试层：先为健康检查动作设计执行器接口和纯测试 mock，证明真实执行链必须经过 dry-run 申请、live gate、白名单和二次确认；Tom 仍保持禁用。

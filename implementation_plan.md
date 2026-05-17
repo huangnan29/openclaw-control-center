@@ -6,7 +6,7 @@
 
 ## 当前阶段
 
-当前阶段推进 **真实执行白名单闸门设计**：中央 control-center 已完成 dry-run API、dry-run UI、人工确认字段和审计检索视图。当前只新增默认关闭的 live gate 配置和 API，用于未来灰度前验证安全条件；Tom 不开启真实执行，不实现执行器，不调用 OpenClaw 实例命令。
+当前阶段推进 **真实执行前 mock executor 测试层**：中央 control-center 已完成 dry-run API、dry-run UI、人工确认字段、审计检索视图和默认关闭的 live gate。Tom 已验证 live gate 关闭；下一步只在测试环境设计执行器接口与 mock，不在 Tom 开启真实执行，不调用 OpenClaw 实例命令。
 
 ## 推进原则
 
