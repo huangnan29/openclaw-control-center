@@ -398,6 +398,36 @@ repo/ops/tom-readonly/managed-action-text-bridge.sh dry-run runtime/managed-acti
 
 也可以用 `MANAGED_ACTION_TEXT` 或标准输入传入文本。`parse/plan` 只写 control-center runtime 的文本副本并返回 runner 摘要；`dry-run` 必须显式确认，并继续由底层 runner 只调用 dry-run API。该桥接层不会打开 live gate，不修改 OpenClaw 实例目录，不重启实例，也不会触发真实 skill。
 
+### OpenClaw Inbox 接入
+
+如果要让 Tom 的 Discord 机器人实际触发 control-center dry-run，不需要改 Discord 插件，也不需要重启 OpenClaw。让 Tom 在自己的 workspace 写入一条文本请求即可：
+
+```bash
+mkdir -p /home/node/.openclaw/workspace/control-center-commands/inbox
+printf '对 tom 运行 zhihu-human-ops-writing dry-run\n' \
+  > /home/node/.openclaw/workspace/control-center-commands/inbox/001.txt
+```
+
+control-center 通过只读挂载读取该目录：
+
+```bash
+MANAGED_ACTION_INBOX_SOURCE=control-center-container \
+MANAGED_ACTION_INBOX_DIR=/instances/tom/workspace/control-center-commands/inbox \
+repo/ops/tom-readonly/managed-action-inbox-runner.sh status
+
+MANAGED_ACTION_INBOX_SOURCE=control-center-container \
+MANAGED_ACTION_INBOX_DIR=/instances/tom/workspace/control-center-commands/inbox \
+repo/ops/tom-readonly/managed-action-inbox-runner.sh plan-next
+
+CONFIRM_MANAGED_ACTION_INBOX_RUNNER=I_UNDERSTAND_THIS_READS_OPENCLAW_INBOX_AND_RUNS_DRY_RUN_TEXT \
+MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container \
+MANAGED_ACTION_INBOX_SOURCE=control-center-container \
+MANAGED_ACTION_INBOX_DIR=/instances/tom/workspace/control-center-commands/inbox \
+repo/ops/tom-readonly/managed-action-inbox-runner.sh run-next
+```
+
+`managed-action-inbox-runner.sh` 不移动、不删除、不修改 OpenClaw workspace 中的请求文件；它只把处理状态、结果和已处理 key 写入 control-center runtime 的 `managed-action-inbox-runner/`。重复运行时，同一路径同一内容不会重复执行；如果文本被修改，会作为新的请求重新评估。该方式把“Discord 消息 → Tom workspace 文本 → control-center dry-run 审计”串起来，同时保持 OpenClaw 实例目录只读读取、live gate 关闭、真实 skill 不执行。
+
 ### 管理动作 dry-run 证据
 
 真实管理动作上线前，先用 dry-run 证据闸门确认最近一次 dry-run 审计可作为人工批准和 live 引用的前置证据：

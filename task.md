@@ -799,4 +799,24 @@ Tom 单 Oracle 上线下一步：
 
 ## 阶段完成后的下一步
 
-下一步可以开始把 openclaw/Discord 机器人实际调用点接到 `managed-action-text-bridge.sh`：机器人收到文本后调用 `parse` 或 `plan` 返回摘要，只有明确 dry-run 指令且带桥接确认时才调用 `dry-run`。通过机器人入口 smoke 后，才进入人工 approval 和一次只读 healthcheck live 演练；演练前仍不得执行 approval `approve`、不得打开 live gate、不得触发真实 skill。
+## 本轮新增（OpenClaw workspace inbox runner）
+
+- 已新增 `ops/tom-readonly/managed-action-inbox-runner.sh`。
+- 该脚本支持 `status`、`plan-next`、`run-next`。
+- Tom/Discord 机器人不需要改 Discord 插件，也不需要重启 OpenClaw；它只需在 workspace 写入 `control-center-commands/inbox/*.txt` 文本请求。
+- control-center 通过只读挂载 `/instances/tom/workspace/control-center-commands/inbox` 读取请求，`MANAGED_ACTION_INBOX_SOURCE=control-center-container` 时由 control-center 容器读取该只读挂载，避免宿主机直接写 OpenClaw workspace。
+- `status` 只列出待处理文本，不调用桥接层。
+- `plan-next` 调用 `managed-action-text-bridge.sh plan`，不标记已处理，不创建 dry-run 审计。
+- `run-next` 必须设置 `CONFIRM_MANAGED_ACTION_INBOX_RUNNER=I_UNDERSTAND_THIS_READS_OPENCLAW_INBOX_AND_RUNS_DRY_RUN_TEXT`，只调用桥接层 `dry-run`。
+- runner 不移动、不删除、不修改 OpenClaw workspace 中的请求文件；处理状态、结果和去重 key 只写 `runtime/managed-action-inbox-runner/`。
+- 同一路径同一内容只处理一次；如果文本内容被修改，会生成新的 key 并重新评估。
+- 已新增 `test/managed-action-inbox-runner.test.ts`，覆盖 status 不调用桥接层、plan-next 不标记已处理、run-next 缺确认阻断、run-next 成功写 control-center runtime 状态并隐藏令牌。
+- 已更新 `ops/tom-readonly/README.md`、`docs/MULTI_INSTANCE_READONLY.md`、`implementation_plan.md` 和 `test/oss-readiness.test.ts`，记录 inbox runner 和安全边界。
+- 已验证 `bash -n ops/tom-readonly/managed-action-inbox-runner.sh` 与 `bash -n ops/tom-readonly/managed-action-text-bridge.sh`。
+- 已验证 `npm test -- test/managed-action-inbox-runner.test.ts test/managed-action-text-bridge.test.ts test/managed-action-command-runner.test.ts test/oss-readiness.test.ts`，23/23 通过。
+- 已验证 `npm test -- test/managed-action-inbox-runner.test.ts test/managed-action-text-bridge.test.ts test/managed-action-command-runner.test.ts test/managed-actions-dry-run.test.ts test/managed-action-live-readiness.test.ts test/managed-action-live-gate.test.ts test/oss-readiness.test.ts test/readonly-multi-instance-safety.test.ts`，33/33 通过。
+- 已验证 `npm run build`。
+
+## 阶段完成后的下一步
+
+下一步部署 inbox runner 到 Tom，并做真实 smoke：先在 Tom workspace 写入一条 `control-center-commands/inbox/*.txt` 测试请求，再由 control-center 侧 `status/plan-next/run-next` 读取并触发 dry-run，确认结果写入 control-center runtime 且不修改 OpenClaw workspace 请求文件。通过后，再把 Tom 的 `AGENTS.md` 增加一小段调用规范，让 Discord 消息可以稳定落 inbox；仍不得执行 approval `approve`、不得打开 live gate、不得触发真实 skill。

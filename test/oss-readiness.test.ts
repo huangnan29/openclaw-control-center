@@ -148,6 +148,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   const liveHealthcheckRollout = path.join(ROOT, "ops", "tom-readonly", "managed-action-healthcheck-rollout.example.json");
   const managedActionCommandRunner = path.join(ROOT, "ops", "tom-readonly", "managed-action-command-runner.sh");
   const managedActionTextBridge = path.join(ROOT, "ops", "tom-readonly", "managed-action-text-bridge.sh");
+  const managedActionInboxRunner = path.join(ROOT, "ops", "tom-readonly", "managed-action-inbox-runner.sh");
   const managedActionDryRunGate = path.join(ROOT, "ops", "tom-readonly", "managed-action-dry-run-gate.sh");
   const discoverRemoteOracleCredentials = path.join(ROOT, "ops", "local", "discover-remote-oracle-credentials.sh");
   const discoverRemoteOracleCredentialsExample = path.join(ROOT, "ops", "local", "discover-remote-oracle-credentials.example.json");
@@ -230,6 +231,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(existsSync(liveHealthcheckWindow));
   assert(existsSync(liveHealthcheckRollout));
   assert(existsSync(managedActionTextBridge));
+  assert(existsSync(managedActionInboxRunner));
   assert(existsSync(managedActionDryRunGate));
   assert(existsSync(discoverRemoteOracleCredentials));
   assert(existsSync(discoverRemoteOracleCredentialsExample));
@@ -589,6 +591,21 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(commandTextBridgeText, /callsManagedActionsLiveApi: false/);
   assert.match(commandTextBridgeText, /writesOpenClawInstanceDirs: false/);
   assert.doesNotMatch(commandTextBridgeText, /api\/managed-actions\/live/);
+  const managedActionInboxRunnerText = readFileSync(managedActionInboxRunner, "utf8");
+  assert.match(managedActionInboxRunnerText, /managed-action-inbox-runner\.sh status/);
+  assert.match(managedActionInboxRunnerText, /managed-action-inbox-runner\.sh plan-next/);
+  assert.match(managedActionInboxRunnerText, /managed-action-inbox-runner\.sh run-next/);
+  assert.match(managedActionInboxRunnerText, /MANAGED_ACTION_INBOX_DIR/);
+  assert.match(managedActionInboxRunnerText, /MANAGED_ACTION_INBOX_SOURCE/);
+  assert.match(managedActionInboxRunnerText, /control-center-container/);
+  assert.match(managedActionInboxRunnerText, /CONFIRM_MANAGED_ACTION_INBOX_RUNNER/);
+  assert.match(managedActionInboxRunnerText, /I_UNDERSTAND_THIS_READS_OPENCLAW_INBOX_AND_RUNS_DRY_RUN_TEXT/);
+  assert.match(managedActionInboxRunnerText, /managed-action-text-bridge\.sh/);
+  assert.match(managedActionInboxRunnerText, /readsOpenClawInboxOnly/);
+  assert.match(managedActionInboxRunnerText, /writesControlCenterRuntimeOnly/);
+  assert.match(managedActionInboxRunnerText, /callsManagedActionsLiveApi: false/);
+  assert.match(managedActionInboxRunnerText, /writesOpenClawInstanceDirs: false/);
+  assert.doesNotMatch(managedActionInboxRunnerText, /api\/managed-actions\/live/);
   const dryRunGateText = readFileSync(managedActionDryRunGate, "utf8");
   assert.match(dryRunGateText, /managed-action-dry-run-gate\.sh status/);
   assert.match(dryRunGateText, /CONFIRM_MANAGED_ACTION_DRY_RUN/);
