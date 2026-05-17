@@ -17,13 +17,12 @@ live 执行器挂载开关：新增 `MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED`，�
 
 ## 当前下一步
 
-设计 healthcheck 真实执行灰度演练方案：
+设计 healthcheck live 演练前置校验：
 
-- 仅覆盖只读 `healthcheck`。
-- 先做配置样板与运行手册，不默认启用。
-- 真实调用必须继续要求本地令牌、有效 dry-run、rollout 规则和 `LIVE-ACTION-APPROVED`。
-- 页面仍不提供真实执行按钮。
-- Tom 暂不启用 live gate 或 executor。
+- 检查 rollout 文件、live gate、executor 开关和允许动作是否一致。
+- 只输出诊断结果，不调用 `/api/managed-actions/live`。
+- Tom 仍不默认启用 live gate 或 executor。
+- 通过后再考虑一次人工确认的只读 healthcheck live 演练。
 
 ## 最近完成
 
@@ -225,7 +224,19 @@ live 执行器挂载开关：新增 `MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED`，�
 - 已验证 Tom 容器没有启用 `MANAGED_ACTIONS_LIVE_ENABLED=true` 或 `MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED=true`。
 - 已验证 Tom readiness 返回 `status=blocked`、`liveExecutionAvailable=false`、`liveExecutionAttempted=false`、`executor.productionWired=false`。
 - 已验证 Tom 总览页仍包含 `真实执行上线条件`，但不包含 `/api/managed-actions/live` 前端调用，也不包含真实执行确认短语。
+- 已新增只读 healthcheck live rollout 样板：`ops/tom-readonly/managed-action-healthcheck-rollout.example.json`。
+- 已新增人工 smoke 脚本：`ops/tom-readonly/live-healthcheck-smoke.sh`。
+- 已让 smoke 脚本必须设置 `CONFIRM_LIVE_HEALTHCHECK=I_UNDERSTAND_THIS_CALLS_LIVE_API` 和 `LOCAL_API_TOKEN` 后才会继续。
+- 已让 smoke 脚本先检查 readiness，未允许 live execution 时不会调用 `/api/managed-actions/live`。
+- 已验证 `npm test -- test/oss-readiness.test.ts test/managed-actions-dry-run.test.ts test/managed-action-live-gate.test.ts`。
+- 已验证 `npm run build`。
+- 已提交并推送 `cbc04f9 ops: add live healthcheck smoke plan`。
+- 已部署到 Tom，并验证运行提交 `cbc04f9`。
+- 已验证 Tom `healthcheck.sh` 通过。
+- 已验证 Tom 存在可执行 `live-healthcheck-smoke.sh` 和 rollout 样板。
+- 已验证 Tom `bash -n repo/ops/tom-readonly/live-healthcheck-smoke.sh` 通过。
+- 已验证 Tom readiness 仍返回 `liveExecutionAvailable=false`、`executor.productionWired=false`。
 
 ## 阶段完成后的下一步
 
-healthcheck 真实执行灰度演练方案：准备只读 healthcheck 的 rollout 样板、手动演练命令和回退说明；Tom 暂不默认启用。
+healthcheck live 演练前置校验：先做只读 preflight，不调用 live API；通过后再人工决定是否临时启用一次只读 healthcheck 演练。

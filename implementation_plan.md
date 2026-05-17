@@ -6,7 +6,7 @@
 
 ## 当前阶段
 
-当前阶段推进 **healthcheck 真实执行灰度演练方案**：中央 control-center 已完成 dry-run API、dry-run UI、人工确认字段、审计检索视图、默认关闭的 live gate、测试用 mock executor、真实执行审计结果类型、dry-run 引用校验、灰度配置解析、rollout 决策响应、只读 readiness 卡片、生产执行器最小骨架和显式挂载开关。当前准备设计只读 healthcheck 的人工演练方案；Tom 不默认启用 live gate 或 executor，不调用 OpenClaw 实例命令。
+当前阶段推进 **healthcheck live 演练前置校验**：中央 control-center 已完成 dry-run API、dry-run UI、人工确认字段、审计检索视图、默认关闭的 live gate、测试用 mock executor、真实执行审计结果类型、dry-run 引用校验、灰度配置解析、rollout 决策响应、只读 readiness 卡片、生产执行器最小骨架、显式挂载开关和只读 healthcheck 人工演练材料。当前准备做只读 preflight；Tom 不默认启用 live gate 或 executor，不调用 OpenClaw 实例命令。
 
 ## 推进原则
 
