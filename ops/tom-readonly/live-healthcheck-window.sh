@@ -16,8 +16,10 @@ ROLLOUT_SOURCE="${ROLLOUT_SOURCE:-${DEPLOY_DIR}/repo/ops/tom-readonly/managed-ac
 PREFLIGHT_SCRIPT="${PREFLIGHT_SCRIPT:-${DEPLOY_DIR}/repo/ops/tom-readonly/live-healthcheck-preflight.sh}"
 SMOKE_SCRIPT="${SMOKE_SCRIPT:-${DEPLOY_DIR}/repo/ops/tom-readonly/live-healthcheck-smoke.sh}"
 HEALTHCHECK_SCRIPT="${HEALTHCHECK_SCRIPT:-${DEPLOY_DIR}/healthcheck.sh}"
+IMPACT_SCRIPT="${IMPACT_SCRIPT:-${DEPLOY_DIR}/repo/ops/tom-readonly/instance-impact-snapshot.sh}"
 CONFIRM_LIVE_HEALTHCHECK_WINDOW="${CONFIRM_LIVE_HEALTHCHECK_WINDOW:-}"
 WINDOW_ACTIVE="false"
+IMPACT_BEFORE=""
 
 timestamp() {
   date +"%Y-%m-%dT%H:%M:%S%z"
@@ -135,6 +137,11 @@ rollback_on_exit() {
       printf '[失败] 自动恢复只读状态失败，请立即手动运行：%s disable\n' "$0" >&2
       exit 1
     fi
+    if [ -n "$IMPACT_BEFORE" ] && [ -x "$IMPACT_SCRIPT" ]; then
+      local impact_after
+      impact_after="$("$IMPACT_SCRIPT" snapshot "after-live-healthcheck-rollback")"
+      "$IMPACT_SCRIPT" compare "$IMPACT_BEFORE" "$impact_after"
+    fi
   fi
   exit "$exit_code"
 }
@@ -158,16 +165,21 @@ show_status() {
 
 run_once() {
   require_confirm
+  [ -x "$IMPACT_SCRIPT" ] || fail "实例影响快照脚本不存在或不可执行：${IMPACT_SCRIPT}"
   [ -n "${LOCAL_API_TOKEN:-}" ] || fail "必须通过环境变量提供 LOCAL_API_TOKEN"
   [ "${CONFIRM_LIVE_HEALTHCHECK:-}" = "I_UNDERSTAND_THIS_CALLS_LIVE_API" ] || \
     fail "必须设置 CONFIRM_LIVE_HEALTHCHECK=I_UNDERSTAND_THIS_CALLS_LIVE_API"
 
+  IMPACT_BEFORE="$("$IMPACT_SCRIPT" snapshot "before-live-healthcheck")"
   trap rollback_on_exit EXIT
   WINDOW_ACTIVE="true"
   start_live_window
   "$SMOKE_SCRIPT"
   WINDOW_ACTIVE="false"
   stop_live_window
+  local impact_after
+  impact_after="$("$IMPACT_SCRIPT" snapshot "after-live-healthcheck")"
+  "$IMPACT_SCRIPT" compare "$IMPACT_BEFORE" "$impact_after"
   trap - EXIT
 }
 
@@ -186,6 +198,8 @@ usage() {
   run 还必须设置：
     CONFIRM_LIVE_HEALTHCHECK=I_UNDERSTAND_THIS_CALLS_LIVE_API
     LOCAL_API_TOKEN=<本地令牌>
+
+  run 会自动生成 before/after 实例影响快照并比较。
 TEXT
 }
 

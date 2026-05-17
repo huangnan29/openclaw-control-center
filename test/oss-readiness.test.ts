@@ -135,6 +135,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   const env = readFileSync(path.join(ROOT, ".env.example"), "utf8");
   const healthcheck = readFileSync(path.join(ROOT, "ops", "tom-readonly", "healthcheck.sh"), "utf8");
   const cron = path.join(ROOT, "ops", "tom-readonly", "install-collector-cron.sh");
+  const instanceImpactSnapshot = path.join(ROOT, "ops", "tom-readonly", "instance-impact-snapshot.sh");
   const liveHealthcheckPreflight = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-preflight.sh");
   const liveHealthcheckSmoke = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-smoke.sh");
   const liveHealthcheckWindow = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-window.sh");
@@ -152,11 +153,18 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(doc.includes("不挂载 /var/run/docker.sock"));
   assert(existsSync(path.join(ROOT, "ops", "tom-readonly", "collector-snapshot.sh")));
   assert(existsSync(cron));
+  assert(existsSync(instanceImpactSnapshot));
   assert(existsSync(liveHealthcheckPreflight));
   assert(existsSync(liveHealthcheckSmoke));
   assert(existsSync(liveHealthcheckWindow));
   assert(existsSync(liveHealthcheckRollout));
   assert.match(readFileSync(cron, "utf8"), /OPENCLAW_COLLECTOR_CRON_BEGIN/);
+  const impactText = readFileSync(instanceImpactSnapshot, "utf8");
+  assert.match(impactText, /instance-impact-snapshot\.sh snapshot/);
+  assert.match(impactText, /gateway health/);
+  assert.match(impactText, /instanceMounts/);
+  assert.match(impactText, /liveExecutionAvailable/);
+  assert.match(impactText, /READONLY_MODE/);
   const preflightText = readFileSync(liveHealthcheckPreflight, "utf8");
   assert.match(preflightText, /api\/managed-actions\/readiness/);
   assert.doesNotMatch(preflightText, /api\/managed-actions\/live/);
@@ -174,6 +182,8 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(liveWindowText, /MANAGED_ACTIONS_LIVE_ALLOWED_ACTIONS: "healthcheck"/);
   assert.match(liveWindowText, /trap rollback_on_exit EXIT/);
   assert.match(liveWindowText, /stop_live_window/);
+  assert.match(liveWindowText, /instance-impact-snapshot\.sh/);
+  assert.match(liveWindowText, /compare "\$IMPACT_BEFORE" "\$impact_after"/);
   assert.match(readFileSync(liveHealthcheckRollout, "utf8"), /"action": "healthcheck"/);
   assert.match(readFileSync(liveHealthcheckRollout, "utf8"), /"risk": "low"/);
   assert(healthcheck.includes("COLLECTOR_SNAPSHOT_MAX_AGE_SECONDS"));

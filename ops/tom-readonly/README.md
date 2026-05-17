@@ -19,6 +19,7 @@
 - `live-healthcheck-preflight.sh`：只读检查 healthcheck live 演练条件，不调用 live API。
 - `live-healthcheck-smoke.sh`：手动 live healthcheck 演练脚本；只有显式提供本地令牌和确认环境变量才会调用 live API。
 - `live-healthcheck-window.sh`：一次性演练窗口脚本；临时启用 control-center 的 healthcheck live 配置，失败或结束后恢复只读状态。
+- `instance-impact-snapshot.sh`：演练前后实例影响留证脚本；只读取 gateway、监听端口、容器挂载和 readiness。
 
 ## Tom 上的常用命令
 
@@ -30,6 +31,7 @@ cd /srv/openclaw-control-center-readonly
 ./update.sh
 ./rollback.sh <commit>
 repo/ops/tom-readonly/live-healthcheck-window.sh status
+repo/ops/tom-readonly/instance-impact-snapshot.sh snapshot readonly-baseline
 ```
 
 如果需要临时覆盖默认值，可以使用环境变量：
@@ -68,6 +70,14 @@ INSTANCE_ID=tom \
 OPERATOR=Anan \
 repo/ops/tom-readonly/live-healthcheck-window.sh run
 ```
+
+`run` 模式会自动生成 before/after 实例影响快照，位置默认为：
+
+```bash
+/srv/openclaw-control-center-readonly/runtime/impact-snapshots/
+```
+
+快照比较要求演练后恢复为只读状态、gateway 健康保持正常、监听端口保持稳定、实例挂载仍是只读、live gate 和 executor 均关闭。
 
 如果只需要手动打开或关闭演练窗口：
 
