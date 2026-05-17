@@ -17,13 +17,12 @@ rollout 决策接入 live 响应：live 请求会同时返回 dry-run 引用校�
 
 ## 当前下一步
 
-部署 rollout 决策接入到 Tom 并验证行为不变：
+设计只读 live readiness 诊断卡：
 
-- Tom 继续保持 `MANAGED_ACTIONS_LIVE_ENABLED=false`。
-- Tom 不配置 `MANAGED_ACTIONS_LIVE_ROLLOUT_FILE`。
-- `/api/managed-actions/live` 继续返回 `blocked_disabled`。
-- live 响应中展示 `rollout.status=disabled`。
-- 页面继续不出现真实执行入口。
+- 只读展示 live gate、dry-run 引用、rollout、执行器接入状态。
+- 不提供执行按钮。
+- 不触发 live API。
+- Tom 继续保持真实执行关闭。
 
 ## 最近完成
 
@@ -179,7 +178,12 @@ rollout 决策接入 live 响应：live 请求会同时返回 dry-run 引用校�
 - 已验证 live 响应包含 `rollout.allowed`、`rollout.status`、`rollout.message` 和可选规则摘要。
 - 已验证 `npm test -- test/managed-action-live-gate.test.ts test/managed-action-live-rollout.test.ts test/managed-actions-dry-run.test.ts test/managed-action-live-audit.test.ts test/managed-action-executor.test.ts test/phase9-routes-commands.test.ts test/readonly-multi-instance-safety.test.ts test/multi-instance-readonly.test.ts test/ui-render-smoke.test.ts`。
 - 已验证 `npm run build`。
+- 已提交并推送 `342105c feat: surface rollout decisions in live gate`。
+- 已部署到 Tom，并验证运行提交 `342105c`。
+- 已验证 Tom live 响应返回 `dryRunReference=valid`、`rollout.status=disabled`。
+- 已验证 Tom live 仍返回 `blocked_disabled`、`liveExecution=false`、`enabled=false`。
+- 已验证 Tom 页面仍无真实执行入口。
 
 ## 阶段完成后的下一步
 
-部署 Tom 验证 rollout 决策接入不改变运行行为；通过后，下一步设计只读页面中的 live readiness 诊断卡，不提供执行按钮。
+只读 live readiness 诊断卡：在页面展示距离真实执行还缺哪些安全条件，不提供执行按钮。
