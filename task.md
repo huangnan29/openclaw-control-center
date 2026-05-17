@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-只读 healthcheck live approval 准备收口：已新增 approval `approve/consume` 生命周期，用环境变量显式记录人工批准，并在 live healthcheck 调用成功后自动标记为已使用，避免同一批准记录被重复使用；Tom 已部署但仍保持 `needs_manual_approval`。
+跨服务器只读 collector 接入增强：已新增远端 collector snapshot 只读拉取脚本，Tom 可以先 `plan` 审查远端来源，再在显式确认后只读取远端 JSON 并写入本机 `runtime/collectors`；不会执行远端 collector，不会修改 OpenClaw 实例目录，也不会调用 live API。
 
 ## 本轮不做
 
@@ -17,7 +17,16 @@
 
 ## 当前下一步
 
-人工批准后执行一次只读 healthcheck live 演练：
+跨服务器只读监控下一步：
+
+- 为第二台 Oracle 服务器准备本地 collector exporter，让该服务器自行生成 collector JSON。
+- 在 Tom 写入 `runtime/remote-collector-pull.sources.json`，只配置远端 snapshot 路径和本地 `runtime/collectors/<serverId>/snapshot.json`。
+- 先执行 `repo/ops/tom-readonly/remote-collector-pull.sh plan runtime/remote-collector-pull.sources.json` 审查来源。
+- 只有确认远端 snapshot 文件存在后，才执行：
+  `CONFIRM_REMOTE_COLLECTOR_PULL=I_UNDERSTAND_THIS_ONLY_READS_REMOTE_COLLECTOR_SNAPSHOTS repo/ops/tom-readonly/remote-collector-pull.sh pull runtime/remote-collector-pull.sources.json`
+- 拉取成功后，再把该 server 的 `collectorSnapshotPath` 加入 Tom `config/instances.json` 并运行 `healthcheck.sh`。
+
+受控管理动作下一步仍是人工批准后执行一次只读 healthcheck live 演练：
 
 - 使用 `repo/ops/tom-readonly/live-healthcheck-window.sh run`。
 - 必须显式提供 `CONFIRM_LIVE_HEALTHCHECK_WINDOW`、`CONFIRM_LIVE_HEALTHCHECK` 和 `LOCAL_API_TOKEN`。
@@ -36,6 +45,22 @@
 ## 最近完成
 
 - 已新增长期推进计划：`implementation_plan.md`。
+- 已新增跨服务器只读拉取脚本 `ops/tom-readonly/remote-collector-pull.sh`。
+- 已新增拉取配置样板 `ops/tom-readonly/remote-collector-pull.sources.example.json`，默认 `enabled=false`。
+- `remote-collector-pull.sh plan` 只校验配置和输出计划，不联网。
+- `remote-collector-pull.sh pull` 必须设置 `CONFIRM_REMOTE_COLLECTOR_PULL=I_UNDERSTAND_THIS_ONLY_READS_REMOTE_COLLECTOR_SNAPSHOTS`，只通过 SSH `cat` 读取远端 collector JSON。
+- 已让拉取脚本校验 `schemaVersion=1`、`serverId` 匹配、`generatedAt` 可解析、`instances` 非空，并限制本地写入路径必须位于 `runtime/collectors/`。
+- 已让拉取脚本写入 `runtime/collector-pull-state/<serverId>.json`，方便审计最近一次拉取状态。
+- 已新增 `test/remote-collector-pull.test.ts`，覆盖计划、确认短语、假 SSH 拉取、原子写入、状态记录和 serverId 不匹配失败。
+- 已验证 `bash -n ops/tom-readonly/remote-collector-pull.sh`。
+- 已验证 `ops/tom-readonly/remote-collector-pull.sh plan ops/tom-readonly/remote-collector-pull.sources.example.json`。
+- 已验证 `npm test -- test/remote-collector-pull.test.ts test/collector-exporter.test.ts test/oss-readiness.test.ts`。
+- 已验证 `npm test -- test/multi-instance-readonly.test.ts test/instance-config.test.ts test/ui-render-smoke.test.ts test/readonly-multi-instance-safety.test.ts test/remote-collector-pull.test.ts`，共 52/52 通过。
+- 已验证 `npm run build`。
+- 已提交并推送 `fcdd104 ops: add readonly remote collector pull`。
+- 已部署到 Tom，并验证运行提交 `fcdd104`。
+- 已验证 Tom `remote-collector-pull.sh plan` 对样板配置返回 `status=planned`，样板源 `enabled=false`，没有执行远端拉取。
+- 已验证 Tom `healthcheck.sh` 通过，collector 快照正常，仍只读；Tom live window status 仍为 `needs_manual_approval`、`READONLY_MODE=true`、`readiness.status=blocked`，未调用 live API。
 - 已新增 `live-healthcheck-approval.sh consume`，让批准记录在 live healthcheck 调用成功后变为一次性已使用状态，后续 `check` 会要求重新 approve。
 - 已让 `live-healthcheck-window.sh run` 在 smoke 成功后自动调用 `consume`，再恢复只读并生成影响快照和报告。
 - 已让演练报告要求 `approval.consumed === true`，确保报告证明批准记录不会被复用。
