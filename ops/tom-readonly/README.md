@@ -19,6 +19,7 @@
 - `remote-collector-credentials.example.json`：远端凭据准备配置样板，不包含真实密钥内容。
 - `remote-collector-preflight.sh`：对已生成的远端 collector 接入包执行 SSH 只读预检，检查 docker、目录和 gateway 前置条件。
 - `remote-collector-rollout.sh`：只读取 Tom 本地接入包、preflight、pull 和 registry 状态，输出跨服务器只读接入下一步。
+- `remote-collector-rollout-runner.sh`：按 rollout gate 当前阶段自动执行下一步安全脚本；缺凭据、远端 snapshot 未就绪或检查失败时停止。
 - `remote-collector-pull.sh`：从其他 Oracle 服务器只读拉取已经生成好的 collector JSON，校验后写入本机 `runtime/collectors`。
 - `remote-collector-pull.sources.example.json`：远端 collector 拉取配置样板，默认 `enabled=false`。
 - `register-remote-collector.sh`：把已经拉取并校验过的远端 collector snapshot 注册到 Tom `config/instances.json`，默认 `plan` 不写入。
@@ -54,6 +55,9 @@ CONFIRM_REMOTE_COLLECTOR_PREFLIGHT=I_UNDERSTAND_THIS_ONLY_READS_REMOTE_PREREQUIS
 repo/ops/tom-readonly/remote-collector-preflight.sh check runtime/remote-onboarding/<serverId>
 repo/ops/tom-readonly/remote-collector-preflight.sh status runtime/remote-onboarding/<serverId>
 repo/ops/tom-readonly/remote-collector-rollout.sh status runtime/remote-onboarding/<serverId>
+repo/ops/tom-readonly/remote-collector-rollout-runner.sh status runtime/remote-onboarding/<serverId>
+CONFIRM_REMOTE_COLLECTOR_ROLLOUT_RUNNER=I_UNDERSTAND_THIS_RUNS_SAFE_REMOTE_COLLECTOR_ROLLOUT_STEPS \
+repo/ops/tom-readonly/remote-collector-rollout-runner.sh run runtime/remote-onboarding/<serverId>
 repo/ops/tom-readonly/remote-collector-pull.sh plan runtime/remote-collector-pull.sources.json
 CONFIRM_REMOTE_COLLECTOR_PULL=I_UNDERSTAND_THIS_ONLY_READS_REMOTE_COLLECTOR_SNAPSHOTS \
 repo/ops/tom-readonly/remote-collector-pull.sh pull runtime/remote-collector-pull.sources.json
@@ -104,9 +108,11 @@ repo/ops/tom-readonly/remote-collector-preflight.sh plan runtime/remote-onboardi
 CONFIRM_REMOTE_COLLECTOR_PREFLIGHT=I_UNDERSTAND_THIS_ONLY_READS_REMOTE_PREREQUISITES \
 repo/ops/tom-readonly/remote-collector-preflight.sh check runtime/remote-onboarding/<serverId>
 repo/ops/tom-readonly/remote-collector-rollout.sh status runtime/remote-onboarding/<serverId>
+CONFIRM_REMOTE_COLLECTOR_ROLLOUT_RUNNER=I_UNDERSTAND_THIS_RUNS_SAFE_REMOTE_COLLECTOR_ROLLOUT_STEPS \
+repo/ops/tom-readonly/remote-collector-rollout-runner.sh run runtime/remote-onboarding/<serverId>
 ```
 
-本机侧 `push-remote-collector-credentials.sh apply` 只通过 SSH 写 Tom control-center runtime 下的远端只读 SSH key 和 onboarding 配置；它不会连接第二台 Oracle，不会写 registry，不会修改任何实例目录。Tom 侧 `remote-collector-credentials.sh apply` 只复制 Tom 本地已有的远端只读 SSH key 到 `runtime/ssh/`，并生成 `runtime/remote-collector-onboarding.json`；它不会联网，不会写远端文件，不会写 registry。接入包默认写入 `runtime/remote-onboarding/<serverId>/`，包含远端 `collector-node.json`、远端 bootstrap 脚本、Tom 拉取配置、Tom 注册配置和 `RUNBOOK.md`。如果没有配置 `collectorNode.buildContext`，脚本会默认把构建 collector image 所需的最小 `build-context/` 一并放进接入包，远端不需要预先克隆完整仓库。`verify` 只读取接入包并离线校验，不 SSH、不写 registry。`preflight check` 会 SSH 到远端执行只读检查命令，只检查 docker、目录可读性、deploy 目录权限和 gateway 端口，不写远端文件、不启动容器、不调用 live API，并把结果写入 Tom 本地 `runtime/remote-preflight-state/<serverId>.json`。`remote-collector-rollout.sh status` 不联网、不写文件，用来确认下一步是补远端凭据、preflight、pull、register 还是 healthcheck。
+本机侧 `push-remote-collector-credentials.sh apply` 只通过 SSH 写 Tom control-center runtime 下的远端只读 SSH key 和 onboarding 配置；它不会连接第二台 Oracle，不会写 registry，不会修改任何实例目录。Tom 侧 `remote-collector-credentials.sh apply` 只复制 Tom 本地已有的远端只读 SSH key 到 `runtime/ssh/`，并生成 `runtime/remote-collector-onboarding.json`；它不会联网，不会写远端文件，不会写 registry。接入包默认写入 `runtime/remote-onboarding/<serverId>/`，包含远端 `collector-node.json`、远端 bootstrap 脚本、Tom 拉取配置、Tom 注册配置和 `RUNBOOK.md`。如果没有配置 `collectorNode.buildContext`，脚本会默认把构建 collector image 所需的最小 `build-context/` 一并放进接入包，远端不需要预先克隆完整仓库。`verify` 只读取接入包并离线校验，不 SSH、不写 registry。`preflight check` 会 SSH 到远端执行只读检查命令，只检查 docker、目录可读性、deploy 目录权限和 gateway 端口，不写远端文件、不启动容器、不调用 live API，并把结果写入 Tom 本地 `runtime/remote-preflight-state/<serverId>.json`。`remote-collector-rollout.sh status` 不联网、不写文件，用来确认下一步是补远端凭据、preflight、pull、register 还是 healthcheck。`remote-collector-rollout-runner.sh run` 会按这个阶段顺序自动调用对应安全脚本，但必须显式提供确认令牌；它不会跳过缺凭据、缺远端 snapshot 或失败检查。
 
 远端 collector 拉取只读取远端 snapshot 文件，远端服务器必须先自行生成 collector JSON。拉取命令不会执行远端 collector、不会修改远端实例目录，也不会调用 `/api/managed-actions/live`。本地写入路径必须位于：
 

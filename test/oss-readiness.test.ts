@@ -151,6 +151,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   const pushRemoteCollectorCredentialsExample = path.join(ROOT, "ops", "local", "push-remote-collector-credentials.example.json");
   const remoteCollectorPreflight = path.join(ROOT, "ops", "tom-readonly", "remote-collector-preflight.sh");
   const remoteCollectorRollout = path.join(ROOT, "ops", "tom-readonly", "remote-collector-rollout.sh");
+  const remoteCollectorRolloutRunner = path.join(ROOT, "ops", "tom-readonly", "remote-collector-rollout-runner.sh");
   const remoteCollectorPull = path.join(ROOT, "ops", "tom-readonly", "remote-collector-pull.sh");
   const remoteCollectorPullExample = path.join(ROOT, "ops", "tom-readonly", "remote-collector-pull.sources.example.json");
   const registerRemoteCollector = path.join(ROOT, "ops", "tom-readonly", "register-remote-collector.sh");
@@ -201,6 +202,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(existsSync(pushRemoteCollectorCredentialsExample));
   assert(existsSync(remoteCollectorPreflight));
   assert(existsSync(remoteCollectorRollout));
+  assert(existsSync(remoteCollectorRolloutRunner));
   assert(existsSync(remoteCollectorPull));
   assert(existsSync(remoteCollectorPullExample));
   assert(existsSync(registerRemoteCollector));
@@ -275,6 +277,15 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(remoteCollectorRolloutText, /mutatesOpenClawInstance: false/);
   assert.match(remoteCollectorRolloutText, /callsLiveApi: false/);
   assert.doesNotMatch(remoteCollectorRolloutText, /api\/managed-actions\/live/);
+  const remoteCollectorRolloutRunnerText = readFileSync(remoteCollectorRolloutRunner, "utf8");
+  assert.match(remoteCollectorRolloutRunnerText, /CONFIRM_REMOTE_COLLECTOR_ROLLOUT_RUNNER/);
+  assert.match(remoteCollectorRolloutRunnerText, /I_UNDERSTAND_THIS_RUNS_SAFE_REMOTE_COLLECTOR_ROLLOUT_STEPS/);
+  assert.match(remoteCollectorRolloutRunnerText, /remote-collector-rollout\.sh/);
+  assert.match(remoteCollectorRolloutRunnerText, /remote-collector-preflight\.sh/);
+  assert.match(remoteCollectorRolloutRunnerText, /remote-collector-pull\.sh/);
+  assert.match(remoteCollectorRolloutRunnerText, /register-remote-collector\.sh/);
+  assert.match(remoteCollectorRolloutRunnerText, /mutatesOpenClawInstance/);
+  assert.doesNotMatch(remoteCollectorRolloutRunnerText, /api\/managed-actions\/live/);
   const remoteCollectorPullText = readFileSync(remoteCollectorPull, "utf8");
   assert.match(remoteCollectorPullText, /CONFIRM_REMOTE_COLLECTOR_PULL/);
   assert.match(remoteCollectorPullText, /I_UNDERSTAND_THIS_ONLY_READS_REMOTE_COLLECTOR_SNAPSHOTS/);

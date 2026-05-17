@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-跨服务器只读 collector 接入总控增强：让 `remote-collector-preflight.sh check` 在 Tom 本地留下 `runtime/remote-preflight-state/<serverId>.json`，新增 `remote-collector-rollout.sh status/plan` 作为跨服务器只读接入闸门，并新增 Tom 端 `remote-collector-credentials.sh` 与本机侧 `push-remote-collector-credentials.sh`，把远端 SSH 凭据准备流程工具化。
+跨服务器只读 collector 接入总控增强：在已有 `remote-collector-rollout.sh status/plan` 闸门、Tom 端 `remote-collector-credentials.sh` 和本机侧 `push-remote-collector-credentials.sh` 的基础上，新增 `remote-collector-rollout-runner.sh`，让 Tom 在显式确认后按当前阶段自动执行下一步安全脚本，避免手工串步骤时跑偏。
 
 ## 本轮不做
 
@@ -23,6 +23,8 @@
 - 在 Tom 先复制 `repo/ops/tom-readonly/remote-collector-onboarding.example.json` 到 `runtime/remote-collector-onboarding.json`，填入第二台 Oracle 的 SSH 信息和实例路径。
 - 任何阶段不确定下一步时，先运行：
   `repo/ops/tom-readonly/remote-collector-rollout.sh status runtime/remote-onboarding/<serverId>`
+- 如果已经准备好真实远端凭据、onboarding、远端 snapshot 等前置条件，优先让 Tom 自动推进安全阶段：
+  `CONFIRM_REMOTE_COLLECTOR_ROLLOUT_RUNNER=I_UNDERSTAND_THIS_RUNS_SAFE_REMOTE_COLLECTOR_ROLLOUT_STEPS repo/ops/tom-readonly/remote-collector-rollout-runner.sh run runtime/remote-onboarding/<serverId>`
 - 如果 rollout gate 返回 `needs_remote_credentials`，必须先补齐真实远端 host/user/port 和 Tom 上可读的只读 SSH key，不能用样板 `10.0.0.12` 硬跑 preflight。
 - 如果远端只读 SSH key 还在本机，推荐先复制 `ops/local/push-remote-collector-credentials.example.json` 到 `runtime/push-remote-collector-credentials.json`，填入真实 `remote.sourceSshKeyPath` 后运行：
   `ops/local/push-remote-collector-credentials.sh plan runtime/push-remote-collector-credentials.json`
@@ -82,6 +84,15 @@
 
 ## 最近完成
 
+- 已新增 `ops/tom-readonly/remote-collector-rollout-runner.sh`，按 rollout gate 当前阶段自动调用 onboarding refresh、只读 preflight、只读 pull、registry register 和 healthcheck。
+- `remote-collector-rollout-runner.sh status/plan` 只读取 rollout gate；`step/run` 必须设置 `CONFIRM_REMOTE_COLLECTOR_ROLLOUT_RUNNER=I_UNDERSTAND_THIS_RUNS_SAFE_REMOTE_COLLECTOR_ROLLOUT_STEPS`。
+- runner 缺少 Tom 本地 `runtime/remote-collector-onboarding.json` 或真实远端 SSH key 时会停在 `needs_remote_credentials`，不会硬跑 SSH。
+- 已新增 `test/remote-collector-rollout-runner.test.ts`，覆盖 status 只读代理、step 必须显式确认、刷新 onboarding 后推进到 preflight。
+- 已验证 `bash -n ops/tom-readonly/remote-collector-rollout-runner.sh`。
+- 已验证 `npm test -- test/remote-collector-rollout-runner.test.ts test/remote-collector-rollout.test.ts test/oss-readiness.test.ts`，11/11 通过。
+- 已验证 `npm test -- test/remote-collector-rollout-runner.test.ts test/push-remote-collector-credentials.test.ts test/remote-collector-credentials.test.ts test/remote-collector-rollout.test.ts test/remote-collector-preflight.test.ts test/remote-collector-onboarding.test.ts test/remote-collector-pull.test.ts test/register-remote-collector.test.ts test/collector-node-bootstrap.test.ts test/oss-readiness.test.ts`，32/32 通过。
+- 已验证 `npm run build`。
+- 已尝试 `npm test` 全量套件；协作大厅相关用例出现多处失败并长时间未退出，已中断。失败集中在 hall execution / handoff / runtime-backed discussion，与本轮新增的跨服务器脚本链路无直接交叉，后续需要单独处理大厅测试稳定性。
 - 已新增 `ops/tom-readonly/remote-collector-rollout.sh`，作为跨服务器只读 collector 接入总控闸门。
 - 已新增 `ops/tom-readonly/remote-collector-credentials.sh` 和 `remote-collector-credentials.example.json`，用于把 Tom 本地已有的远端只读 SSH key 安装到 control-center runtime，并生成 `runtime/remote-collector-onboarding.json`。
 - `remote-collector-credentials.sh plan` 不写文件、不联网；`apply` 必须设置 `CONFIRM_REMOTE_COLLECTOR_CREDENTIALS=I_UNDERSTAND_THIS_ONLY_WRITES_CONTROL_CENTER_REMOTE_CREDENTIALS`，只写 Tom control-center runtime，不 SSH、不写 registry、不修改实例目录。
