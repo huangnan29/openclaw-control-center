@@ -234,6 +234,7 @@ test("remote collector rollout gate reports the next safe stage", async () => {
     assert.equal(needsCredentials.stage, "needs_remote_credentials");
     assert.equal(needsCredentials.evidence.remoteAccess.status, "blocked");
     assert(needsCredentials.evidence.remoteAccess.issues.some((issue: string) => issue.includes("SSH key")));
+    assert(needsCredentials.nextCommands.some((command: string) => command.includes("remote-oracle-intake.sh apply")));
     assert(needsCredentials.nextCommands.some((command: string) => command.includes("write-push-config")));
     assert(needsCredentials.nextCommands.some((command: string) => command.includes("push-remote-collector-credentials.sh apply")));
     assert(needsCredentials.nextCommands.some((command: string) => command.includes("remote-collector-credentials.sh apply")));

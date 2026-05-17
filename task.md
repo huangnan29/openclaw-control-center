@@ -28,6 +28,9 @@
   `REMOTE_ORACLE_HOST=<可达候选 host> REMOTE_ORACLE_KEY_PATH=<可达候选 keyPath> ops/local/discover-remote-oracle-credentials.sh render-push-config ops/local/discover-remote-oracle-credentials.example.json > runtime/push-remote-collector-credentials.json`
 - 或显式确认后只写本机 push 配置文件：
   `CONFIRM_REMOTE_ORACLE_PUSH_CONFIG_WRITE=I_UNDERSTAND_THIS_ONLY_WRITES_LOCAL_PUSH_CONFIG REMOTE_ORACLE_HOST=<可达候选 host> REMOTE_ORACLE_KEY_PATH=<可达候选 keyPath> ops/local/discover-remote-oracle-credentials.sh write-push-config ops/local/discover-remote-oracle-credentials.example.json`
+- 如果已明确知道第二台 Oracle host/key，优先用 intake 编排器先预览再接入 Tom runtime：
+  `REMOTE_ORACLE_HOST=<可达候选 host> REMOTE_ORACLE_KEY_PATH=<可达候选 keyPath> ops/local/remote-oracle-intake.sh plan`
+  `CONFIRM_REMOTE_ORACLE_INTAKE=I_UNDERSTAND_THIS_WRITES_LOCAL_PUSH_CONFIG_AND_TOM_RUNTIME_ONLY REMOTE_ORACLE_HOST=<可达候选 host> REMOTE_ORACLE_KEY_PATH=<可达候选 keyPath> ops/local/remote-oracle-intake.sh apply`
 - 在 Tom 先复制 `repo/ops/tom-readonly/remote-collector-onboarding.example.json` 到 `runtime/remote-collector-onboarding.json`，填入第二台 Oracle 的 SSH 信息和实例路径。
 - 任何阶段不确定下一步时，先运行：
   `repo/ops/tom-readonly/remote-collector-rollout.sh status runtime/remote-onboarding/<serverId>`
@@ -100,6 +103,16 @@
 
 ## 最近完成
 
+- 已新增 `ops/local/remote-oracle-intake.sh`，作为本机侧第二台 Oracle 凭据接入编排器。
+- `remote-oracle-intake.sh plan` 只渲染 push 配置摘要，不写文件、不联网、不连接 Tom、不连接第二台 Oracle。
+- `remote-oracle-intake.sh apply` 必须设置 `CONFIRM_REMOTE_ORACLE_INTAKE=I_UNDERSTAND_THIS_WRITES_LOCAL_PUSH_CONFIG_AND_TOM_RUNTIME_ONLY`，只串联本机 push 配置写入和 Tom runtime 凭据推送。
+- `remote-oracle-intake.sh apply` 不连接第二台 Oracle、不写 Tom registry、不修改任何 OpenClaw 实例目录、不调用 managed action live API。
+- 已新增 `test/remote-oracle-intake.test.ts`，覆盖 plan 不写不推、apply 缺确认被拒、apply 只写本机配置并只推 Tom runtime。
+- 已验证 `bash -n ops/local/remote-oracle-intake.sh`。
+- 已验证 `npm test -- test/remote-oracle-intake.test.ts`，3/3 通过。
+- 已验证 intake、rollout、发现、push 和 OSS 安全断言组合，24/24 通过。
+- 已验证跨服务器只读上线相关回归集，49/49 通过。
+- 已验证 `npm run build`。
 - 已增强 `ops/local/discover-remote-oracle-credentials.sh`，新增 `write-push-config` 模式。
 - `write-push-config` 必须设置 `CONFIRM_REMOTE_ORACLE_PUSH_CONFIG_WRITE=I_UNDERSTAND_THIS_ONLY_WRITES_LOCAL_PUSH_CONFIG`，只根据显式 `REMOTE_ORACLE_HOST` 和 `REMOTE_ORACLE_KEY_PATH` 写本机 `runtime/push-remote-collector-credentials.json`。
 - `write-push-config` 不联网、不连接 Tom、不连接第二台 Oracle、不写 Tom runtime、不写 registry、不修改任何 OpenClaw 实例目录，也不输出私钥内容。

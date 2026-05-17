@@ -29,6 +29,7 @@
 - `rollback.sh`：回滚到指定提交；如果不传提交，则使用最近一次 `update.sh` 记录的 `previous-good.commit`。
 - `../local/discover-remote-oracle-credentials.sh`：在本机只读发现第二台 Oracle 的候选 SSH host/key，`probe` 需显式确认且只执行只读 SSH 探测；拿到明确 host/key 后可用 `write-push-config` 只写本机 push 配置。
 - `../local/discover-remote-oracle-credentials.example.json`：本机候选发现配置样板，不包含真实密钥内容。
+- `../local/remote-oracle-intake.sh`：本机侧凭据接入编排器；`plan` 不写文件不联网，`apply` 显式确认后只写本机 push 配置和 Tom control-center runtime。
 - `../local/push-remote-collector-credentials.sh`：在本机把远端只读 SSH key 和 onboarding 配置推送到 Tom control-center runtime，不连接第二台 Oracle。
 - `managed-action-healthcheck-rollout.example.json`：只读 healthcheck live 演练的 rollout 样板，不会被默认加载。
 - `managed-action-dry-run-gate.sh`：管理动作 dry-run 证据闸门，默认只读检查 readiness 与 audit，显式确认后只创建 dry-run 审计记录。
@@ -96,6 +97,11 @@ BRANCH=multi-instance-readonly-control-center ./update.sh
 
 ```bash
 # 如果远端只读 SSH key 还在本机，可以先在本机执行：
+REMOTE_ORACLE_HOST=<可达候选 host> REMOTE_ORACLE_KEY_PATH=<可达候选 keyPath> \
+ops/local/remote-oracle-intake.sh plan
+CONFIRM_REMOTE_ORACLE_INTAKE=I_UNDERSTAND_THIS_WRITES_LOCAL_PUSH_CONFIG_AND_TOM_RUNTIME_ONLY \
+REMOTE_ORACLE_HOST=<可达候选 host> REMOTE_ORACLE_KEY_PATH=<可达候选 keyPath> \
+ops/local/remote-oracle-intake.sh apply
 ops/local/discover-remote-oracle-credentials.sh scan ops/local/discover-remote-oracle-credentials.example.json
 CONFIRM_REMOTE_ORACLE_DISCOVERY=I_UNDERSTAND_THIS_ONLY_PROBES_SSH_READONLY \
 ops/local/discover-remote-oracle-credentials.sh probe ops/local/discover-remote-oracle-credentials.example.json
@@ -126,7 +132,7 @@ CONFIRM_REMOTE_COLLECTOR_ROLLOUT_RUNNER=I_UNDERSTAND_THIS_RUNS_SAFE_REMOTE_COLLE
 repo/ops/tom-readonly/remote-collector-rollout-runner.sh run runtime/remote-onboarding/<serverId>
 ```
 
-本机侧 `discover-remote-oracle-credentials.sh scan` 只读取本机 SSH config、候选 key 文件元数据和显式 host hint 文件，不联网、不写文件、不输出私钥内容；`probe` 必须显式确认，只对候选 host/key 执行 `id -un`、`uname -n`、`uname -s` 这类只读 SSH 探测，并使用 `/dev/null` 作为 known hosts 文件，避免悄悄写本机状态；`render-push-config` 只按显式 `REMOTE_ORACLE_HOST` 和 `REMOTE_ORACLE_KEY_PATH` 输出本机 push 配置 JSON；`write-push-config` 必须显式确认，只把同一份 push 配置写到本机 `runtime/` 下。本机侧 `push-remote-collector-credentials.sh apply` 只通过 SSH 写 Tom control-center runtime 下的远端只读 SSH key 和 onboarding 配置；它不会连接第二台 Oracle，不会写 registry，不会修改任何实例目录。Tom 侧 `remote-collector-credentials.sh apply` 只复制 Tom 本地已有的远端只读 SSH key 到 `runtime/ssh/`，并生成 `runtime/remote-collector-onboarding.json`；它不会联网，不会写远端文件，不会写 registry。接入包默认写入 `runtime/remote-onboarding/<serverId>/`，包含远端 `collector-node.json`、远端 bootstrap 脚本、Tom 拉取配置、Tom 注册配置和 `RUNBOOK.md`。如果没有配置 `collectorNode.buildContext`，脚本会默认把构建 collector image 所需的最小 `build-context/` 一并放进接入包，远端不需要预先克隆完整仓库。`verify` 只读取接入包并离线校验，不 SSH、不写 registry。`preflight check` 会 SSH 到远端执行只读检查命令，只检查 docker、目录可读性、deploy 目录权限和 gateway 端口，不写远端文件、不启动容器、不调用 live API，并把结果写入 Tom 本地 `runtime/remote-preflight-state/<serverId>.json`。`remote-collector-rollout.sh status` 不联网、不写文件，用来确认下一步是补远端凭据、preflight、pull、register 还是 healthcheck。`remote-collector-rollout-runner.sh run` 会按这个阶段顺序自动调用对应安全脚本，但必须显式提供确认令牌；它不会跳过缺凭据、缺远端 snapshot 或失败检查。
+本机侧 `remote-oracle-intake.sh plan` 只渲染将要推送到 Tom 的配置摘要，不写文件、不联网；`apply` 必须显式确认，只串联本机 `write-push-config`、本机 `push-remote-collector-credentials.sh plan` 和推送 Tom runtime，不连接第二台 Oracle、不写 registry、不修改任何实例目录。本机侧 `discover-remote-oracle-credentials.sh scan` 只读取本机 SSH config、候选 key 文件元数据和显式 host hint 文件，不联网、不写文件、不输出私钥内容；`probe` 必须显式确认，只对候选 host/key 执行 `id -un`、`uname -n`、`uname -s` 这类只读 SSH 探测，并使用 `/dev/null` 作为 known hosts 文件，避免悄悄写本机状态；`render-push-config` 只按显式 `REMOTE_ORACLE_HOST` 和 `REMOTE_ORACLE_KEY_PATH` 输出本机 push 配置 JSON；`write-push-config` 必须显式确认，只把同一份 push 配置写到本机 `runtime/` 下。本机侧 `push-remote-collector-credentials.sh apply` 只通过 SSH 写 Tom control-center runtime 下的远端只读 SSH key 和 onboarding 配置；它不会连接第二台 Oracle，不会写 registry，不会修改任何实例目录。Tom 侧 `remote-collector-credentials.sh apply` 只复制 Tom 本地已有的远端只读 SSH key 到 `runtime/ssh/`，并生成 `runtime/remote-collector-onboarding.json`；它不会联网，不会写远端文件，不会写 registry。接入包默认写入 `runtime/remote-onboarding/<serverId>/`，包含远端 `collector-node.json`、远端 bootstrap 脚本、Tom 拉取配置、Tom 注册配置和 `RUNBOOK.md`。如果没有配置 `collectorNode.buildContext`，脚本会默认把构建 collector image 所需的最小 `build-context/` 一并放进接入包，远端不需要预先克隆完整仓库。`verify` 只读取接入包并离线校验，不 SSH、不写 registry。`preflight check` 会 SSH 到远端执行只读检查命令，只检查 docker、目录可读性、deploy 目录权限和 gateway 端口，不写远端文件、不启动容器、不调用 live API，并把结果写入 Tom 本地 `runtime/remote-preflight-state/<serverId>.json`。`remote-collector-rollout.sh status` 不联网、不写文件，用来确认下一步是补远端凭据、preflight、pull、register 还是 healthcheck。`remote-collector-rollout-runner.sh run` 会按这个阶段顺序自动调用对应安全脚本，但必须显式提供确认令牌；它不会跳过缺凭据、缺远端 snapshot 或失败检查。
 
 远端 collector 拉取只读取远端 snapshot 文件，远端服务器必须先自行生成 collector JSON。拉取命令不会执行远端 collector、不会修改远端实例目录，也不会调用 `/api/managed-actions/live`。本地写入路径必须位于：
 
