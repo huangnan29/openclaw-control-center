@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "approved": false,
+  "approvedAt": "",
+  "approvedBy": "",
+  "instanceId": "tom",
+  "action": "healthcheck",
+  "operator": "Anan",
+  "risk": "low",
+  "confirmationText": "I_UNDERSTAND_THIS_TEMPORARILY_ENABLES_LIVE_GATE",
+  "liveConfirmationText": "I_UNDERSTAND_THIS_CALLS_LIVE_API",
+  "scope": {
+    "service": "openclaw-control-center",
+    "mutatesOpenClawInstance": false,
+    "allowedAction": "healthcheck"
+  },
+  "checklist": {
+    "understandsTemporaryLiveGate": false,
+    "understandsLocalTokenRequired": false,
+    "understandsAutoRollback": false,
+    "understandsImpactSnapshot": false
+  },
+  "notes": "人工确认后，将 approved 改为 true，填写 approvedAt 与 approvedBy，并将 checklist 全部改为 true。"
+}

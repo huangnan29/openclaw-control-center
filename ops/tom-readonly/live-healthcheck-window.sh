@@ -13,6 +13,8 @@ STATE_DIR="${STATE_DIR:-${DEPLOY_DIR}/runtime/deploy-state}"
 OVERRIDE_FILE="${OVERRIDE_FILE:-${DEPLOY_DIR}/runtime/docker-compose.live-healthcheck.override.yml}"
 ROLLOUT_HOST_FILE="${ROLLOUT_HOST_FILE:-${DEPLOY_DIR}/runtime/managed-action-healthcheck-rollout.json}"
 ROLLOUT_SOURCE="${ROLLOUT_SOURCE:-${DEPLOY_DIR}/repo/ops/tom-readonly/managed-action-healthcheck-rollout.example.json}"
+APPROVAL_FILE="${APPROVAL_FILE:-${DEPLOY_DIR}/runtime/live-healthcheck-approval.json}"
+APPROVAL_SCRIPT="${APPROVAL_SCRIPT:-${DEPLOY_DIR}/repo/ops/tom-readonly/live-healthcheck-approval.sh}"
 PREFLIGHT_SCRIPT="${PREFLIGHT_SCRIPT:-${DEPLOY_DIR}/repo/ops/tom-readonly/live-healthcheck-preflight.sh}"
 SMOKE_SCRIPT="${SMOKE_SCRIPT:-${DEPLOY_DIR}/repo/ops/tom-readonly/live-healthcheck-smoke.sh}"
 HEALTHCHECK_SCRIPT="${HEALTHCHECK_SCRIPT:-${DEPLOY_DIR}/healthcheck.sh}"
@@ -61,8 +63,16 @@ require_base_paths() {
 
 require_live_paths() {
   [ -f "$ROLLOUT_SOURCE" ] || fail "rollout 样板不存在：${ROLLOUT_SOURCE}"
+  [ -x "$APPROVAL_SCRIPT" ] || fail "批准校验脚本不存在或不可执行：${APPROVAL_SCRIPT}"
   [ -x "$PREFLIGHT_SCRIPT" ] || fail "preflight 脚本不存在或不可执行：${PREFLIGHT_SCRIPT}"
   [ -x "$SMOKE_SCRIPT" ] || fail "smoke 脚本不存在或不可执行：${SMOKE_SCRIPT}"
+}
+
+check_approval_file() {
+  log "校验 live healthcheck 人工批准文件：${APPROVAL_FILE}"
+  INSTANCE_ID="${INSTANCE_ID:-tom}" \
+    OPERATOR="${OPERATOR:-Anan}" \
+    "$APPROVAL_SCRIPT" check "$APPROVAL_FILE"
 }
 
 write_rollout_file() {
@@ -103,6 +113,7 @@ start_live_window() {
   require_confirm
   require_base_paths
   require_live_paths
+  check_approval_file
   write_rollout_file
   write_override_file
   record_state_marker
@@ -114,6 +125,8 @@ start_live_window() {
   log "执行 EXPECT_LIVE_READY=true preflight"
   EXPECT_LIVE_READY=true \
     ROLLOUT_FILE="$ROLLOUT_HOST_FILE" \
+    INSTANCE_ID="${INSTANCE_ID:-tom}" \
+    OPERATOR="${OPERATOR:-Anan}" \
     CONTAINER_NAME="$CONTAINER_NAME" \
     "$PREFLIGHT_SCRIPT"
 }
@@ -174,7 +187,9 @@ run_once() {
   trap rollback_on_exit EXIT
   WINDOW_ACTIVE="true"
   start_live_window
-  "$SMOKE_SCRIPT"
+  INSTANCE_ID="${INSTANCE_ID:-tom}" \
+    OPERATOR="${OPERATOR:-Anan}" \
+    "$SMOKE_SCRIPT"
   WINDOW_ACTIVE="false"
   stop_live_window
   local impact_after
@@ -198,6 +213,9 @@ usage() {
   run 还必须设置：
     CONFIRM_LIVE_HEALTHCHECK=I_UNDERSTAND_THIS_CALLS_LIVE_API
     LOCAL_API_TOKEN=<本地令牌>
+
+  run 还必须存在通过校验的批准文件：
+    /srv/openclaw-control-center-readonly/runtime/live-healthcheck-approval.json
 
   run 会自动生成 before/after 实例影响快照并比较。
 TEXT

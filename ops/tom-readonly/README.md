@@ -16,6 +16,8 @@
 - `update.sh`：拉取 `multi-instance-readonly-control-center` 分支，重建控制中心容器，随后执行健康检查。
 - `rollback.sh`：回滚到指定提交；如果不传提交，则使用最近一次 `update.sh` 记录的 `previous-good.commit`。
 - `managed-action-healthcheck-rollout.example.json`：只读 healthcheck live 演练的 rollout 样板，不会被默认加载。
+- `live-healthcheck-approval.sh`：生成或校验 live healthcheck 人工批准记录，不调用 live API。
+- `live-healthcheck-approval.example.json`：批准记录样板，默认未批准。
 - `live-healthcheck-preflight.sh`：只读检查 healthcheck live 演练条件，不调用 live API。
 - `live-healthcheck-smoke.sh`：手动 live healthcheck 演练脚本；只有显式提供本地令牌和确认环境变量才会调用 live API。
 - `live-healthcheck-window.sh`：一次性演练窗口脚本；临时启用 control-center 的 healthcheck live 配置，失败或结束后恢复只读状态。
@@ -30,6 +32,8 @@ cd /srv/openclaw-control-center-readonly
 ./install-collector-cron.sh
 ./update.sh
 ./rollback.sh <commit>
+repo/ops/tom-readonly/live-healthcheck-approval.sh template runtime/live-healthcheck-approval.json
+repo/ops/tom-readonly/live-healthcheck-approval.sh check runtime/live-healthcheck-approval.json
 repo/ops/tom-readonly/live-healthcheck-window.sh status
 repo/ops/tom-readonly/instance-impact-snapshot.sh snapshot readonly-baseline
 ```
@@ -63,6 +67,14 @@ OPERATOR=Anan \
 更推荐使用一次性演练窗口，脚本会在退出前自动恢复只读状态：
 
 ```bash
+repo/ops/tom-readonly/live-healthcheck-approval.sh template runtime/live-healthcheck-approval.json
+# 人工编辑 runtime/live-healthcheck-approval.json：
+# - approved=true
+# - approvedAt=<当前 ISO 时间>
+# - approvedBy=<批准人>
+# - checklist 全部为 true
+repo/ops/tom-readonly/live-healthcheck-approval.sh check runtime/live-healthcheck-approval.json
+
 CONFIRM_LIVE_HEALTHCHECK_WINDOW=I_UNDERSTAND_THIS_TEMPORARILY_ENABLES_LIVE_GATE \
 CONFIRM_LIVE_HEALTHCHECK=I_UNDERSTAND_THIS_CALLS_LIVE_API \
 LOCAL_API_TOKEN=<本地令牌> \
@@ -83,6 +95,7 @@ repo/ops/tom-readonly/live-healthcheck-window.sh run
 
 ```bash
 CONFIRM_LIVE_HEALTHCHECK_WINDOW=I_UNDERSTAND_THIS_TEMPORARILY_ENABLES_LIVE_GATE \
+APPROVAL_FILE=/srv/openclaw-control-center-readonly/runtime/live-healthcheck-approval.json \
 repo/ops/tom-readonly/live-healthcheck-window.sh enable
 
 repo/ops/tom-readonly/live-healthcheck-window.sh disable
