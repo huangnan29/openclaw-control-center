@@ -72,7 +72,10 @@
   `CONFIRM_REMOTE_COLLECTOR_NODE_BOOTSTRAP_PLAN=I_UNDERSTAND_THIS_ONLY_RUNS_REMOTE_BOOTSTRAP_PLAN repo/ops/tom-readonly/remote-collector-node-sync.sh bootstrap-plan runtime/remote-onboarding/<serverId>`
 - 确认后只写远端 collector-only 部署文件：
   `CONFIRM_REMOTE_COLLECTOR_NODE_BOOTSTRAP_WRITE=I_UNDERSTAND_THIS_ONLY_WRITES_REMOTE_COLLECTOR_NODE_FILES repo/ops/tom-readonly/remote-collector-node-sync.sh bootstrap-write runtime/remote-onboarding/<serverId>`
-- 然后在远端执行 `./collector-snapshot.sh` 生成 snapshot，确认 JSON 存在。
+- 生成远端 collector snapshot：
+  `CONFIRM_REMOTE_COLLECTOR_NODE_SNAPSHOT=I_UNDERSTAND_THIS_RUNS_REMOTE_COLLECTOR_SNAPSHOT_ONLY repo/ops/tom-readonly/remote-collector-node-sync.sh snapshot runtime/remote-onboarding/<serverId>`
+- 安装远端 collector cron：
+  `CONFIRM_REMOTE_COLLECTOR_NODE_CRON=I_UNDERSTAND_THIS_ONLY_INSTALLS_REMOTE_COLLECTOR_CRON repo/ops/tom-readonly/remote-collector-node-sync.sh install-cron runtime/remote-onboarding/<serverId>`
 - 使用接入包里的 `remote-collector-pull.sources.json`，只配置远端 snapshot 路径和本地 `runtime/collectors/<serverId>/snapshot.json`。
 - 先执行 `repo/ops/tom-readonly/remote-collector-pull.sh plan runtime/remote-onboarding/<serverId>/remote-collector-pull.sources.json` 审查来源。
 - 只有确认远端 snapshot 文件存在后，才执行：
@@ -113,8 +116,13 @@
 - `remote-collector-node-sync.sh plan` 只读取 Tom 本地接入包，不联网、不写文件。
 - `remote-collector-node-sync.sh sync` 必须设置 `CONFIRM_REMOTE_COLLECTOR_NODE_SYNC=I_UNDERSTAND_THIS_ONLY_COPIES_COLLECTOR_BUNDLE_TO_REMOTE`，只通过 SSH+tar 写远端 collector deploy 目录，不写 OpenClaw 实例目录。
 - `bootstrap-plan/bootstrap-write` 分别需要显式确认；`bootstrap-write` 只执行远端接入包里的 `bootstrap-collector-node.sh write`，写 collector-only 部署文件，不启动容器、不安装 cron、不调用 live API。
-- 已让 `remote-collector-rollout.sh` 在 `needs_remote_collector_pull` 阶段输出 `remote-collector-node-sync.sh` 的 plan/sync/bootstrap 命令，减少后续手工复制接入包的风险。
-- 已新增 `test/remote-collector-node-sync.test.ts`，覆盖 plan 不联网、sync 必须确认、bootstrap plan/write 仍保持 collector-only 边界。
+- `snapshot/install-cron` 分别需要显式确认；`snapshot` 只启动/使用 collector-only 容器生成远端 snapshot，`install-cron` 只安装当前用户 crontab 中的 collector 受控块，二者都不修改 OpenClaw 实例目录、不调用 live API。
+- 已让 `remote-collector-rollout.sh` 在 `needs_remote_collector_pull` 阶段输出 `remote-collector-node-sync.sh` 的 plan/sync/bootstrap/snapshot/cron 命令，减少后续手工复制和远端手工执行风险。
+- 已让 `remote-collector-rollout-runner.sh` 在 `needs_remote_collector_pull` 阶段自动串联远端接入包同步、bootstrap plan/write、snapshot、cron 和 Tom 只读 pull；缺凭据、远端检查或 snapshot 失败时会停住。
+- 已新增并扩展 `test/remote-collector-node-sync.test.ts`，覆盖 plan 不联网、sync 必须确认、bootstrap plan/write、snapshot/cron 仍保持 collector-only 边界。
+- 已扩展 `test/remote-collector-rollout-runner.test.ts`，覆盖 runner 在 pull 前先准备远端 collector 节点并生成 snapshot。
+- 已验证 `npm test -- test/remote-collector-node-sync.test.ts test/remote-collector-rollout-runner.test.ts test/remote-collector-rollout.test.ts test/go-live-gate.test.ts test/oss-readiness.test.ts`，20/20 通过。
+- 已验证跨服务器只读、总闸门、dry-run、凭据接入和远端 collector 自动引导回归集，56/56 通过。
 - 已验证 `bash -n ops/tom-readonly/remote-collector-node-sync.sh` 和 `bash -n ops/tom-readonly/remote-collector-rollout.sh`。
 - 已验证 `npm test -- test/remote-collector-node-sync.test.ts test/oss-readiness.test.ts`，10/10 通过。
 - 已验证跨服务器只读、总闸门、dry-run 和凭据接入回归集，54/54 通过。

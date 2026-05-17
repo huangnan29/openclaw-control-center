@@ -72,7 +72,7 @@ async function writeOnboardingConfig(dir: string): Promise<{ deployDir: string; 
 
 async function writeFakeSsh(
   dir: string,
-  options: { argsFile: string; stdinFile: string; mode?: "sync" | "bootstrap" },
+  options: { argsFile: string; stdinFile: string; mode?: "sync" | "bootstrap" | "node-actions" },
 ): Promise<string> {
   const binDir = join(dir, "bin");
   await mkdir(binDir, { recursive: true });
@@ -83,7 +83,13 @@ async function writeFakeSsh(
   *"bootstrap-collector-node.sh write"*) printf '{"status":"written","nextActions":["cd /srv/openclaw-collector-node && ./collector-snapshot.sh"]}\\n' ;;
   *) printf '{"status":"unknown"}\\n' ;;
 esac`
-    : `printf 'synced\\n'`;
+    : options.mode === "node-actions"
+      ? `case "$*" in
+  *"./collector-snapshot.sh"*) printf 'collector starting\\n{"serverId":"remote-oracle","instances":1,"generatedAt":"2026-05-17T12:00:00.000Z"}\\n' ;;
+  *"./install-collector-cron.sh"*) printf '[完成] 已安装 collector-only cron：*/2 * * * *\\n' ;;
+  *) printf '{"status":"unknown"}\\n' ;;
+esac`
+      : `printf 'synced\\n'`;
   await writeFile(
     ssh,
     `#!/usr/bin/env bash
@@ -214,6 +220,63 @@ test("remote collector node bootstrap modes stay collector-only", async () => {
     const args = await readFile(argsFile, "utf8");
     assert.match(args, /bootstrap-collector-node\.sh write collector-node\.json/);
     assert.doesNotMatch(args, /collector-snapshot\.sh/);
+    assert.equal((await readFile(stdinFile, "utf8")).length, 0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("remote collector node snapshot and cron require confirmation and stay instance-safe", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-remote-node-sync-"));
+  try {
+    const { deployDir, bundleDir } = await writeOnboardingConfig(dir);
+    const argsFile = join(dir, "ssh-node-action-args.txt");
+    const stdinFile = join(dir, "ssh-node-action-stdin.txt");
+    const fakeBin = await writeFakeSsh(dir, { argsFile, stdinFile, mode: "node-actions" });
+    const env = { ...process.env, DEPLOY_DIR: deployDir, PATH: `${fakeBin}:${process.env.PATH || ""}` };
+
+    const blockedSnapshot = spawnSync(SYNC, ["snapshot", bundleDir], { env, encoding: "utf8" });
+    assert.notEqual(blockedSnapshot.status, 0);
+    assert.match(blockedSnapshot.stderr, /CONFIRM_REMOTE_COLLECTOR_NODE_SNAPSHOT/);
+
+    const snapshot = JSON.parse(
+      execFileSync(SYNC, ["snapshot", bundleDir], {
+        env: {
+          ...env,
+          CONFIRM_REMOTE_COLLECTOR_NODE_SNAPSHOT: "I_UNDERSTAND_THIS_RUNS_REMOTE_COLLECTOR_SNAPSHOT_ONLY",
+        },
+        encoding: "utf8",
+      }),
+    );
+    assert.equal(snapshot.status, "snapshot_completed");
+    assert.equal(snapshot.remoteResult.serverId, "remote-oracle");
+    assert.equal(snapshot.safety.startsCollectorContainer, true);
+    assert.equal(snapshot.safety.writesRemoteCollectorRuntime, true);
+    assert.equal(snapshot.safety.writesOpenClawInstanceDirs, false);
+    assert.equal(snapshot.safety.callsLiveApi, false);
+
+    const blockedCron = spawnSync(SYNC, ["install-cron", bundleDir], { env, encoding: "utf8" });
+    assert.notEqual(blockedCron.status, 0);
+    assert.match(blockedCron.stderr, /CONFIRM_REMOTE_COLLECTOR_NODE_CRON/);
+
+    const cron = JSON.parse(
+      execFileSync(SYNC, ["install-cron", bundleDir], {
+        env: {
+          ...env,
+          CONFIRM_REMOTE_COLLECTOR_NODE_CRON: "I_UNDERSTAND_THIS_ONLY_INSTALLS_REMOTE_COLLECTOR_CRON",
+        },
+        encoding: "utf8",
+      }),
+    );
+    assert.equal(cron.status, "cron_installed");
+    assert.equal(cron.safety.installsCron, true);
+    assert.equal(cron.safety.writesOpenClawInstanceDirs, false);
+    assert.equal(cron.safety.restartsOpenClawInstance, false);
+    assert.equal(cron.safety.callsLiveApi, false);
+
+    const args = await readFile(argsFile, "utf8");
+    assert.match(args, /install-collector-cron\.sh/);
+    assert.doesNotMatch(args, /api\/managed-actions\/live/);
     assert.equal((await readFile(stdinFile, "utf8")).length, 0);
   } finally {
     await rm(dir, { recursive: true, force: true });

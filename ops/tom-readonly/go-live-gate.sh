@@ -250,9 +250,9 @@ function buildNextCommands(decision, remoteSummary, dryRunSummary) {
     }
     if (remoteSummary.stage === "needs_remote_collector_pull") {
       return [
-        `# 先按 ${relativeRuntimePath(bundleDir)}/RUNBOOK.md 在远端生成 collector snapshot`,
+        ...remoteSummary.nextCommands,
         runnerCommand,
-      ];
+      ].filter(Boolean);
     }
     return [runnerCommand];
   }

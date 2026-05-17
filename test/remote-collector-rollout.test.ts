@@ -256,6 +256,8 @@ test("remote collector rollout gate reports the next safe stage", async () => {
     assert.equal(needsPull.evidence.preflight.status, "ready");
     assert(needsPull.nextCommands.some((command: string) => command.includes("remote-collector-node-sync.sh sync")));
     assert(needsPull.nextCommands.some((command: string) => command.includes("remote-collector-node-sync.sh bootstrap-write")));
+    assert(needsPull.nextCommands.some((command: string) => command.includes("remote-collector-node-sync.sh snapshot")));
+    assert(needsPull.nextCommands.some((command: string) => command.includes("remote-collector-node-sync.sh install-cron")));
     assert(needsPull.nextCommands.some((command: string) => command.includes("remote-collector-pull.sh pull")));
 
     await writeSnapshotAndPullState(deployDir);

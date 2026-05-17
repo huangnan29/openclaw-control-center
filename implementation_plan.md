@@ -137,7 +137,7 @@
 20. collector-only 远端 registry：server 配置 `collectorSnapshotPath` 后，远端实例可只填写 `id/name`，中央不需要远端 `openclawHome` 或 workspace 路径。
 21. 远端 collector-only 节点 bootstrap：在远端 Oracle 上 dry-run 生成 collector-only compose、registry、snapshot 脚本和 cron 脚本，默认不启动容器、不修改实例。
 22. Tom 远端 collector onboarding 接入包：在 Tom runtime 下生成可审查的接入包，包含远端 collector 配置、远端 bootstrap 脚本、Tom 拉取配置、Tom 注册配置、RUNBOOK 和默认内置的最小 Docker build context；`verify` 可离线校验接入包一致性、安全边界和 bootstrap plan；`preflight check` 只通过 SSH 执行只读远端前置检查；该步骤不写活跃 registry、不修改实例。
-23. Tom 到远端 collector 节点同步：`remote-collector-node-sync.sh plan` 不联网；`sync` 只把接入包复制到远端 collector deploy 目录；`bootstrap-plan/bootstrap-write` 只执行远端 collector-only bootstrap，不启动容器、不安装 cron、不修改实例目录。
+23. Tom 到远端 collector 节点同步与运行：`remote-collector-node-sync.sh plan` 不联网；`sync` 只把接入包复制到远端 collector deploy 目录；`bootstrap-plan/bootstrap-write` 只执行远端 collector-only bootstrap；`snapshot/install-cron` 只启动/使用 collector-only 容器生成 snapshot，并安装当前用户 crontab 中的 collector 受控块，不启动或重启 OpenClaw 实例容器、不修改实例目录。
 24. Tom registry 安全注册：读取已拉取的远端 collector snapshot，先 `plan` 审查将新增的 server 和实例，确认后 `apply` 备份并原子更新 `config/instances.json`；该步骤只更新 control-center registry，不修改远端或本地 OpenClaw 实例。
 25. 第二台 Oracle 接入中央视图：在远端生成 collector JSON，在 Tom 只读拉取后，通过注册脚本把对应 server 的 `collectorSnapshotPath` 写入 registry，再通过 `healthcheck.sh` 验收。
 26. 跨服务器只读接入 rollout gate：读取 onboarding bundle、preflight 状态、pull 状态、snapshot 和 registry，输出 `needs_remote_preflight`、`needs_remote_collector_pull`、`needs_registry_register` 或 `ready_for_healthcheck`，不 SSH、不写 registry、不写远端文件。

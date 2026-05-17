@@ -411,7 +411,8 @@ function buildCommands(bundle, stage) {
       `CONFIRM_REMOTE_COLLECTOR_NODE_SYNC=I_UNDERSTAND_THIS_ONLY_COPIES_COLLECTOR_BUNDLE_TO_REMOTE repo/ops/tom-readonly/remote-collector-node-sync.sh sync ${bundlePath}`,
       `CONFIRM_REMOTE_COLLECTOR_NODE_BOOTSTRAP_PLAN=I_UNDERSTAND_THIS_ONLY_RUNS_REMOTE_BOOTSTRAP_PLAN repo/ops/tom-readonly/remote-collector-node-sync.sh bootstrap-plan ${bundlePath}`,
       `CONFIRM_REMOTE_COLLECTOR_NODE_BOOTSTRAP_WRITE=I_UNDERSTAND_THIS_ONLY_WRITES_REMOTE_COLLECTOR_NODE_FILES repo/ops/tom-readonly/remote-collector-node-sync.sh bootstrap-write ${bundlePath}`,
-      `# 然后按 ${bundlePath}/RUNBOOK.md 在远端人工执行 ./collector-snapshot.sh 生成 collector snapshot`,
+      `CONFIRM_REMOTE_COLLECTOR_NODE_SNAPSHOT=I_UNDERSTAND_THIS_RUNS_REMOTE_COLLECTOR_SNAPSHOT_ONLY repo/ops/tom-readonly/remote-collector-node-sync.sh snapshot ${bundlePath}`,
+      `CONFIRM_REMOTE_COLLECTOR_NODE_CRON=I_UNDERSTAND_THIS_ONLY_INSTALLS_REMOTE_COLLECTOR_CRON repo/ops/tom-readonly/remote-collector-node-sync.sh install-cron ${bundlePath}`,
       `repo/ops/tom-readonly/remote-collector-pull.sh plan ${pullConfig}`,
       `CONFIRM_REMOTE_COLLECTOR_PULL=I_UNDERSTAND_THIS_ONLY_READS_REMOTE_COLLECTOR_SNAPSHOTS repo/ops/tom-readonly/remote-collector-pull.sh pull ${pullConfig}`,
     ];

@@ -189,6 +189,8 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(doc.includes("I_UNDERSTAND_THIS_ONLY_COPIES_COLLECTOR_BUNDLE_TO_REMOTE"));
   assert(doc.includes("I_UNDERSTAND_THIS_ONLY_RUNS_REMOTE_BOOTSTRAP_PLAN"));
   assert(doc.includes("I_UNDERSTAND_THIS_ONLY_WRITES_REMOTE_COLLECTOR_NODE_FILES"));
+  assert(doc.includes("I_UNDERSTAND_THIS_RUNS_REMOTE_COLLECTOR_SNAPSHOT_ONLY"));
+  assert(doc.includes("I_UNDERSTAND_THIS_ONLY_INSTALLS_REMOTE_COLLECTOR_CRON"));
   assert(doc.includes("remote-collector-rollout.sh"));
   assert(doc.includes("I_UNDERSTAND_THIS_ONLY_READS_REMOTE_PREREQUISITES"));
   assert(doc.includes("remote-collector-pull.sh"));
@@ -326,9 +328,14 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(remoteCollectorNodeSyncText, /I_UNDERSTAND_THIS_ONLY_RUNS_REMOTE_BOOTSTRAP_PLAN/);
   assert.match(remoteCollectorNodeSyncText, /CONFIRM_REMOTE_COLLECTOR_NODE_BOOTSTRAP_WRITE/);
   assert.match(remoteCollectorNodeSyncText, /I_UNDERSTAND_THIS_ONLY_WRITES_REMOTE_COLLECTOR_NODE_FILES/);
+  assert.match(remoteCollectorNodeSyncText, /CONFIRM_REMOTE_COLLECTOR_NODE_SNAPSHOT/);
+  assert.match(remoteCollectorNodeSyncText, /I_UNDERSTAND_THIS_RUNS_REMOTE_COLLECTOR_SNAPSHOT_ONLY/);
+  assert.match(remoteCollectorNodeSyncText, /CONFIRM_REMOTE_COLLECTOR_NODE_CRON/);
+  assert.match(remoteCollectorNodeSyncText, /I_UNDERSTAND_THIS_ONLY_INSTALLS_REMOTE_COLLECTOR_CRON/);
   assert.match(remoteCollectorNodeSyncText, /writesRemoteCollectorNode/);
+  assert.match(remoteCollectorNodeSyncText, /startsCollectorContainer/);
   assert.match(remoteCollectorNodeSyncText, /writesOpenClawInstanceDirs: false/);
-  assert.match(remoteCollectorNodeSyncText, /startsContainers: false/);
+  assert.match(remoteCollectorNodeSyncText, /startsContainers: modeName === "snapshot"/);
   assert.match(remoteCollectorNodeSyncText, /callsLiveApi: false/);
   assert.doesNotMatch(remoteCollectorNodeSyncText, /api\/managed-actions\/live/);
   const remoteCollectorRolloutText = readFileSync(remoteCollectorRollout, "utf8");
@@ -351,6 +358,9 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(remoteCollectorRolloutRunnerText, /I_UNDERSTAND_THIS_RUNS_SAFE_REMOTE_COLLECTOR_ROLLOUT_STEPS/);
   assert.match(remoteCollectorRolloutRunnerText, /remote-collector-rollout\.sh/);
   assert.match(remoteCollectorRolloutRunnerText, /remote-collector-preflight\.sh/);
+  assert.match(remoteCollectorRolloutRunnerText, /remote-collector-node-sync\.sh/);
+  assert.match(remoteCollectorRolloutRunnerText, /I_UNDERSTAND_THIS_RUNS_REMOTE_COLLECTOR_SNAPSHOT_ONLY/);
+  assert.match(remoteCollectorRolloutRunnerText, /I_UNDERSTAND_THIS_ONLY_INSTALLS_REMOTE_COLLECTOR_CRON/);
   assert.match(remoteCollectorRolloutRunnerText, /remote-collector-pull\.sh/);
   assert.match(remoteCollectorRolloutRunnerText, /register-remote-collector\.sh/);
   assert.match(remoteCollectorRolloutRunnerText, /mutatesOpenClawInstance/);

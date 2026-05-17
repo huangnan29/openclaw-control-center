@@ -6,12 +6,15 @@ set +x
 # plan 只读取 Tom 本地 onboarding bundle，不联网、不写文件。
 # sync 只把 onboarding bundle 复制到远端 collector deploy 目录，不修改任何 OpenClaw 实例目录。
 # bootstrap-plan/bootstrap-write 只在远端 collector deploy 目录内执行接入包里的 bootstrap 脚本。
+# snapshot/install-cron 分别显式确认后只运行远端 collector-only 快照和 cron 安装，不修改 OpenClaw 实例目录。
 
 DEPLOY_DIR="${DEPLOY_DIR:-/srv/openclaw-control-center-readonly}"
 BUNDLE_DIR="${BUNDLE_DIR:-${DEPLOY_DIR}/runtime/remote-onboarding/remote-oracle}"
 CONFIRM_REMOTE_COLLECTOR_NODE_SYNC="${CONFIRM_REMOTE_COLLECTOR_NODE_SYNC:-}"
 CONFIRM_REMOTE_COLLECTOR_NODE_BOOTSTRAP_PLAN="${CONFIRM_REMOTE_COLLECTOR_NODE_BOOTSTRAP_PLAN:-}"
 CONFIRM_REMOTE_COLLECTOR_NODE_BOOTSTRAP_WRITE="${CONFIRM_REMOTE_COLLECTOR_NODE_BOOTSTRAP_WRITE:-}"
+CONFIRM_REMOTE_COLLECTOR_NODE_SNAPSHOT="${CONFIRM_REMOTE_COLLECTOR_NODE_SNAPSHOT:-}"
+CONFIRM_REMOTE_COLLECTOR_NODE_CRON="${CONFIRM_REMOTE_COLLECTOR_NODE_CRON:-}"
 MAX_REMOTE_COLLECTOR_SYNC_BYTES="${MAX_REMOTE_COLLECTOR_SYNC_BYTES:-209715200}"
 
 fail() {
@@ -30,12 +33,16 @@ usage() {
   remote-collector-node-sync.sh sync <bundle-dir>
   remote-collector-node-sync.sh bootstrap-plan <bundle-dir>
   remote-collector-node-sync.sh bootstrap-write <bundle-dir>
+  remote-collector-node-sync.sh snapshot <bundle-dir>
+  remote-collector-node-sync.sh install-cron <bundle-dir>
 
 说明：
   plan 只读取 Tom 本地 onboarding bundle，输出将同步的远端 collector 节点目标，不联网、不写文件。
   sync 通过 SSH+tar 把 bundle 复制到远端 collector deploy 目录；只写远端 collector 节点目录，不写任何 OpenClaw 实例目录。
   bootstrap-plan 通过 SSH 执行远端 ./bootstrap-collector-node.sh plan collector-node.json；不写文件、不启动容器。
   bootstrap-write 通过 SSH 执行远端 bootstrap write；只写远端 collector-only 部署文件，不启动容器、不修改 OpenClaw 实例目录。
+  snapshot 通过 SSH 执行远端 ./collector-snapshot.sh；只启动/使用 collector-only 容器生成 snapshot，不修改 OpenClaw 实例目录。
+  install-cron 通过 SSH 执行远端 ./install-collector-cron.sh；只安装当前用户 crontab 中的 collector 受控块。
 
 安全确认：
   sync 必须设置：
@@ -47,11 +54,16 @@ usage() {
   bootstrap-write 必须设置：
     CONFIRM_REMOTE_COLLECTOR_NODE_BOOTSTRAP_WRITE=I_UNDERSTAND_THIS_ONLY_WRITES_REMOTE_COLLECTOR_NODE_FILES
 
+  snapshot 必须设置：
+    CONFIRM_REMOTE_COLLECTOR_NODE_SNAPSHOT=I_UNDERSTAND_THIS_RUNS_REMOTE_COLLECTOR_SNAPSHOT_ONLY
+
+  install-cron 必须设置：
+    CONFIRM_REMOTE_COLLECTOR_NODE_CRON=I_UNDERSTAND_THIS_ONLY_INSTALLS_REMOTE_COLLECTOR_CRON
+
 不会执行：
   - 不修改远端 OpenClaw 实例目录。
   - 不重启 OpenClaw 实例。
-  - 不启动 collector 容器。
-  - 不安装 cron。
+  - 不启动或重启 OpenClaw 实例容器。
   - 不调用 managed-actions live API。
 TEXT
 }
@@ -65,6 +77,8 @@ run_node() {
     CONFIRM_REMOTE_COLLECTOR_NODE_SYNC="$CONFIRM_REMOTE_COLLECTOR_NODE_SYNC" \
     CONFIRM_REMOTE_COLLECTOR_NODE_BOOTSTRAP_PLAN="$CONFIRM_REMOTE_COLLECTOR_NODE_BOOTSTRAP_PLAN" \
     CONFIRM_REMOTE_COLLECTOR_NODE_BOOTSTRAP_WRITE="$CONFIRM_REMOTE_COLLECTOR_NODE_BOOTSTRAP_WRITE" \
+    CONFIRM_REMOTE_COLLECTOR_NODE_SNAPSHOT="$CONFIRM_REMOTE_COLLECTOR_NODE_SNAPSHOT" \
+    CONFIRM_REMOTE_COLLECTOR_NODE_CRON="$CONFIRM_REMOTE_COLLECTOR_NODE_CRON" \
     MAX_REMOTE_COLLECTOR_SYNC_BYTES="$MAX_REMOTE_COLLECTOR_SYNC_BYTES" \
     node <<'NODE'
 const fs = require("node:fs");
@@ -77,6 +91,8 @@ const bundleDir = resolveBundleDir(process.env.BUNDLE_DIR || path.join(deployDir
 const confirmSync = process.env.CONFIRM_REMOTE_COLLECTOR_NODE_SYNC || "";
 const confirmBootstrapPlan = process.env.CONFIRM_REMOTE_COLLECTOR_NODE_BOOTSTRAP_PLAN || "";
 const confirmBootstrapWrite = process.env.CONFIRM_REMOTE_COLLECTOR_NODE_BOOTSTRAP_WRITE || "";
+const confirmSnapshot = process.env.CONFIRM_REMOTE_COLLECTOR_NODE_SNAPSHOT || "";
+const confirmCron = process.env.CONFIRM_REMOTE_COLLECTOR_NODE_CRON || "";
 const configuredMaxSyncBytes = Number.parseInt(process.env.MAX_REMOTE_COLLECTOR_SYNC_BYTES || "209715200", 10);
 const maxSyncBytes = Number.isFinite(configuredMaxSyncBytes) && configuredMaxSyncBytes > 0
   ? configuredMaxSyncBytes
@@ -359,6 +375,55 @@ function runBootstrap(bundle, bootstrapMode) {
   };
 }
 
+function parseLastJsonLine(text) {
+  const lines = String(text || "").trim().split(/\r?\n/).filter(Boolean).reverse();
+  for (const line of lines) {
+    try {
+      return JSON.parse(line);
+    } catch {
+      // 远端脚本可能先输出 docker compose 日志；只解析最后的 JSON 行。
+    }
+  }
+  return undefined;
+}
+
+function runSnapshot(bundle) {
+  if (confirmSnapshot !== "I_UNDERSTAND_THIS_RUNS_REMOTE_COLLECTOR_SNAPSHOT_ONLY") {
+    fail("必须设置 CONFIRM_REMOTE_COLLECTOR_NODE_SNAPSHOT=I_UNDERSTAND_THIS_RUNS_REMOTE_COLLECTOR_SNAPSHOT_ONLY");
+  }
+  const remoteScript = [
+    "set -euo pipefail",
+    `cd ${shellQuote(bundle.remoteDeployDir)}`,
+    "./collector-snapshot.sh",
+  ].join("\n");
+  const result = runSsh(bundle, `bash -lc ${shellQuote(remoteScript)}`);
+  return {
+    status: "snapshot_completed",
+    completedAt: new Date().toISOString(),
+    remoteResult: parseLastJsonLine(result.stdout),
+    remoteStdout: result.stdout.trim(),
+    remoteStderr: result.stderr.trim(),
+  };
+}
+
+function runInstallCron(bundle) {
+  if (confirmCron !== "I_UNDERSTAND_THIS_ONLY_INSTALLS_REMOTE_COLLECTOR_CRON") {
+    fail("必须设置 CONFIRM_REMOTE_COLLECTOR_NODE_CRON=I_UNDERSTAND_THIS_ONLY_INSTALLS_REMOTE_COLLECTOR_CRON");
+  }
+  const remoteScript = [
+    "set -euo pipefail",
+    `cd ${shellQuote(bundle.remoteDeployDir)}`,
+    "./install-collector-cron.sh",
+  ].join("\n");
+  const result = runSsh(bundle, `bash -lc ${shellQuote(remoteScript)}`);
+  return {
+    status: "cron_installed",
+    completedAt: new Date().toISOString(),
+    remoteStdout: result.stdout.trim(),
+    remoteStderr: result.stderr.trim(),
+  };
+}
+
 function safetyFor(modeName) {
   return {
     planOnly: modeName === "plan",
@@ -366,9 +431,11 @@ function safetyFor(modeName) {
     writesTomRegistry: false,
     writesRemoteBundle: modeName === "sync",
     writesRemoteCollectorNode: modeName === "sync" || modeName === "bootstrap-write",
+    writesRemoteCollectorRuntime: modeName === "snapshot",
+    startsCollectorContainer: modeName === "snapshot",
     writesOpenClawInstanceDirs: false,
-    startsContainers: false,
-    installsCron: false,
+    startsContainers: modeName === "snapshot",
+    installsCron: modeName === "install-cron",
     mutatesOpenClawInstance: false,
     restartsOpenClawInstance: false,
     callsLiveApi: false,
@@ -407,7 +474,9 @@ function buildBaseOutput(bundle, modeName) {
       `CONFIRM_REMOTE_COLLECTOR_NODE_SYNC=I_UNDERSTAND_THIS_ONLY_COPIES_COLLECTOR_BUNDLE_TO_REMOTE repo/ops/tom-readonly/remote-collector-node-sync.sh sync ${path.relative(deployDir, bundle.bundleDir)}`,
       `CONFIRM_REMOTE_COLLECTOR_NODE_BOOTSTRAP_PLAN=I_UNDERSTAND_THIS_ONLY_RUNS_REMOTE_BOOTSTRAP_PLAN repo/ops/tom-readonly/remote-collector-node-sync.sh bootstrap-plan ${path.relative(deployDir, bundle.bundleDir)}`,
       `CONFIRM_REMOTE_COLLECTOR_NODE_BOOTSTRAP_WRITE=I_UNDERSTAND_THIS_ONLY_WRITES_REMOTE_COLLECTOR_NODE_FILES repo/ops/tom-readonly/remote-collector-node-sync.sh bootstrap-write ${path.relative(deployDir, bundle.bundleDir)}`,
-      "# 然后在远端 collector deploy 目录人工执行 ./collector-snapshot.sh，并回到 Tom 执行 remote-collector-pull.sh pull。",
+      `CONFIRM_REMOTE_COLLECTOR_NODE_SNAPSHOT=I_UNDERSTAND_THIS_RUNS_REMOTE_COLLECTOR_SNAPSHOT_ONLY repo/ops/tom-readonly/remote-collector-node-sync.sh snapshot ${path.relative(deployDir, bundle.bundleDir)}`,
+      `CONFIRM_REMOTE_COLLECTOR_NODE_CRON=I_UNDERSTAND_THIS_ONLY_INSTALLS_REMOTE_COLLECTOR_CRON repo/ops/tom-readonly/remote-collector-node-sync.sh install-cron ${path.relative(deployDir, bundle.bundleDir)}`,
+      "# 然后回到 Tom 执行 remote-collector-pull.sh pull。",
     ],
     safety: safetyFor(modeName),
   };
@@ -443,6 +512,18 @@ try {
       ...result,
       ...buildBaseOutput(bundle, mode),
     }, null, 2));
+  } else if (mode === "snapshot") {
+    const result = runSnapshot(bundle);
+    console.log(JSON.stringify({
+      ...result,
+      ...buildBaseOutput(bundle, mode),
+    }, null, 2));
+  } else if (mode === "install-cron") {
+    const result = runInstallCron(bundle);
+    console.log(JSON.stringify({
+      ...result,
+      ...buildBaseOutput(bundle, mode),
+    }, null, 2));
   } else {
     fail(`未知模式：${mode}`);
   }
@@ -455,7 +536,7 @@ NODE
 main() {
   require_command node
   case "${1:-plan}" in
-    plan|sync|bootstrap-plan|bootstrap-write)
+    plan|sync|bootstrap-plan|bootstrap-write|snapshot|install-cron)
       run_node "${1:-plan}" "${2:-$BUNDLE_DIR}"
       ;;
     -h|--help|help)
