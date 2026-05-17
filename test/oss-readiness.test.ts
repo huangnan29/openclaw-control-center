@@ -557,6 +557,12 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(commandRunnerText, /managed-action-command-runner\.sh status/);
   assert.match(commandRunnerText, /managed-action-command-runner\.sh plan/);
   assert.match(commandRunnerText, /managed-action-command-runner\.sh dry-run/);
+  assert.match(commandRunnerText, /managed-action-command-runner\.sh parse-text/);
+  assert.match(commandRunnerText, /managed-action-command-runner\.sh plan-text/);
+  assert.match(commandRunnerText, /managed-action-command-runner\.sh dry-run-text/);
+  assert.match(commandRunnerText, /parseTextCommand/);
+  assert.match(commandRunnerText, /文本指令必须明确包含 dry-run/);
+  assert.match(commandRunnerText, /高风险词/);
   assert.match(commandRunnerText, /CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN/);
   assert.match(commandRunnerText, /I_UNDERSTAND_THIS_ONLY_CALLS_MANAGED_ACTION_DRY_RUN_API/);
   assert.match(commandRunnerText, /MANAGED_ACTION_COMMAND_TOKEN_SOURCE/);

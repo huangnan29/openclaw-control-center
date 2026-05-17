@@ -746,4 +746,19 @@ Tom 单 Oracle 上线下一步：
 
 ## 阶段完成后的下一步
 
-下一步把 OpenClaw/Discord 指令文本到 `runtime/managed-action-command.json` 的转换规则固化，例如把“对 tom 运行 zhihu-human-ops-writing dry-run”映射成 `managed-action-command-runner.sh plan/dry-run`。人工填写并校验 `/srv/openclaw-control-center-readonly/runtime/live-healthcheck-approval.json` 后，才能执行一次只读 healthcheck live 演练；演练前后都必须确认现有 OpenClaw 实例未被重启、未被写入、未被触发任务。若演练通过，再进入单动作灰度策略收口；若失败，保持只读并先修复失败点。
+- 已为 `ops/tom-readonly/managed-action-command-runner.sh` 增加文本指令入口：`parse-text <command.txt>`、`plan-text <command.txt>`、`dry-run-text <command.txt>`。
+- 已固化文本解析规则：文本必须明确包含 `dry-run`、`预览` 或 `演练`，否则阻止；文本包含 `live`、`真实执行`、`发布`、`重启`、`approval` 等高风险词时阻止。
+- 已支持把“对 tom 运行 zhihu-human-ops-writing dry-run”解析为 `instanceId=tom`、`action=skill_run`、`skillName=zhihu-human-ops-writing`、`operator=Anan`、`confirmedText=DRY-RUN-ONLY`。
+- 已更新 `ops/tom-readonly/README.md`，加入 `parse-text`、`plan-text`、`dry-run-text` 常用命令和安全边界。
+- 已更新 `test/managed-action-command-runner.test.ts`，覆盖中文文本解析、`plan-text` 不联网、缺少 dry-run 字样阻断、高风险词阻断、`dry-run-text` 只调用 dry-run API。
+- 已更新 `test/oss-readiness.test.ts`，断言文本入口存在、要求 dry-run 字样、包含高风险词阻断逻辑，并继续断言不包含 managed-actions live API 路径。
+- 已验证 `bash -n ops/tom-readonly/managed-action-command-runner.sh`。
+- 已验证 `npm test -- test/managed-action-command-runner.test.ts`。
+- 已验证 `npm test -- test/managed-action-command-runner.test.ts test/managed-actions-dry-run.test.ts test/managed-action-live-readiness.test.ts test/managed-action-live-gate.test.ts test/oss-readiness.test.ts test/readonly-multi-instance-safety.test.ts`。
+- 已验证 `npm run build`。
+- 已验证 `git diff --check`。
+- 本轮仍未执行 approval `approve`、未打开 live gate、未调用 `/api/managed-actions/live`、未修改或重启任何 OpenClaw 实例。
+
+## 阶段完成后的下一步
+
+下一步提交并部署本轮文本指令入口到 Tom，然后在 Tom 上用 `runtime/managed-action-command.txt` 做 `parse-text`、`plan-text` 和 `dry-run-text` 烟测，确认文本指令可以写入 dry-run 审计但仍不执行实例命令。人工填写并校验 `/srv/openclaw-control-center-readonly/runtime/live-healthcheck-approval.json` 后，才能执行一次只读 healthcheck live 演练；演练前后都必须确认现有 OpenClaw 实例未被重启、未被写入、未被触发任务。若演练通过，再进入单动作灰度策略收口；若失败，保持只读并先修复失败点。

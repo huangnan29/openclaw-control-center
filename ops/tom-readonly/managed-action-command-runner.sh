@@ -4,6 +4,7 @@ set +x
 
 # OpenClaw/Discord 侧管理动作命令入口。
 # plan 只校验命令并输出将要提交的 dry-run payload，不联网、不写审计。
+# parse-text/plan-text 只解析自然语言文本并输出 dry-run payload，不联网、不写审计。
 # dry-run 必须显式确认并提供 LOCAL_API_TOKEN，只调用 dry-run API 写审计，不执行实例命令。
 # status 只读取控制中心管理动作和 readiness 状态。
 
@@ -31,6 +32,9 @@ usage() {
   managed-action-command-runner.sh status
   managed-action-command-runner.sh plan <command.json|-> 
   managed-action-command-runner.sh dry-run <command.json|->
+  managed-action-command-runner.sh parse-text <command.txt|->
+  managed-action-command-runner.sh plan-text <command.txt|->
+  managed-action-command-runner.sh dry-run-text <command.txt|->
 
 command.json 示例：
   {
@@ -41,6 +45,10 @@ command.json 示例：
     "skillName": "zhihu-human-ops-writing"
   }
 
+文本指令示例：
+  对 tom 运行 zhihu-human-ops-writing dry-run
+  instance=tom action=skill_run skill=zhihu-human-ops-writing dry-run
+
 dry-run 必须设置：
   CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN=I_UNDERSTAND_THIS_ONLY_CALLS_MANAGED_ACTION_DRY_RUN_API
   LOCAL_API_TOKEN=<本地令牌>
@@ -49,6 +57,7 @@ dry-run 必须设置：
 
 安全边界：
   - plan 不联网、不写文件。
+  - parse-text/plan-text 不联网、不写文件。
   - dry-run 只调用 /api/managed-actions/dry-run，不执行 OpenClaw 实例命令。
   - 不打开 live gate，不修改 OpenClaw 实例目录，不重启实例。
 TEXT
@@ -122,6 +131,112 @@ function readCommand() {
   return parsed;
 }
 
+function readCommandText() {
+  if (!commandFile) throw new Error("缺少 command.txt 路径；parse-text/plan-text/dry-run-text 必须提供文本文件。");
+  const raw = commandFile === "-" ? fs.readFileSync(0, "utf8") : fs.readFileSync(commandFile, "utf8");
+  const text = String(raw || "").trim();
+  if (!text) throw new Error("command.txt 不能为空。");
+  if (text.length > 500) throw new Error("command.txt 不能超过 500 个字符。");
+  return text;
+}
+
+function parseTextCommand(text) {
+  const normalized = text
+    .replace(/[，。；、]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const lower = normalized.toLowerCase();
+  if (!/\b(dry-run|dryrun|dry_run)\b|预览|演练|只预览|仅预览/.test(lower)) {
+    throw new Error("文本指令必须明确包含 dry-run/预览/演练，避免误解为真实执行。");
+  }
+  if (/真实执行|正式执行|live\s*run|\blive\b|发布|重启|restart|approve|approval|打开\s*live|启用\s*live/.test(lower)) {
+    throw new Error("文本指令包含真实执行/live/发布/重启/approval 等高风险词，已阻止。");
+  }
+
+  const instanceId = extractNamedValue(normalized, ["instance", "实例", "inst"])
+    || extractAfterKeyword(normalized, ["对", "给", "for"])
+    || extractKnownInstance(lower);
+  if (!instanceId) throw new Error("无法从文本指令中识别 instanceId。请使用“对 tom ... dry-run”或 instance=tom。");
+
+  const action = extractAction(lower);
+  if (!action) throw new Error("无法从文本指令中识别 action。支持 healthcheck、collector_refresh、skill_run。");
+
+  const skillName = action === "skill_run"
+    ? extractNamedValue(normalized, ["skill", "skillName", "技能"])
+      || extractSkillLikeToken(normalized, instanceId)
+    : undefined;
+  if (action === "skill_run" && !skillName) {
+    throw new Error("action=skill_run 时无法识别 skillName。请使用 skill=zhihu-human-ops-writing 或“运行 zhihu-human-ops-writing dry-run”。");
+  }
+
+  const operator = extractNamedValue(normalized, ["operator", "操作者", "用户"]) || "Anan";
+  const reason = extractNamedValue(normalized, ["reason", "原因"]) || `OpenClaw/Discord 文本指令 dry-run：${safeReason(normalized)}`;
+  return buildPayload({
+    instanceId,
+    action,
+    operator,
+    reason,
+    confirmedText: dryRunConfirmation,
+    ...(skillName ? { skillName } : {}),
+  });
+}
+
+function extractNamedValue(text, names) {
+  for (const name of names) {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = text.match(new RegExp(`${escaped}\\s*[:=：]\\s*([A-Za-z0-9_-]+)`, "i"));
+    if (match?.[1]) return match[1].trim();
+  }
+  return undefined;
+}
+
+function extractAfterKeyword(text, keywords) {
+  for (const keyword of keywords) {
+    const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = text.match(new RegExp(`${escaped}\\s*([A-Za-z0-9_-]+)`, "i"));
+    if (match?.[1]) return match[1].trim();
+  }
+  return undefined;
+}
+
+function extractKnownInstance(lower) {
+  const known = ["main", "tom", "third", "deepseek", "spark"];
+  return known.find((item) => new RegExp(`(^|\\s)${item}(\\s|$)`, "i").test(lower));
+}
+
+function extractAction(lower) {
+  if (/\bhealthcheck\b|健康检查/.test(lower)) return "healthcheck";
+  if (/\bcollector_refresh\b|\bcollector-refresh\b|collector\s+refresh|刷新\s*collector|刷新.*快照|collector.*快照/.test(lower)) return "collector_refresh";
+  if (/\bskill_run\b|\bskill-run\b|skill\s+run|\bskill\b|技能|运行\s+[A-Za-z0-9_-]+/.test(lower)) return "skill_run";
+  return undefined;
+}
+
+function extractSkillLikeToken(text, instanceId) {
+  const ignored = new Set([
+    "dry-run",
+    "dryrun",
+    "dry_run",
+    "skill",
+    "skill_run",
+    "skill-run",
+    "run",
+    "openclaw",
+    "discord",
+    "healthcheck",
+    "collector",
+    "collector_refresh",
+    "preview",
+    "plan",
+    instanceId.toLowerCase(),
+  ]);
+  const tokens = text.match(/[A-Za-z][A-Za-z0-9_-]{2,}/g) || [];
+  return tokens.find((token) => !ignored.has(token.toLowerCase()) && token.includes("-"));
+}
+
+function safeReason(text) {
+  return text.replace(/\s+/g, " ").slice(0, 180);
+}
+
 function readRequiredString(obj, key, limit) {
   const value = typeof obj[key] === "string" ? obj[key].trim() : "";
   if (!value) throw new Error(`${key} 不能为空。`);
@@ -191,11 +306,13 @@ function baseSafety(extra = {}) {
   };
 }
 
-function nextDryRunCommand() {
-  return "CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN=I_UNDERSTAND_THIS_ONLY_CALLS_MANAGED_ACTION_DRY_RUN_API LOCAL_API_TOKEN=<本地令牌> repo/ops/tom-readonly/managed-action-command-runner.sh dry-run <command.json>";
+function nextDryRunCommand(inputKind = "json") {
+  const modeName = inputKind === "text" ? "dry-run-text" : "dry-run";
+  const label = inputKind === "text" ? "<command.txt>" : "<command.json>";
+  return `CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN=I_UNDERSTAND_THIS_ONLY_CALLS_MANAGED_ACTION_DRY_RUN_API LOCAL_API_TOKEN=<本地令牌> repo/ops/tom-readonly/managed-action-command-runner.sh ${modeName} ${label}`;
 }
 
-function plannedReport(payload) {
+function plannedReport(payload, inputKind = "json") {
   return {
     schemaVersion: 1,
     status: "planned",
@@ -209,9 +326,30 @@ function plannedReport(payload) {
       ...(payload.skillName ? { skillName: payload.skillName } : {}),
     },
     payload: safePayloadForOutput(payload),
-    nextCommands: [nextDryRunCommand()],
+    nextCommands: [nextDryRunCommand(inputKind)],
     safety: baseSafety({
       readsCommandFileOnly: true,
+      requiresDryRunConfirmation: true,
+      requiresLocalApiToken: true,
+    }),
+  };
+}
+
+function parsedTextReport(payload, text) {
+  return {
+    schemaVersion: 1,
+    status: "parsed",
+    mode,
+    generatedAt: new Date().toISOString(),
+    inputText: text,
+    command: safePayloadForOutput(payload),
+    nextCommands: [
+      "repo/ops/tom-readonly/managed-action-command-runner.sh plan-text <command.txt>",
+      nextDryRunCommand("text"),
+    ],
+    safety: baseSafety({
+      readsCommandTextOnly: true,
+      callsManagedActionsDryRunApi: false,
       requiresDryRunConfirmation: true,
       requiresLocalApiToken: true,
     }),
@@ -239,7 +377,7 @@ async function statusReport() {
   };
 }
 
-async function dryRunReport(payload) {
+async function dryRunReport(payload, inputKind = "json") {
   if (confirmDryRun !== "I_UNDERSTAND_THIS_ONLY_CALLS_MANAGED_ACTION_DRY_RUN_API") {
     return {
       schemaVersion: 1,
@@ -247,7 +385,7 @@ async function dryRunReport(payload) {
       mode,
       generatedAt: new Date().toISOString(),
       issues: ["必须设置 CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN=I_UNDERSTAND_THIS_ONLY_CALLS_MANAGED_ACTION_DRY_RUN_API。"],
-      nextCommands: [nextDryRunCommand()],
+      nextCommands: [nextDryRunCommand(inputKind)],
       safety: baseSafety({
         blockedBeforeApi: true,
         requiresDryRunConfirmation: true,
@@ -261,7 +399,7 @@ async function dryRunReport(payload) {
       mode,
       generatedAt: new Date().toISOString(),
       issues: ["必须通过 LOCAL_API_TOKEN 提供本地令牌。"],
-      nextCommands: [nextDryRunCommand()],
+      nextCommands: [nextDryRunCommand(inputKind)],
       safety: baseSafety({
         blockedBeforeApi: true,
         requiresLocalApiToken: true,
@@ -296,7 +434,7 @@ async function dryRunReport(payload) {
         "repo/ops/tom-readonly/managed-action-command-runner.sh status",
         "repo/ops/tom-readonly/live-healthcheck-readiness.sh status",
       ]
-      : [nextDryRunCommand()],
+      : [nextDryRunCommand(inputKind)],
     safety: baseSafety({
       callsManagedActionsDryRunApi: true,
       createsDryRunAuditOnly: ok,
@@ -309,10 +447,19 @@ async function dryRunReport(payload) {
 
 async function main() {
   if (mode === "status") return statusReport();
+  if (mode === "parse-text") {
+    const text = readCommandText();
+    return parsedTextReport(parseTextCommand(text), text);
+  }
+  if (mode === "plan-text" || mode === "dry-run-text") {
+    const payload = parseTextCommand(readCommandText());
+    if (mode === "plan-text") return plannedReport(payload, "text");
+    return dryRunReport(payload, "text");
+  }
   if (mode !== "plan" && mode !== "dry-run") throw new Error(`未知模式：${mode}`);
   const payload = buildPayload(readCommand());
-  if (mode === "plan") return plannedReport(payload);
-  return dryRunReport(payload);
+  if (mode === "plan") return plannedReport(payload, "json");
+  return dryRunReport(payload, "json");
 }
 
 main()
@@ -347,10 +494,23 @@ main() {
       [ -n "$COMMAND_FILE" ] || fail "plan 必须提供 command.json 路径"
       run_node "plan"
       ;;
+    parse-text)
+      [ -n "$COMMAND_FILE" ] || fail "parse-text 必须提供 command.txt 路径"
+      run_node "parse-text"
+      ;;
+    plan-text)
+      [ -n "$COMMAND_FILE" ] || fail "plan-text 必须提供 command.txt 路径"
+      run_node "plan-text"
+      ;;
     dry-run)
       [ -n "$COMMAND_FILE" ] || fail "dry-run 必须提供 command.json 路径"
       resolve_local_api_token_for_dry_run
       run_node "dry-run"
+      ;;
+    dry-run-text)
+      [ -n "$COMMAND_FILE" ] || fail "dry-run-text 必须提供 command.txt 路径"
+      resolve_local_api_token_for_dry_run
+      run_node "dry-run-text"
       ;;
     -h|--help|help)
       usage
