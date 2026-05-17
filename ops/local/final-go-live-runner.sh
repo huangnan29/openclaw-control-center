@@ -389,8 +389,22 @@ function prepare() {
   }
 
   if (!hasPrepareStep && (hasCommand(before.report, "final-go-live-runner.sh run-approved") || hasCommand(before.report, "live-healthcheck-rollout-runner.sh run-approved"))) {
+    const approvalReviewBeforePrepare = runTomApprovalReview();
+    const reviewStatus = approvalReviewBeforePrepare.report?.status || "unknown";
+    if (
+      approvalReviewBeforePrepare.exitCode !== 0
+      && hasCommand(approvalReviewBeforePrepare.report, "live-healthcheck-rollout-runner.sh prepare")
+    ) {
+      const tomPrepare = runTomRunner("prepare");
+      return preparedHumanApprovalReport({
+        stages: { before, approvalReviewBeforePrepare, tomPrepare },
+        writesTomRuntime: true,
+        safetyExtra: { recoveredFromStaleApprovedReadiness: true, approvalReviewBeforePrepareStatus: reviewStatus },
+        fallbackNextCommands: nextCommandsFrom(tomPrepare.report),
+      });
+    }
     return preparedHumanApprovalReport({
-      stages: { before },
+      stages: { before, approvalReviewBeforePrepare },
       writesTomRuntime: false,
       fallbackNextCommands: nextCommandsFrom(before.report),
     });
