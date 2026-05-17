@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-只读 healthcheck live 演练人工批准收口：新增 approval JSON 模板与校验脚本，并让一次性演练窗口在打开 live gate 前强制校验批准记录。
+只读 healthcheck live 演练报告收口：新增演练报告脚本，并让一次性演练窗口在成功完成后自动生成 JSON 与 Markdown 报告。
 
 ## 本轮不做
 
@@ -25,6 +25,7 @@
 - 必须先生成并人工填写 `runtime/live-healthcheck-approval.json`，通过 `live-healthcheck-approval.sh check` 后才允许打开窗口。
 - 脚本退出前必须恢复只读状态，并重新通过 `healthcheck.sh`。
 - 脚本会自动生成 before/after 实例影响快照并比较。
+- 脚本成功后会自动生成 live healthcheck 演练报告，汇总 approval、dry-run 审计、live result 审计和影响快照。
 - 未获得人工批准前，不执行 `/api/managed-actions/live`。
 
 ## 最近完成
@@ -298,6 +299,22 @@
 - 已提交并推送 `e6c629f ops: require approval record for live healthcheck`。
 - 已部署到 Tom，并验证运行提交 `e6c629f`。
 - 已在 Tom 生成候选 approval 模板，并验证未批准模板不会通过校验。
+- 已验证 Tom `live-healthcheck-window.sh status` 仍显示未检测到临时 override，`READONLY_MODE=true`，live gate 与 executor 未启用，readiness 仍为 `blocked`。
+- 本轮未执行 `enable` 或 `run`，未调用 `/api/managed-actions/live`。
+- 已新增演练报告脚本：`ops/tom-readonly/live-healthcheck-report.sh`。
+- 报告脚本只读取 approval、before/after impact snapshots 和 `runtime/operation-audit.log`，不调用 live API。
+- 报告通过条件包括：approval 已批准、dry-run 审计存在、live result 审计为 `executed`、`liveExecution=true`、`mutatesOpenClawInstance=false`，以及 after 快照恢复只读。
+- 已让 `live-healthcheck-window.sh run` 在成功比较 before/after 快照后自动调用报告脚本。
+- 报告会写入 `runtime/live-healthcheck-reports/`，同时生成 JSON 与 Markdown。
+- 已更新 `ops/tom-readonly/README.md`，记录报告目录和通过条件。
+- 已增强 `test/oss-readiness.test.ts`，覆盖报告脚本和窗口脚本接入。
+- 已验证 `bash -n ops/tom-readonly/live-healthcheck-report.sh && bash -n ops/tom-readonly/live-healthcheck-window.sh`。
+- 已用临时 approval、impact snapshots 和模拟 `operation-audit.log` 验证报告脚本生成 `status=passed`，且 Markdown 报告存在。
+- 已验证 `npm test -- test/oss-readiness.test.ts test/managed-actions-dry-run.test.ts test/managed-action-live-gate.test.ts`。
+- 已验证 `npm run build`。
+- 已提交并推送 `ff9890e ops: generate live healthcheck evidence report`。
+- 已部署到 Tom，并验证运行提交 `ff9890e`。
+- 已验证 Tom `bash -n repo/ops/tom-readonly/live-healthcheck-report.sh` 通过。
 - 已验证 Tom `live-healthcheck-window.sh status` 仍显示未检测到临时 override，`READONLY_MODE=true`，live gate 与 executor 未启用，readiness 仍为 `blocked`。
 - 本轮未执行 `enable` 或 `run`，未调用 `/api/managed-actions/live`。
 
