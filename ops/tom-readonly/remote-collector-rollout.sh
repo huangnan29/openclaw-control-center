@@ -387,7 +387,11 @@ function buildCommands(bundle, stage) {
   }
   if (stage === "needs_remote_credentials") {
     return [
-      "# 先把真实第二台 Oracle 的 host/user/port/sourceSshKeyPath 写入 credentials 配置",
+      "# 如果远端只读 SSH key 在本机：先在本机把真实第二台 Oracle 的 host/user/port/sourceSshKeyPath 写入 push 配置",
+      "cp ops/local/push-remote-collector-credentials.example.json runtime/push-remote-collector-credentials.json",
+      "ops/local/push-remote-collector-credentials.sh plan runtime/push-remote-collector-credentials.json",
+      "CONFIRM_PUSH_REMOTE_COLLECTOR_CREDENTIALS=I_UNDERSTAND_THIS_ONLY_PUSHES_REMOTE_COLLECTOR_CREDENTIALS_TO_TOM_RUNTIME ops/local/push-remote-collector-credentials.sh apply runtime/push-remote-collector-credentials.json",
+      "# 如果远端只读 SSH key 已在 Tom 上：走 Tom 端 credentials 配置",
       "cp repo/ops/tom-readonly/remote-collector-credentials.example.json runtime/remote-collector-credentials.json",
       "repo/ops/tom-readonly/remote-collector-credentials.sh plan runtime/remote-collector-credentials.json",
       "CONFIRM_REMOTE_COLLECTOR_CREDENTIALS=I_UNDERSTAND_THIS_ONLY_WRITES_CONTROL_CENTER_REMOTE_CREDENTIALS repo/ops/tom-readonly/remote-collector-credentials.sh apply runtime/remote-collector-credentials.json",
