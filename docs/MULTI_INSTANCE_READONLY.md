@@ -383,6 +383,21 @@ repo/ops/tom-readonly/register-remote-collector.sh apply runtime/register-remote
 
 `plan` 不写文件；`apply` 只更新 control-center registry，不修改任何 OpenClaw 实例目录，不重启实例，不调用 managed action live API。
 
+### 机器人文本桥接
+
+OpenClaw/Discord 机器人如果收到自然语言指令，优先调用 Tom 侧桥接脚本，而不是直接拼 API 请求。桥接脚本会把文本写入 control-center 自己的 `runtime/managed-action-command.txt`，再交给 `managed-action-command-runner.sh parse-text/plan-text/dry-run-text`：
+
+```bash
+printf '对 tom 运行 zhihu-human-ops-writing dry-run\n' > runtime/managed-action-command.txt
+repo/ops/tom-readonly/managed-action-text-bridge.sh parse runtime/managed-action-command.txt
+repo/ops/tom-readonly/managed-action-text-bridge.sh plan runtime/managed-action-command.txt
+CONFIRM_MANAGED_ACTION_TEXT_BRIDGE=I_UNDERSTAND_THIS_ONLY_RUNS_MANAGED_ACTION_DRY_RUN_TEXT \
+MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container \
+repo/ops/tom-readonly/managed-action-text-bridge.sh dry-run runtime/managed-action-command.txt
+```
+
+也可以用 `MANAGED_ACTION_TEXT` 或标准输入传入文本。`parse/plan` 只写 control-center runtime 的文本副本并返回 runner 摘要；`dry-run` 必须显式确认，并继续由底层 runner 只调用 dry-run API。该桥接层不会打开 live gate，不修改 OpenClaw 实例目录，不重启实例，也不会触发真实 skill。
+
 ### 管理动作 dry-run 证据
 
 真实管理动作上线前，先用 dry-run 证据闸门确认最近一次 dry-run 审计可作为人工批准和 live 引用的前置证据：

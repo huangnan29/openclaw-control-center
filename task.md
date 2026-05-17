@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-单 Oracle 上线收口：把最终上线总闸门切到默认 `local-only` 拓扑，只管理当前 Oracle 上的实例；补齐本机新增实例的安全注册入口；跨服务器远端凭据检查改为显式可选模式。
+单 Oracle 上线收口：把 OpenClaw/Discord 文本指令接到 Tom 侧受控管理动作 dry-run 链路，机器人可以通过统一桥接脚本触发 `parse/plan/dry-run`，但仍不允许真实执行、不允许修改实例、不允许打开 live gate。
 
 ## 本轮不做
 
@@ -770,4 +770,22 @@ Tom 单 Oracle 上线下一步：
 
 ## 阶段完成后的下一步
 
-下一步把 Discord/OpenClaw 机器人调用层接到 `managed-action-command-runner.sh parse-text/plan-text/dry-run-text`，让机器人收到文本后写入 `runtime/managed-action-command.txt` 并返回 runner 摘要。人工填写并校验 `/srv/openclaw-control-center-readonly/runtime/live-healthcheck-approval.json` 后，才能执行一次只读 healthcheck live 演练；演练前后都必须确认现有 OpenClaw 实例未被重启、未被写入、未被触发任务。若演练通过，再进入单动作灰度策略收口；若失败，保持只读并先修复失败点。
+## 本轮新增（机器人文本桥接层）
+
+- 已新增 `ops/tom-readonly/managed-action-text-bridge.sh`。
+- 该脚本支持 `parse <command.txt|->`、`plan <command.txt|->`、`dry-run <command.txt|->`，也支持 `MANAGED_ACTION_TEXT` 和 `MANAGED_ACTION_TEXT_FILE`。
+- 桥接层会把机器人文本统一写入 control-center runtime 的 `managed-action-command.txt`，再调用底层 `managed-action-command-runner.sh parse-text/plan-text/dry-run-text`。
+- `parse/plan` 只写 control-center runtime 文本副本并返回精简 JSON 摘要；不联网、不写审计、不调用 live。
+- `dry-run` 必须设置 `CONFIRM_MANAGED_ACTION_TEXT_BRIDGE=I_UNDERSTAND_THIS_ONLY_RUNS_MANAGED_ACTION_DRY_RUN_TEXT`，随后才会自动补齐底层 runner 的 dry-run 确认并调用 `dry-run-text`。
+- 输出摘要包含 `runnerStatus`、`target`、`operationRequestId`、`commandPreview` 和安全字段，便于机器人直接回传给 Discord/OpenClaw。
+- 已新增 `test/managed-action-text-bridge.test.ts`，覆盖 parse 写入 runtime 并调用 runner、plan 只调用 `plan-text`、dry-run 缺桥接确认不调用 runner、dry-run 设置底层确认且不泄露令牌。
+- 已更新 `ops/tom-readonly/README.md`、`docs/MULTI_INSTANCE_READONLY.md`、`implementation_plan.md` 和 `test/oss-readiness.test.ts`，记录桥接入口和安全边界。
+- 已验证 `bash -n ops/tom-readonly/managed-action-text-bridge.sh`。
+- 已验证 `npm test -- test/managed-action-text-bridge.test.ts test/managed-action-command-runner.test.ts test/oss-readiness.test.ts`，18/18 通过。
+- 已验证 `npm test -- test/managed-action-text-bridge.test.ts test/managed-action-command-runner.test.ts test/managed-actions-dry-run.test.ts test/managed-action-live-readiness.test.ts test/managed-action-live-gate.test.ts test/oss-readiness.test.ts test/readonly-multi-instance-safety.test.ts`，28/28 通过。
+- 已验证 `npm run build`。
+- 已验证 `git diff --check`。
+
+## 阶段完成后的下一步
+
+下一步把桥接层部署到 Tom，并在 Tom 上真实 smoke：用“对 tom 运行 zhihu-human-ops-writing dry-run”分别测试 `parse`、`plan`、`dry-run`，确认返回摘要中 `callsManagedActionsDryRunApi=true`、`callsManagedActionsLiveApi=false`、`writesOpenClawInstanceDirs=false`、`operationRequestId` 存在；再测试包含“发布”的高风险文本会在调用 API 前被阻断。通过后，才进入人工 approval 和一次只读 healthcheck live 演练；演练前仍不得执行 approval `approve`、不得打开 live gate、不得触发真实 skill。

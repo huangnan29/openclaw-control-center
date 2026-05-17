@@ -48,6 +48,7 @@
 - `live-healthcheck-report.sh`：演练报告脚本；读取 approval、impact snapshots 和 operation audit，生成 JSON 与 Markdown 报告。
 - `live-healthcheck-window.sh`：一次性演练窗口脚本；临时启用 control-center 的 healthcheck live 配置，失败或结束后恢复只读状态。
 - `instance-impact-snapshot.sh`：演练前后实例影响留证脚本；只读取 gateway、监听端口、容器挂载和 readiness。
+- `managed-action-text-bridge.sh`：给 OpenClaw/Discord 机器人使用的文本桥接层；把机器人文本写入 control-center runtime，再调用 `managed-action-command-runner.sh parse-text/plan-text/dry-run-text`，输出精简摘要。
 
 ## Tom 上的常用命令
 
@@ -114,6 +115,8 @@ repo/ops/tom-readonly/managed-action-command-runner.sh plan runtime/managed-acti
 printf '对 tom 运行 zhihu-human-ops-writing dry-run\n' > runtime/managed-action-command.txt
 repo/ops/tom-readonly/managed-action-command-runner.sh parse-text runtime/managed-action-command.txt
 repo/ops/tom-readonly/managed-action-command-runner.sh plan-text runtime/managed-action-command.txt
+repo/ops/tom-readonly/managed-action-text-bridge.sh parse runtime/managed-action-command.txt
+repo/ops/tom-readonly/managed-action-text-bridge.sh plan runtime/managed-action-command.txt
 CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN=I_UNDERSTAND_THIS_ONLY_CALLS_MANAGED_ACTION_DRY_RUN_API \
 LOCAL_API_TOKEN=<本地令牌> \
 repo/ops/tom-readonly/managed-action-command-runner.sh dry-run runtime/managed-action-command.json
@@ -121,6 +124,9 @@ repo/ops/tom-readonly/managed-action-command-runner.sh dry-run runtime/managed-a
 CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN=I_UNDERSTAND_THIS_ONLY_CALLS_MANAGED_ACTION_DRY_RUN_API \
 MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container \
 repo/ops/tom-readonly/managed-action-command-runner.sh dry-run-text runtime/managed-action-command.txt
+CONFIRM_MANAGED_ACTION_TEXT_BRIDGE=I_UNDERSTAND_THIS_ONLY_RUNS_MANAGED_ACTION_DRY_RUN_TEXT \
+MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container \
+repo/ops/tom-readonly/managed-action-text-bridge.sh dry-run runtime/managed-action-command.txt
 CONFIRM_LIVE_HEALTHCHECK_RUNNER=I_UNDERSTAND_THIS_RUNS_APPROVED_LIVE_HEALTHCHECK \
 LOCAL_API_TOKEN=<本地令牌> \
 repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh run-approved
@@ -146,6 +152,8 @@ BRANCH=multi-instance-readonly-control-center ./update.sh
 `ops/local/final-go-live-runner.sh prepare` 是给 openclaw 调用的本机侧总 runner：它先执行 `final-go-live-status.sh check`，只有当总闸门下一步是 Tom `live-healthcheck-rollout-runner.sh prepare` 时，才 SSH 到 Tom 准备 approval 模板和批准前证据包，然后重新检查最终状态并停在人工批准前。如果总闸门仍提示 `prepare`，本机 runner 会先只读询问 Tom runner 当前 readiness；已经处在人工批准边界或已批准待执行边界时，重复执行 `prepare` 会幂等返回当前边界，不会再次写 Tom runtime。它不会批准 approval、不会打开 live gate、不会调用 managed action live API。`run-approved` 还必须显式设置 `CONFIRM_FINAL_GO_LIVE_RUNNER` 和 `LOCAL_API_TOKEN`，并会继续交给 Tom runner 再校验 approval/readiness。
 
 `managed-action-command-runner.sh` 是给 OpenClaw/Discord 机器人调用的 dry-run 命令入口。`plan` 只读取命令 JSON 并校验字段，不联网、不写审计；`parse-text/plan-text` 会把“对 tom 运行 zhihu-human-ops-writing dry-run”这类文本解析成受控 payload，且要求文本必须明确包含 dry-run/预览/演练并拒绝 live、发布、重启、approval 等高风险词；`dry-run/dry-run-text` 必须设置 `CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN`，并通过 `LOCAL_API_TOKEN` 或显式 `MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container` 取得本地令牌，只调用 `/api/managed-actions/dry-run` 生成预览与审计记录，不打开 live gate、不执行实例命令。`skill_run` 命令必须带 `skillName`，当前仍只是预览未来 skill 调用，不会真正调 OpenClaw skill。
+
+`managed-action-text-bridge.sh` 是更适合机器人直接调用的一层封装。它可以接收 `<command.txt>`、标准输入、`MANAGED_ACTION_TEXT` 或 `MANAGED_ACTION_TEXT_FILE`，统一写入 `runtime/managed-action-command.txt`，再调用底层 runner 的 `parse-text`、`plan-text` 或 `dry-run-text`，最后返回包含 `runnerStatus`、`target`、`operationRequestId`、`commandPreview` 和安全字段的精简 JSON。`dry-run` 模式必须设置 `CONFIRM_MANAGED_ACTION_TEXT_BRIDGE=I_UNDERSTAND_THIS_ONLY_RUNS_MANAGED_ACTION_DRY_RUN_TEXT`；桥接层只会自动补齐底层 runner 的 dry-run 确认，不会打开 live gate、不修改 OpenClaw 实例目录、不重启实例。
 
 当前只有一台 Oracle 时，新增实例优先走本机注册入口：
 
