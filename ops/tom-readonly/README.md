@@ -40,6 +40,7 @@
 - `live-healthcheck-approval.sh`：生成、校验或标记 live healthcheck 人工批准记录，不调用 live API。
 - `live-healthcheck-approval.example.json`：批准记录样板，默认未批准。
 - `live-healthcheck-approval-packet.sh`：生成 live healthcheck 批准前证据包，汇总总闸门、dry-run、approval、live window 状态和影响快照。
+- `live-healthcheck-readiness.sh`：只读汇总 live healthcheck 演练 readiness；不生成证据包、不写 approval、不打开 live gate。
 - `live-healthcheck-preflight.sh`：只读检查 healthcheck live 演练条件，不调用 live API。
 - `live-healthcheck-smoke.sh`：手动 live healthcheck 演练脚本；只有显式提供本地令牌和确认环境变量才会调用 live API。
 - `live-healthcheck-report.sh`：演练报告脚本；读取 approval、impact snapshots 和 operation audit，生成 JSON 与 Markdown 报告。
@@ -102,6 +103,8 @@ repo/ops/tom-readonly/live-healthcheck-approval.sh check runtime/live-healthchec
 repo/ops/tom-readonly/live-healthcheck-approval.sh consume runtime/live-healthcheck-approval.json
 repo/ops/tom-readonly/live-healthcheck-approval-packet.sh generate
 repo/ops/tom-readonly/live-healthcheck-approval-packet.sh check
+repo/ops/tom-readonly/live-healthcheck-readiness.sh status
+repo/ops/tom-readonly/live-healthcheck-readiness.sh check
 repo/ops/tom-readonly/live-healthcheck-window.sh status
 repo/ops/tom-readonly/instance-impact-snapshot.sh snapshot readonly-baseline
 ```
@@ -251,6 +254,8 @@ INSTANCE_ID=tom \
 OPERATOR=Anan \
 repo/ops/tom-readonly/live-healthcheck-window.sh run
 ```
+
+`live-healthcheck-readiness.sh status/check` 会只读汇总总闸门、dry-run 证据、批准前证据包、approval 和 live window 状态，输出 `waiting_human_approval`、`approved_ready_for_live_window` 或 `blocked_preconditions` 等状态。它不会生成新证据包、不会写 approval、不会打开 live gate、不会调用 managed action live API。
 
 `live-healthcheck-approval-packet.sh generate` 会写入：
 

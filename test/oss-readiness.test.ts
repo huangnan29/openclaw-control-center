@@ -140,6 +140,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   const liveHealthcheckApprovalExample = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-approval.example.json");
   const liveHealthcheckApprovalPacket = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-approval-packet.sh");
   const liveHealthcheckPreflight = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-preflight.sh");
+  const liveHealthcheckReadiness = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-readiness.sh");
   const liveHealthcheckReport = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-report.sh");
   const liveHealthcheckSmoke = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-smoke.sh");
   const liveHealthcheckWindow = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-window.sh");
@@ -218,6 +219,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(existsSync(liveHealthcheckApprovalExample));
   assert(existsSync(liveHealthcheckApprovalPacket));
   assert(existsSync(liveHealthcheckPreflight));
+  assert(existsSync(liveHealthcheckReadiness));
   assert(existsSync(liveHealthcheckReport));
   assert(existsSync(liveHealthcheckSmoke));
   assert(existsSync(liveHealthcheckWindow));
@@ -476,6 +478,15 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(approvalPacketText, /callsManagedActionsLiveApi: false/);
   assert.match(approvalPacketText, /writesOpenClawInstanceDirs: false/);
   assert.doesNotMatch(approvalPacketText, /api\/managed-actions\/live/);
+  const readinessText = readFileSync(liveHealthcheckReadiness, "utf8");
+  assert.match(readinessText, /live-healthcheck-readiness\.sh status/);
+  assert.match(readinessText, /live-healthcheck-readiness\.sh check/);
+  assert.match(readinessText, /live-healthcheck-approval-packet\.sh/);
+  assert.match(readinessText, /generatesApprovalPacket: false/);
+  assert.match(readinessText, /writesApprovalFile: false/);
+  assert.match(readinessText, /opensLiveGate: false/);
+  assert.match(readinessText, /callsManagedActionsLiveApi: false/);
+  assert.doesNotMatch(readinessText, /api\/managed-actions\/live/);
   const preflightText = readFileSync(liveHealthcheckPreflight, "utf8");
   assert.match(preflightText, /api\/managed-actions\/readiness/);
   assert.doesNotMatch(preflightText, /api\/managed-actions\/live/);
