@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-跨服务器只读 collector 接入增强：已新增远端 collector snapshot 只读拉取脚本，Tom 可以先 `plan` 审查远端来源，再在显式确认后只读取远端 JSON 并写入本机 `runtime/collectors`；不会执行远端 collector，不会修改 OpenClaw 实例目录，也不会调用 live API。
+跨服务器只读 collector 接入增强：已新增远端 collector snapshot 只读拉取脚本，并让 collector-only 远端实例可以只用 `id/name + collectorSnapshotPath` 加入中央 registry；中央不需要填写或挂载远端 `openclawHome`。
 
 ## 本轮不做
 
@@ -25,6 +25,7 @@
 - 只有确认远端 snapshot 文件存在后，才执行：
   `CONFIRM_REMOTE_COLLECTOR_PULL=I_UNDERSTAND_THIS_ONLY_READS_REMOTE_COLLECTOR_SNAPSHOTS repo/ops/tom-readonly/remote-collector-pull.sh pull runtime/remote-collector-pull.sources.json`
 - 拉取成功后，再把该 server 的 `collectorSnapshotPath` 加入 Tom `config/instances.json` 并运行 `healthcheck.sh`。
+- 远端 server 的实例配置可以只写 `id` 和 `name`；只要 server 配置了 `collectorSnapshotPath`，中央会生成内部 `/collector/<serverId>/<instanceId>/config` 占位路径。
 
 受控管理动作下一步仍是人工批准后执行一次只读 healthcheck live 演练：
 
@@ -45,6 +46,15 @@
 ## 最近完成
 
 - 已新增长期推进计划：`implementation_plan.md`。
+- 已让 `parseOpenClawInstanceConfigText` 支持 collector-only 远端实例：server 配置 `collectorSnapshotPath` 后，实例可以省略 `openclawHome/workspaceRoot`。
+- 已为 collector-only 实例生成内部占位路径 `/collector/<serverId>/<instanceId>/config`，中央仍只从 collector snapshot 读取数据。
+- 已更新 `docs/MULTI_INSTANCE_READONLY.md`，远端 collector 示例不再要求填写远端目录路径。
+- 已验证 `npm test -- test/instance-config.test.ts test/multi-instance-readonly.test.ts test/remote-collector-pull.test.ts test/oss-readiness.test.ts`，25/25 通过。
+- 已验证 `npm run build`。
+- 已提交并推送 `fcc996f feat: allow collector-only remote instances`。
+- 已部署到 Tom，并验证运行提交 `fcc996f`。
+- 已在 Tom 容器内验证 collector-only registry 解析结果为 `status=ok`，内部路径为 `/collector/remote-oracle/remote-main/config`。
+- 已验证 Tom `healthcheck.sh` 通过，现有 5 个实例仍只读；live window status 仍为 `needs_manual_approval`、`READONLY_MODE=true`、`readiness.status=blocked`，未调用 live API。
 - 已新增跨服务器只读拉取脚本 `ops/tom-readonly/remote-collector-pull.sh`。
 - 已新增拉取配置样板 `ops/tom-readonly/remote-collector-pull.sources.example.json`，默认 `enabled=false`。
 - `remote-collector-pull.sh plan` 只校验配置和输出计划，不联网。

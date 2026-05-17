@@ -6,7 +6,7 @@
 
 ## 当前阶段
 
-当前阶段并行推进 **跨服务器只读 collector 接入** 与 **人工批准的只读 healthcheck live 演练**：中央 control-center 已完成 registry、collector snapshot 读取、本地 exporter、Tom collector cron、远端 collector snapshot 只读拉取脚本、dry-run API、dry-run UI、人工确认字段、审计检索视图、默认关闭的 live gate、测试用 mock executor、真实执行审计结果类型、dry-run 引用校验、灰度配置解析、rollout 决策响应、只读 readiness 卡片、生产执行器最小骨架、显式挂载开关、只读 healthcheck 人工演练材料、Tom preflight、一次性演练窗口脚本、实例影响快照留证、结构化 approval 记录、approval 准备/状态查看、显式 approval `approve` 记录命令、approval 一次性 `consume` 状态和演练报告生成。Tom 仍不默认启用 live gate 或 executor；下一步是在第二台 Oracle 上生成 collector JSON，再由 Tom 只读拉取并加入 registry；管理动作侧只有在 approval 文件通过 `approve/check` 校验、且提供本地令牌后，才执行一次 `healthcheck` live 演练。
+当前阶段并行推进 **跨服务器只读 collector 接入** 与 **人工批准的只读 healthcheck live 演练**：中央 control-center 已完成 registry、collector snapshot 读取、本地 exporter、Tom collector cron、远端 collector snapshot 只读拉取脚本、collector-only 远端实例解析、dry-run API、dry-run UI、人工确认字段、审计检索视图、默认关闭的 live gate、测试用 mock executor、真实执行审计结果类型、dry-run 引用校验、灰度配置解析、rollout 决策响应、只读 readiness 卡片、生产执行器最小骨架、显式挂载开关、只读 healthcheck 人工演练材料、Tom preflight、一次性演练窗口脚本、实例影响快照留证、结构化 approval 记录、approval 准备/状态查看、显式 approval `approve` 记录命令、approval 一次性 `consume` 状态和演练报告生成。Tom 仍不默认启用 live gate 或 executor；下一步是在第二台 Oracle 上生成 collector JSON，再由 Tom 只读拉取并加入 registry；管理动作侧只有在 approval 文件通过 `approve/check` 校验、且提供本地令牌后，才执行一次 `healthcheck` live 演练。
 
 ## 推进原则
 
@@ -134,5 +134,6 @@
 17. approval 一次性使用：live healthcheck 调用成功后自动 `consume` 批准记录，后续 check 必须重新 approve，防止同一批准重复演练。
 18. 演练报告生成：成功演练后汇总 approval、dry-run 审计、live result 审计和影响快照，并要求 approval 已批准且已使用。
 19. 远端 collector snapshot 只读拉取：Tom 通过 SSH 只读取远端已经生成好的 JSON，校验后写入本机 `runtime/collectors`，不执行远端 collector，不修改远端实例目录。
-20. 第二台 Oracle 接入中央视图：在远端生成 collector JSON，在 Tom 拉取后把对应 server 的 `collectorSnapshotPath` 写入 registry，再通过 `healthcheck.sh` 验收。
-21. 白名单真实执行灰度：默认关闭，只在单实例、单动作、人工确认下开启。
+20. collector-only 远端 registry：server 配置 `collectorSnapshotPath` 后，远端实例可只填写 `id/name`，中央不需要远端 `openclawHome` 或 workspace 路径。
+21. 第二台 Oracle 接入中央视图：在远端生成 collector JSON，在 Tom 拉取后把对应 server 的 `collectorSnapshotPath` 写入 registry，再通过 `healthcheck.sh` 验收。
+22. 白名单真实执行灰度：默认关闭，只在单实例、单动作、人工确认下开启。
