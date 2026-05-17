@@ -137,6 +137,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   const cron = path.join(ROOT, "ops", "tom-readonly", "install-collector-cron.sh");
   const liveHealthcheckPreflight = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-preflight.sh");
   const liveHealthcheckSmoke = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-smoke.sh");
+  const liveHealthcheckWindow = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-window.sh");
   const liveHealthcheckRollout = path.join(ROOT, "ops", "tom-readonly", "managed-action-healthcheck-rollout.example.json");
 
   assert(doc.includes("OPENCLAW_INSTANCES_FILE"));
@@ -153,6 +154,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(existsSync(cron));
   assert(existsSync(liveHealthcheckPreflight));
   assert(existsSync(liveHealthcheckSmoke));
+  assert(existsSync(liveHealthcheckWindow));
   assert(existsSync(liveHealthcheckRollout));
   assert.match(readFileSync(cron, "utf8"), /OPENCLAW_COLLECTOR_CRON_BEGIN/);
   const preflightText = readFileSync(liveHealthcheckPreflight, "utf8");
@@ -166,6 +168,12 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(readFileSync(liveHealthcheckSmoke, "utf8"), /LIVE-ACTION-APPROVED/);
   assert.match(readFileSync(liveHealthcheckSmoke, "utf8"), /DRY-RUN-ONLY/);
   assert.match(readFileSync(liveHealthcheckSmoke, "utf8"), /set \+x/);
+  const liveWindowText = readFileSync(liveHealthcheckWindow, "utf8");
+  assert.match(liveWindowText, /CONFIRM_LIVE_HEALTHCHECK_WINDOW/);
+  assert.match(liveWindowText, /I_UNDERSTAND_THIS_TEMPORARILY_ENABLES_LIVE_GATE/);
+  assert.match(liveWindowText, /MANAGED_ACTIONS_LIVE_ALLOWED_ACTIONS: "healthcheck"/);
+  assert.match(liveWindowText, /trap rollback_on_exit EXIT/);
+  assert.match(liveWindowText, /stop_live_window/);
   assert.match(readFileSync(liveHealthcheckRollout, "utf8"), /"action": "healthcheck"/);
   assert.match(readFileSync(liveHealthcheckRollout, "utf8"), /"risk": "low"/);
   assert(healthcheck.includes("COLLECTOR_SNAPSHOT_MAX_AGE_SECONDS"));

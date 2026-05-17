@@ -18,6 +18,7 @@
 - `managed-action-healthcheck-rollout.example.json`：只读 healthcheck live 演练的 rollout 样板，不会被默认加载。
 - `live-healthcheck-preflight.sh`：只读检查 healthcheck live 演练条件，不调用 live API。
 - `live-healthcheck-smoke.sh`：手动 live healthcheck 演练脚本；只有显式提供本地令牌和确认环境变量才会调用 live API。
+- `live-healthcheck-window.sh`：一次性演练窗口脚本；临时启用 control-center 的 healthcheck live 配置，失败或结束后恢复只读状态。
 
 ## Tom 上的常用命令
 
@@ -28,6 +29,7 @@ cd /srv/openclaw-control-center-readonly
 ./install-collector-cron.sh
 ./update.sh
 ./rollback.sh <commit>
+repo/ops/tom-readonly/live-healthcheck-window.sh status
 ```
 
 如果需要临时覆盖默认值，可以使用环境变量：
@@ -54,6 +56,26 @@ LOCAL_API_TOKEN=<本地令牌> \
 INSTANCE_ID=tom \
 OPERATOR=Anan \
 ./live-healthcheck-smoke.sh
+```
+
+更推荐使用一次性演练窗口，脚本会在退出前自动恢复只读状态：
+
+```bash
+CONFIRM_LIVE_HEALTHCHECK_WINDOW=I_UNDERSTAND_THIS_TEMPORARILY_ENABLES_LIVE_GATE \
+CONFIRM_LIVE_HEALTHCHECK=I_UNDERSTAND_THIS_CALLS_LIVE_API \
+LOCAL_API_TOKEN=<本地令牌> \
+INSTANCE_ID=tom \
+OPERATOR=Anan \
+repo/ops/tom-readonly/live-healthcheck-window.sh run
+```
+
+如果只需要手动打开或关闭演练窗口：
+
+```bash
+CONFIRM_LIVE_HEALTHCHECK_WINDOW=I_UNDERSTAND_THIS_TEMPORARILY_ENABLES_LIVE_GATE \
+repo/ops/tom-readonly/live-healthcheck-window.sh enable
+
+repo/ops/tom-readonly/live-healthcheck-window.sh disable
 ```
 
 ## 验收标准
