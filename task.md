@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-真实执行前 mock executor 测试层：新增执行器接口和测试用 mock healthcheck，证明执行链必须先通过 live gate，生产路径仍不接执行器。
+真实执行审计结果类型：定义未来真实执行的审计条目结构，覆盖执行成功、执行失败、已回滚、已跳过四类结果；当前不接真实执行器。
 
 ## 本轮不做
 
@@ -17,11 +17,12 @@
 
 ## 当前下一步
 
-下一步设计真实执行审计结果类型：
+部署审计结果类型到 Tom 并验证行为不变：
 
-- 只定义类型和测试，不接真实执行器。
-- 明确真实执行成功、失败、回滚、跳过的审计结构。
 - Tom 继续保持 `MANAGED_ACTIONS_LIVE_ENABLED=false`。
+- `/api/managed-actions/live` 继续返回 `blocked_disabled`。
+- 页面继续不出现真实执行入口。
+- `healthcheck.sh` 继续通过。
 
 ## 最近完成
 
@@ -130,7 +131,15 @@
 - 已部署到 Tom，并验证运行提交 `9b2e52e`。
 - 已验证 Tom `/api/managed-actions/live` 仍返回 `blocked_disabled`、`liveExecution=false`、`enabled=false`、`readonlyMode=true`。
 - 已验证 Tom 页面仍无真实执行入口。
+- 已新增真实执行审计结果类型模块：`src/runtime/managed-action-live-audit.ts`。
+- 已新增 `managed_action_live_result` 审计 action 类型。
+- 已定义真实执行审计 metadata：`operationRequestId`、`operator`、`reason`、`executor`、`target`、`gate`、`commandPreview`、`durationMs`、`rollback`、`result`、`error`、`skip`。
+- 已覆盖四类审计结果：`executed`、`failed`、`rolled_back`、`skipped`。
+- 已验证 `executed` 与 `skipped` 为 `ok=true`，`failed` 与 `rolled_back` 为 `ok=false`。
+- 已验证 `skipped` 不标记真实执行，`executed/failed/rolled_back` 标记 `liveExecution=true`。
+- 已验证 `npm test -- test/managed-action-live-audit.test.ts test/managed-action-executor.test.ts test/managed-actions-dry-run.test.ts test/phase9-routes-commands.test.ts test/readonly-multi-instance-safety.test.ts test/multi-instance-readonly.test.ts test/ui-render-smoke.test.ts`。
+- 已验证 `npm run build`。
 
 ## 阶段完成后的下一步
 
-真实执行审计结果类型：只定义和测试审计结构，不在 Tom 开启真实执行。
+部署 Tom 验证审计结果类型不会改变运行行为；通过后，下一步设计真实执行前置 dry-run 申请有效性校验，仍不启用真实执行。

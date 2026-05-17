@@ -12,6 +12,7 @@ export type OperationAuditAction =
   | "task_heartbeat"
   | "managed_action_dry_run"
   | "managed_action_live_blocked"
+  | "managed_action_live_result"
   | "task_room_create"
   | "task_room_message"
   | "task_room_handoff"
