@@ -183,6 +183,29 @@ volumes:
 
 当前版本只实现中央读取快照文件的能力。下一步才是在每台 Oracle 服务器上实现本地 collector exporter，由 exporter 定期生成上述 JSON。
 
+### 本地 exporter 命令
+
+服务器本地可以用 `collector:snapshot` 生成上述快照。这个命令只读取当前 registry 里的实例，并把结果写到指定输出文件：
+
+```bash
+OPENCLAW_COLLECTOR_SERVER_ID=tom-oracle npm run collector:snapshot -- runtime/collectors/tom-oracle/snapshot.json
+```
+
+容器生产环境可以直接运行编译后的命令：
+
+```bash
+OPENCLAW_COLLECTOR_SERVER_ID=tom-oracle node dist/index.js collector-snapshot /app/runtime/collectors/tom-oracle/snapshot.json
+```
+
+Tom 灰度部署提供了封装脚本：
+
+```bash
+cd /srv/openclaw-control-center-readonly
+./collector-snapshot.sh
+```
+
+当前脚本只负责生成快照，不会自动把中央 UI 切换到 `collectorSnapshotPath`。切换读取路径和定时执行应作为下一步单独验证，避免把“导出能力”和“生产切流”混在一起。
+
 ## 推荐环境变量
 
 ```env

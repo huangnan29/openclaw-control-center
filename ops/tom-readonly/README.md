@@ -11,6 +11,7 @@
 ## 脚本
 
 - `healthcheck.sh`：检查 gateway 健康、总览页、实例详情页、写接口 403、容器只读安全边界。
+- `collector-snapshot.sh`：在 Tom 本地生成 collector JSON 快照，只写控制中心 runtime，不修改任何 OpenClaw 实例目录。
 - `update.sh`：拉取 `multi-instance-readonly-control-center` 分支，重建控制中心容器，随后执行健康检查。
 - `rollback.sh`：回滚到指定提交；如果不传提交，则使用最近一次 `update.sh` 记录的 `previous-good.commit`。
 
@@ -19,6 +20,7 @@
 ```bash
 cd /srv/openclaw-control-center-readonly
 ./healthcheck.sh
+./collector-snapshot.sh
 ./update.sh
 ./rollback.sh <commit>
 ```
@@ -27,6 +29,7 @@ cd /srv/openclaw-control-center-readonly
 
 ```bash
 BASE_URL=http://127.0.0.1:4311 INSTANCE_IDS="main tom third deepseek spark" ./healthcheck.sh
+SERVER_ID=tom-oracle OUTPUT_PATH=/app/runtime/collectors/tom-oracle/snapshot.json ./collector-snapshot.sh
 BRANCH=multi-instance-readonly-control-center ./update.sh
 ```
 

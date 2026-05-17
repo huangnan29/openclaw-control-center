@@ -6,18 +6,19 @@
 
 ## 本轮任务
 
-中央 collector 快照接入已进入实现：server registry 支持 `collectorSnapshotPath`，中央 control-center 可优先读取 collector JSON 快照文件。
+服务器本地 collector exporter 已进入实现：每台 Oracle 可用本地命令生成中央可读取的 collector JSON 快照。
 
 ## 本轮不做
 
 - 不做任何写操作或管理动作。
 - 不做 HTTP collector 服务。
-- 不做服务器本地 collector exporter。
+- 不做自动定时任务。
+- 不把 Tom 中央 UI 立即切换为 `collectorSnapshotPath` 读取。
 - 不让中央控制中心直接挂载远端实例目录。
 
 ## 当前下一步
 
-完成 collector 快照文件接入验证与 Tom 灰度部署；随后进入下一步：实现服务器本地 collector exporter，仍保持只读。
+完成本地 collector exporter 验证与 Tom 灰度部署；随后进入下一步：为 Tom 配置定时生成 collector 快照，并在单服务器范围内灰度切换中央读取 `collectorSnapshotPath`。
 
 ## 最近完成
 
@@ -44,7 +45,10 @@
 - 已让 server registry 支持 `collectorSnapshotPath`。
 - 已新增 collector 快照文件解析器：`src/runtime/collector-snapshot.ts`。
 - 已让多实例只读 adapter 对配置了 `collectorSnapshotPath` 的实例优先使用 collector 快照。
+- 已新增 collector exporter：`src/runtime/collector-exporter.ts`。
+- 已新增命令：`npm run collector:snapshot -- <output-path>` 与 `node dist/index.js collector-snapshot <output-path>`。
+- 已新增 Tom 快照脚本：`ops/tom-readonly/collector-snapshot.sh`。
 
 ## 阶段完成后的下一步
 
-服务器本地 collector exporter：每台 Oracle 本地只读采集本机实例，并定期输出 collector JSON 快照。
+Tom collector 灰度切流：先配置定时生成快照，再把 Tom registry 指向本机 `collectorSnapshotPath`，确认中央 UI 可完全从 collector 快照读取。

@@ -17,7 +17,13 @@ import {
   UI_TIMEZONE,
 } from "./config";
 import { buildExportBundle, writeExportBundle } from "./runtime/export-bundle";
+import {
+  buildCollectorSnapshot,
+  selectCollectorExportScope,
+  writeCollectorSnapshotFile,
+} from "./runtime/collector-exporter";
 import { validateExportFileDryRun } from "./runtime/import-dry-run";
+import { loadOpenClawInstanceConfigs } from "./runtime/instance-config";
 import { monitorIntervalMs, nextContinuousMonitorDelayMs, runMonitorOnce } from "./runtime/monitor";
 import { pruneStaleAcks } from "./runtime/notification-center";
 import { appendOperationAudit } from "./runtime/operation-audit";
@@ -110,11 +116,13 @@ async function start(): Promise<void> {
 void start();
 
 async function runCommand(
-  command: "backup-export" | "import-validate" | "acks-prune" | "task-heartbeat",
+  command: "backup-export" | "import-validate" | "acks-prune" | "task-heartbeat" | "collector-snapshot",
   adapter: OpenClawReadonlyAdapter,
   arg?: string,
 ): Promise<void> {
-  assertCommandOperationGate(command);
+  if (command !== "collector-snapshot") {
+    assertCommandOperationGate(command);
+  }
 
   if (command === "backup-export") {
     try {
@@ -213,6 +221,21 @@ async function runCommand(
     return;
   }
 
+  if (command === "collector-snapshot") {
+    const outputPath = resolveCollectorSnapshotOutput(arg);
+    const scope = selectCollectorExportScope(loadOpenClawInstanceConfigs(), process.env.OPENCLAW_COLLECTOR_SERVER_ID);
+    const snapshot = await buildCollectorSnapshot(scope);
+    const written = await writeCollectorSnapshotFile(snapshot, outputPath);
+    console.log("[mission-control] collector snapshot", {
+      serverId: snapshot.serverId,
+      serverName: snapshot.serverName,
+      generatedAt: snapshot.generatedAt,
+      outputPath: written.path,
+      instances: written.instances,
+    });
+    return;
+  }
+
   if (!arg) {
     throw new Error(
       "import-validate requires a file path argument. Example: APP_COMMAND=import-validate COMMAND_ARG=<file.json> npm run dev",
@@ -250,7 +273,7 @@ function assertCommandOperationGate(
 
 function normalizeCommand(
   input: string | undefined,
-): "backup-export" | "import-validate" | "acks-prune" | "task-heartbeat" | undefined {
+): "backup-export" | "import-validate" | "acks-prune" | "task-heartbeat" | "collector-snapshot" | undefined {
   if (!input) return undefined;
   const trimmed = input.trim().toLowerCase();
   if (trimmed === "") return undefined;
@@ -258,9 +281,20 @@ function normalizeCommand(
   if (trimmed === "import-validate") return "import-validate";
   if (trimmed === "acks-prune") return "acks-prune";
   if (trimmed === "task-heartbeat") return "task-heartbeat";
+  if (trimmed === "collector-snapshot") return "collector-snapshot";
   throw new Error(
-    `Unknown command '${input}'. Supported: backup-export, import-validate, acks-prune, task-heartbeat.`,
+    `Unknown command '${input}'. Supported: backup-export, import-validate, acks-prune, task-heartbeat, collector-snapshot.`,
   );
+}
+
+function resolveCollectorSnapshotOutput(arg: string | undefined): string {
+  const outputPath = arg?.trim() || process.env.OPENCLAW_COLLECTOR_OUTPUT?.trim();
+  if (!outputPath) {
+    throw new Error(
+      "collector-snapshot requires an output path. Example: APP_COMMAND=collector-snapshot COMMAND_ARG=runtime/collectors/local/snapshot.json npm run dev",
+    );
+  }
+  return outputPath;
 }
 
 function resolveAcksPruneDryRun(arg: string | undefined): boolean {

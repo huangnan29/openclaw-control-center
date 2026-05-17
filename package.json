@@ -15,6 +15,7 @@
     "command:import-validate": "cross-env APP_COMMAND=import-validate node --import tsx src/index.ts",
     "command:acks-prune": "cross-env APP_COMMAND=acks-prune node --import tsx src/index.ts",
     "command:task-heartbeat": "cross-env APP_COMMAND=task-heartbeat node --import tsx src/index.ts",
+    "collector:snapshot": "cross-env APP_COMMAND=collector-snapshot node --import tsx src/index.ts",
     "test": "node --import tsx scripts/run-tests-isolated.ts",
     "build": "tsc -p tsconfig.json",
     "release:audit": "bash scripts/release-audit.sh",

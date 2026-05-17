@@ -6,7 +6,7 @@
 
 ## 当前阶段
 
-当前阶段推进 **中央 collector 架构（只读）**：先让中央 control-center 能读取每台 Oracle 本地 collector 生成的 JSON 快照文件，逐步摆脱中央节点直接挂载远端实例目录的需求。仍不做实例启停、审批、发布、重启、任务派发等写操作。
+当前阶段推进 **中央 collector 架构（只读）**：中央 control-center 已能读取 collector JSON 快照文件，本轮继续补每台 Oracle 本地生成快照的 exporter。仍不做实例启停、审批、发布、重启、任务派发等写操作。
 
 ## 推进原则
 
