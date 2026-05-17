@@ -262,3 +262,126 @@ test("managed action dry-run previews whitelisted actions without executing in r
     }
   }
 });
+
+test("managed action live route executes readonly healthcheck only when executor switch and all gates are ready", async () => {
+  const previousInstancesJson = process.env.OPENCLAW_INSTANCES_JSON;
+  const previousInstancesFile = process.env.OPENCLAW_INSTANCES_FILE;
+  process.env.OPENCLAW_INSTANCES_JSON = JSON.stringify({
+    instances: [instance("tom")],
+  });
+  delete process.env.OPENCLAW_INSTANCES_FILE;
+
+  const server = startUiServer(0, new ReadonlyToolClient(), {
+    readonlyMode: false,
+    localTokenAuthRequired: false,
+    managedActionLiveGate: {
+      enabled: true,
+      readonlyMode: false,
+      allowedActions: ["healthcheck"],
+      requiredConfirmationText: "LIVE-ACTION-APPROVED",
+    },
+    managedActionProductionExecutorEnabled: true,
+    managedActionLiveRolloutConfig: {
+      source: "file",
+      path: "/tmp/test-rollout.json",
+      enabled: true,
+      issues: [],
+      rules: [
+        {
+          action: "healthcheck",
+          instanceId: "tom",
+          operators: ["Anan"],
+          risk: "low",
+          enabled: true,
+          maxDryRunAgeMinutes: 60,
+        },
+      ],
+    },
+  });
+
+  try {
+    if (!server.listening) {
+      await new Promise<void>((resolve, reject) => {
+        server.once("listening", resolve);
+        server.once("error", reject);
+      });
+    }
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Failed to bind ephemeral UI port.");
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+
+    const dryRunResponse = await fetch(`${baseUrl}/api/managed-actions/dry-run`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        instanceId: "tom",
+        action: "healthcheck",
+        operator: "Anan",
+        reason: "真实执行前的 dry-run 引用",
+        confirmedText: "DRY-RUN-ONLY",
+      }),
+    });
+    assert.equal(dryRunResponse.status, 200);
+    const dryRun = await dryRunResponse.json() as { review: { operationRequestId: string } };
+
+    const liveResponse = await fetch(`${baseUrl}/api/managed-actions/live`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        instanceId: "tom",
+        action: "healthcheck",
+        operator: "Anan",
+        reason: "显式开关打开后的只读 healthcheck",
+        operationRequestId: dryRun.review.operationRequestId,
+        confirmedText: "LIVE-ACTION-APPROVED",
+      }),
+    });
+    assert.equal(liveResponse.status, 200);
+    const live = await liveResponse.json() as {
+      ok: boolean;
+      status: string;
+      liveExecution: boolean;
+      gate: { enabled: boolean; readonlyMode: boolean };
+      rollout: { allowed: boolean; status: string };
+      dryRunReference: { valid: boolean; status: string };
+      executor: { productionWired: boolean; status: string };
+      safety: { mutatesOpenClawInstance: boolean };
+    };
+    assert.equal(live.ok, true);
+    assert.equal(live.status, "executed_readonly_healthcheck");
+    assert.equal(live.liveExecution, true);
+    assert.equal(live.gate.enabled, true);
+    assert.equal(live.gate.readonlyMode, false);
+    assert.equal(live.rollout.allowed, true);
+    assert.equal(live.rollout.status, "allowed");
+    assert.equal(live.dryRunReference.valid, true);
+    assert.equal(live.dryRunReference.status, "valid");
+    assert.equal(live.executor.productionWired, true);
+    assert.equal(live.executor.status, "wired");
+    assert.equal(live.safety.mutatesOpenClawInstance, false);
+
+    const readinessResponse = await fetch(`${baseUrl}/api/managed-actions/readiness`);
+    assert.equal(readinessResponse.status, 200);
+    const readiness = await readinessResponse.json() as {
+      liveExecutionAvailable: boolean;
+      executor: { productionWired: boolean; status: string };
+    };
+    assert.equal(readiness.liveExecutionAvailable, true);
+    assert.equal(readiness.executor.productionWired, true);
+    assert.equal(readiness.executor.status, "wired");
+  } finally {
+    if (server.listening) {
+      await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+    }
+    if (previousInstancesJson === undefined) {
+      delete process.env.OPENCLAW_INSTANCES_JSON;
+    } else {
+      process.env.OPENCLAW_INSTANCES_JSON = previousInstancesJson;
+    }
+    if (previousInstancesFile === undefined) {
+      delete process.env.OPENCLAW_INSTANCES_FILE;
+    } else {
+      process.env.OPENCLAW_INSTANCES_FILE = previousInstancesFile;
+    }
+  }
+});

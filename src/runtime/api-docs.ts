@@ -25,6 +25,7 @@ export function buildApiDocs(): ApiDocsPayload {
       MANAGED_ACTIONS_LIVE_ENABLED: false,
       MANAGED_ACTIONS_LIVE_ALLOWED_ACTIONS: "",
       MANAGED_ACTIONS_LIVE_ROLLOUT_FILE: "",
+      MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED: false,
       IMPORT_MUTATION_ENABLED: false,
       IMPORT_MUTATION_DRY_RUN: false,
       LOCAL_TOKEN_AUTH_REQUIRED: true,
@@ -45,7 +46,7 @@ export function buildApiDocs(): ApiDocsPayload {
       taskHeartbeatExecutionGuard:
         "Live task heartbeat execution requires LOCAL_API_TOKEN when LOCAL_TOKEN_AUTH_REQUIRED=true; default mode is dry-run",
       managedActionLiveGuard:
-        "Managed action live execution is disabled by default; it requires local token, READONLY_MODE=false, MANAGED_ACTIONS_LIVE_ENABLED=true, a whitelisted action, a prior dry-run operationRequestId, and explicit live confirmation",
+        "Managed action live execution is disabled by default; it requires local token, READONLY_MODE=false, MANAGED_ACTIONS_LIVE_ENABLED=true, MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED=true, a whitelisted action, a valid rollout rule, a prior dry-run operationRequestId, and explicit live confirmation",
       hallRuntimeDispatchNotes:
         "Hall discussion / assign / handoff use the real openclaw agent runtime when HALL_RUNTIME_DISPATCH_ENABLED=true and a live ToolClient is available; hall prefers direct stdout streaming when available, falls back to session deltas when needed, and can auto-chain bounded execution turns after assign",
     },
@@ -770,11 +771,12 @@ export function buildApiDocs(): ApiDocsPayload {
           confirmedText: "required LIVE-ACTION-APPROVED",
         },
         response: {
-          ok: "false",
-          status: "blocked_disabled|blocked_readonly|blocked_not_whitelisted|blocked_confirmation|blocked_missing_dry_run|blocked_invalid_dry_run|blocked_rollout_not_allowed|ready_not_implemented",
-          liveExecution: "false",
+          ok: "boolean",
+          status: "blocked_disabled|blocked_readonly|blocked_not_whitelisted|blocked_confirmation|blocked_missing_dry_run|blocked_invalid_dry_run|blocked_rollout_not_allowed|ready_not_implemented|executed_readonly_healthcheck|executor_missing",
+          liveExecution: "false when blocked or skipped; true only after executor runs",
           dryRunReference: "{ valid, status, operationRequestId, ageMs?, maxAgeMs, matched? }",
           rollout: "{ allowed, status, message, rule? }",
+          executor: "{ productionWired, status }",
           gate: "{ enabled, readonlyMode, allowedActions, requiredConfirmationText }",
         },
       },

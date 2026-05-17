@@ -46,5 +46,6 @@ BRANCH=multi-instance-readonly-control-center ./update.sh
 - 容器未启用 `privileged`。
 - 容器未挂载 `/var/run/docker.sock`。
 - 所有实例目录挂载均为只读。
+- `MANAGED_ACTIONS_LIVE_ENABLED` 与 `MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED` 不得为 `true`。
 - `PATCH /api/ui/preferences` 返回 403。
 - 如果 registry 配置了 `collectorSnapshotPath`，快照必须存在、可解析、包含实例且未超过 `COLLECTOR_SNAPSHOT_MAX_AGE_SECONDS`。

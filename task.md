@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-生产执行器最小骨架：新增可测试的只读 `healthcheck` 生产执行器模块，但当前仍不接入 `/api/managed-actions/live`，Tom 上继续显示 `productionWired=false`。
+live 执行器挂载开关：新增 `MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED`，默认关闭；只有显式打开且 live gate、dry-run 引用、rollout、确认短语全部通过时，才会把生产执行器接到 `/api/managed-actions/live`。
 
 ## 本轮不做
 
@@ -17,13 +17,13 @@
 
 ## 当前下一步
 
-设计 live 执行器挂载开关：
+部署 live 执行器挂载开关到 Tom 并验证默认关闭：
 
-- 新增显式生产执行器挂载配置，默认关闭。
-- 关闭时 live 路由行为完全不变。
-- 关闭时 readiness 仍显示 `executor.productionWired=false`。
-- 打开配置也必须继续受 live gate、dry-run 引用、rollout、确认短语共同约束。
-- Tom 暂不启用该开关。
+- Tom 继续保持 `MANAGED_ACTIONS_LIVE_ENABLED` 不为 `true`。
+- Tom 继续保持 `MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED` 不为 `true`。
+- Tom readiness 继续返回 `executor.productionWired=false`。
+- Tom 页面继续不包含 `/api/managed-actions/live` 前端调用。
+- Tom `healthcheck.sh` 必须通过新增的 live 开关安全检查。
 
 ## 最近完成
 
@@ -210,7 +210,16 @@
 - 已验证 Tom readiness 仍返回 `status=blocked`、`liveExecutionAvailable=false`、`liveExecutionAttempted=false`、`mutatesOpenClawInstance=false`。
 - 已验证 Tom readiness 仍返回 `executor.productionWired=false`、`executor.status=missing`。
 - 已验证 Tom 总览页仍无 `/api/managed-actions/live` 前端调用，也无真实执行确认短语。
+- 已新增 `MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED=false` 默认配置。
+- 已让 live gate 在 `executorWired=true` 且所有安全条件通过时返回 `ready`；默认仍返回 `ready_not_implemented`。
+- 已将生产执行器挂载开关接入 `/api/managed-actions/live`。
+- 已验证显式打开开关、live gate、dry-run 引用、rollout 和确认短语全部通过时，只读 `healthcheck` 返回 `executed_readonly_healthcheck`。
+- 已验证只读 `healthcheck` 响应声明 `safety.mutatesOpenClawInstance=false`。
+- 已让 readiness 根据挂载开关显示 `executor.productionWired`。
+- 已更新 Tom `healthcheck.sh`，如果 `MANAGED_ACTIONS_LIVE_ENABLED=true` 或 `MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED=true` 会直接失败。
+- 已验证 `npm test -- test/managed-action-live-gate.test.ts test/managed-actions-dry-run.test.ts test/managed-action-executor.test.ts test/managed-action-live-audit.test.ts test/managed-action-live-readiness.test.ts test/phase9-routes-commands.test.ts test/readonly-multi-instance-safety.test.ts test/multi-instance-readonly.test.ts test/ui-render-smoke.test.ts test/oss-readiness.test.ts`。
+- 已验证 `npm run build`。
 
 ## 阶段完成后的下一步
 
-live 执行器挂载开关设计：只允许通过显式配置把生产执行器接到 live 路由，默认关闭；Tom 暂不启用。
+部署 Tom 验证 live 执行器挂载开关默认关闭；通过后，进入 healthcheck 真实执行灰度演练方案设计，仍先不在页面提供执行入口。

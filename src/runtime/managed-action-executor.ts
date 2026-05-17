@@ -14,6 +14,7 @@ export interface ManagedActionExecutionResult {
   ok: boolean;
   status: "executed_mock" | "executed_readonly_healthcheck" | "blocked_by_gate" | "executor_missing";
   liveExecution: boolean;
+  mutatesOpenClawInstance: boolean;
   action: ManagedActionName;
   targetInstanceId: string;
   operationRequestId: string;
@@ -34,6 +35,7 @@ export async function runManagedActionExecutor(
       ok: false,
       status: "blocked_by_gate",
       liveExecution: false,
+      mutatesOpenClawInstance: false,
       action: input.action,
       targetInstanceId: input.instance.id,
       operationRequestId: input.operationRequestId,
@@ -47,6 +49,7 @@ export async function runManagedActionExecutor(
       ok: false,
       status: "executor_missing",
       liveExecution: false,
+      mutatesOpenClawInstance: false,
       action: input.action,
       targetInstanceId: input.instance.id,
       operationRequestId: input.operationRequestId,
@@ -64,6 +67,7 @@ export function createMockHealthcheckExecutor(): ManagedActionExecutor {
         ok: true,
         status: "executed_mock",
         liveExecution: true,
+        mutatesOpenClawInstance: true,
         action: input.action,
         targetInstanceId: input.instance.id,
         operationRequestId: input.operationRequestId,

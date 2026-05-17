@@ -122,6 +122,12 @@ check_container_security() {
   local envs
   envs="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$CONTAINER_NAME")"
   printf '%s\n' "$envs" | grep -Fxq "READONLY_MODE=true" || fail "READONLY_MODE 未开启"
+  if printf '%s\n' "$envs" | grep -Fxq "MANAGED_ACTIONS_LIVE_ENABLED=true"; then
+    fail "管理动作 live gate 被启用"
+  fi
+  if printf '%s\n' "$envs" | grep -Fxq "MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED=true"; then
+    fail "管理动作生产执行器被挂载"
+  fi
   printf '%s\n' "$envs" | grep -Fxq "APPROVAL_ACTIONS_ENABLED=false" || fail "审批写动作未禁用"
   printf '%s\n' "$envs" | grep -Fxq "IMPORT_MUTATION_ENABLED=false" || fail "导入写动作未禁用"
   printf '%s\n' "$envs" | grep -Fxq "TASK_HEARTBEAT_ENABLED=false" || fail "任务心跳写动作未禁用"

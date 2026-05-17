@@ -48,6 +48,7 @@ test("done-checklist route logic builds readiness payload", async () => {
   assert.equal(localTokenGateItem.status, LOCAL_TOKEN_AUTH_REQUIRED ? "pass" : "warn");
 
   const docs = buildApiDocs();
+  assert.equal(docs.safetyDefaults.MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED, false);
   assert(docs.routes.some((route) => route.path === "/api/commander/exceptions"));
   assert(docs.routes.some((route) => route.path === "/api/action-queue"));
   assert(docs.routes.some((route) => route.path === "/api/action-queue/acks/prune-preview"));

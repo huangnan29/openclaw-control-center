@@ -20,6 +20,7 @@ export interface ManagedActionLiveAuditInput {
   finishedAt: string;
   gate: ManagedActionLiveGate;
   commandPreview?: string[];
+  mutatesOpenClawInstance?: boolean;
   result?: {
     message?: string;
     exitCode?: number;
@@ -102,6 +103,7 @@ export function buildManagedActionLiveAuditMetadata(
 ): ManagedActionLiveAuditMetadata {
   const durationMs = Math.max(0, Date.parse(input.finishedAt) - Date.parse(input.startedAt));
   const liveExecution = input.outcome !== "skipped";
+  const mutatesOpenClawInstance = input.mutatesOpenClawInstance ?? liveExecution;
   const rollbackStatus = input.rollback?.status ?? (input.outcome === "rolled_back" ? "completed" : "not_required");
   return {
     managedAction: input.action,
@@ -111,7 +113,7 @@ export function buildManagedActionLiveAuditMetadata(
     reason: input.reason,
     executor: input.executor,
     liveExecution,
-    mutatesOpenClawInstance: liveExecution,
+    mutatesOpenClawInstance,
     startedAt: input.startedAt,
     finishedAt: input.finishedAt,
     durationMs,

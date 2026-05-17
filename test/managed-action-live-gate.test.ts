@@ -41,3 +41,20 @@ test("managed action live gate reaches not implemented only after all safety che
   assert.equal(decision.status, "ready_not_implemented");
   assert.equal(decision.liveExecution, false);
 });
+
+test("managed action live gate is ready only when the production executor is explicitly wired", () => {
+  const decision = evaluateManagedActionLiveGate({
+    gate: readyGate,
+    action: "healthcheck",
+    operationRequestId: "dry-run-1",
+    dryRunReferenceValid: true,
+    rolloutAllowed: true,
+    executorWired: true,
+    confirmedText: MANAGED_ACTION_LIVE_CONFIRMATION,
+  });
+
+  assert.equal(decision.ok, true);
+  assert.equal(decision.status, "ready");
+  assert.equal(decision.statusCode, 200);
+  assert.equal(decision.liveExecution, false);
+});

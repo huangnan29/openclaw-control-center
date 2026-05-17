@@ -11,6 +11,7 @@ import {
   LOCAL_API_TOKEN,
   LOCAL_TOKEN_AUTH_REQUIRED,
   LOCAL_TOKEN_HEADER,
+  MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED,
   OPENCLAW_CONTROL_UI_URL,
   POLLING_INTERVALS_MS,
   READONLY_MODE,
@@ -50,16 +51,24 @@ import {
   type ManagedActionLiveReadinessFinding,
   type ManagedActionLiveReadinessSnapshot,
 } from "../runtime/managed-action-live-readiness";
+import { buildManagedActionLiveAuditEntry } from "../runtime/managed-action-live-audit";
 import {
   evaluateManagedActionLiveGate,
   runtimeManagedActionLiveGate,
+  type ManagedActionLiveGate,
 } from "../runtime/managed-action-live";
 import {
   defaultManagedActionLiveRolloutConfig,
   evaluateManagedActionLiveRollout,
   loadManagedActionLiveRolloutConfig,
+  type ManagedActionLiveRolloutConfig,
   type ManagedActionLiveRolloutDecision,
 } from "../runtime/managed-action-live-rollout";
+import {
+  runManagedActionExecutor,
+  type ManagedActionExecutor,
+} from "../runtime/managed-action-executor";
+import { createProductionManagedActionExecutor } from "../runtime/managed-action-production-executor";
 import {
   buildManagedActionDryRun,
   isManagedActionName,
@@ -1038,6 +1047,10 @@ interface StartUiServerOptions {
   localTokenAuthRequired?: boolean;
   localApiToken?: string;
   readonlyMode?: boolean;
+  managedActionLiveGate?: ManagedActionLiveGate;
+  managedActionLiveRolloutConfig?: ManagedActionLiveRolloutConfig;
+  managedActionProductionExecutorEnabled?: boolean;
+  managedActionExecutor?: ManagedActionExecutor;
   createMultiInstanceSnapshot?: (
     instances: OpenClawInstanceConfig[],
     selectedInstanceId?: string,
@@ -1084,6 +1097,23 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
   const localTokenGateRequired = options.localTokenAuthRequired ?? LOCAL_TOKEN_AUTH_REQUIRED;
   const localApiToken = options.localApiToken ?? LOCAL_API_TOKEN;
   const readonlyMode = options.readonlyMode ?? READONLY_MODE;
+  const managedActionProductionExecutorEnabled =
+    options.managedActionProductionExecutorEnabled ?? MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED;
+  const managedActionExecutor = managedActionProductionExecutorEnabled
+    ? options.managedActionExecutor ?? createProductionManagedActionExecutor()
+    : {};
+  const resolveManagedActionLiveGate = (): ManagedActionLiveGate =>
+    options.managedActionLiveGate ?? runtimeManagedActionLiveGate();
+  const resolveManagedActionLiveRolloutConfig = async (): Promise<ManagedActionLiveRolloutConfig> =>
+    options.managedActionLiveRolloutConfig ?? (await loadManagedActionLiveRolloutConfig());
+  const readManagedActionReadiness = async (
+    dryRunAudit?: ManagedActionAuditSnapshot,
+  ): Promise<ManagedActionLiveReadinessSnapshot> => readManagedActionLiveReadinessSnapshot({
+    dryRunAudit,
+    gate: resolveManagedActionLiveGate(),
+    rolloutConfig: await resolveManagedActionLiveRolloutConfig(),
+    productionExecutorWired: managedActionProductionExecutorEnabled,
+  });
   const assertMutationAuthorized = (
     req: IncomingMessage,
     routeLabel: string,
@@ -1186,7 +1216,7 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
             ].filter((value): value is string => typeof value === "string" && value.length > 0);
             const [managedActionAudit, managedActionReadiness] = await Promise.all([
               readManagedActionDryRunAudits({ limit: 8 }),
-              readManagedActionLiveReadinessSnapshot(),
+              readManagedActionReadiness(),
             ]);
             const html = renderMultiInstanceOverview(
               scopedSnapshot ?? snapshot,
@@ -1204,7 +1234,7 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
             selectedInstance.id,
             language,
             section,
-            await readManagedActionLiveReadinessSnapshot(),
+            await readManagedActionReadiness(),
           );
           return writeText(res, 200, html, "text/html; charset=utf-8");
         }
@@ -1376,7 +1406,7 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
 
       if (method === "GET" && path === "/api/managed-actions/readiness") {
         assertAllowedQueryParams(url.searchParams, [], true);
-        return writeJson(res, 200, await readManagedActionLiveReadinessSnapshot());
+        return writeJson(res, 200, await readManagedActionReadiness());
       }
 
       if (method === "POST" && path === "/api/managed-actions/dry-run") {
@@ -1480,59 +1510,127 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
           instanceId,
           action,
         });
-        const rolloutConfig = await loadManagedActionLiveRolloutConfig();
+        const rolloutConfig = await resolveManagedActionLiveRolloutConfig();
         const rollout = evaluateManagedActionLiveRollout({
           config: rolloutConfig,
           action,
           instanceId,
           operator,
         });
-        const gate = runtimeManagedActionLiveGate();
+        const gate = resolveManagedActionLiveGate();
         const decision = evaluateManagedActionLiveGate({
           gate,
           action,
           operationRequestId,
           dryRunReferenceValid: dryRunReference.valid,
           rolloutAllowed: rollout.allowed,
+          executorWired: managedActionProductionExecutorEnabled,
           confirmedText,
         });
 
-        await appendOperationAudit({
-          action: "managed_action_live_blocked",
-          source: "api",
-          ok: false,
-          requestId,
-          detail: decision.message,
-          metadata: {
-            managedAction: action,
-            status: decision.status,
-            target: {
-              instanceId: instance.id,
-              instanceName: instance.name,
-              ...(instance.serverId ? { serverId: instance.serverId } : {}),
-              ...(instance.serverName ? { serverName: instance.serverName } : {}),
+        if (!decision.ok) {
+          await appendOperationAudit({
+            action: "managed_action_live_blocked",
+            source: "api",
+            ok: false,
+            requestId,
+            detail: decision.message,
+            metadata: {
+              managedAction: action,
+              status: decision.status,
+              target: {
+                instanceId: instance.id,
+                instanceName: instance.name,
+                ...(instance.serverId ? { serverId: instance.serverId } : {}),
+                ...(instance.serverName ? { serverName: instance.serverName } : {}),
+              },
+              operationRequestId,
+              operator,
+              reason,
+              dryRunReference: managedActionDryRunReferenceSummary(dryRunReference),
+              rollout: managedActionRolloutSummary(rollout),
+              executor: managedActionExecutorSummary(managedActionProductionExecutorEnabled),
+              liveExecution: false,
+              gate: {
+                enabled: gate.enabled,
+                readonlyMode: gate.readonlyMode,
+                allowedActions: gate.allowedActions,
+              },
             },
-            operationRequestId,
-            operator,
-            reason,
+          });
+
+          return writeJson(res, decision.statusCode, {
+            ok: false,
+            status: decision.status,
+            message: decision.message,
+            liveExecution: false,
             dryRunReference: managedActionDryRunReferenceSummary(dryRunReference),
             rollout: managedActionRolloutSummary(rollout),
-            liveExecution: false,
+            executor: managedActionExecutorSummary(managedActionProductionExecutorEnabled),
             gate: {
               enabled: gate.enabled,
               readonlyMode: gate.readonlyMode,
               allowedActions: gate.allowedActions,
+              requiredConfirmationText: gate.requiredConfirmationText,
             },
-          },
-        });
+          });
+        }
 
-        return writeJson(res, decision.statusCode, {
-          ok: false,
-          status: decision.status,
-          message: decision.message,
-          liveExecution: false,
+        const startedAt = new Date().toISOString();
+        const execution = await runManagedActionExecutor(
+          {
+            action,
+            instance,
+            operationRequestId,
+            operator,
+            reason,
+            gateReady: decision.ok,
+          },
+          managedActionExecutor,
+        );
+        const finishedAt = new Date().toISOString();
+        const outcome = execution.ok && execution.liveExecution
+          ? "executed"
+          : execution.liveExecution
+            ? "failed"
+            : "skipped";
+        await appendOperationAudit(buildManagedActionLiveAuditEntry({
+          outcome,
+          source: "api",
+          action,
+          instance,
+          operationRequestId,
+          requestId,
+          operator,
+          reason,
+          executor: "production-managed-action-executor",
+          startedAt,
+          finishedAt,
+          gate,
+          commandPreview: dryRunReference.record?.commandPreview,
+          mutatesOpenClawInstance: execution.mutatesOpenClawInstance,
+          result: {
+            message: execution.detail,
+          },
+          ...(outcome === "skipped" ? { skip: { reason: execution.detail } } : {}),
+        }));
+
+        const executionStatusCode = execution.ok
+          ? 200
+          : execution.liveExecution
+            ? 500
+            : 501;
+        return writeJson(res, executionStatusCode, {
+          ok: execution.ok,
+          status: execution.status,
+          message: execution.detail,
+          liveExecution: execution.liveExecution,
+          safety: {
+            mutatesOpenClawInstance: execution.mutatesOpenClawInstance,
+          },
           dryRunReference: managedActionDryRunReferenceSummary(dryRunReference),
           rollout: managedActionRolloutSummary(rollout),
+          executor: managedActionExecutorSummary(managedActionProductionExecutorEnabled),
           gate: {
             enabled: gate.enabled,
             readonlyMode: gate.readonlyMode,
@@ -21286,18 +21384,18 @@ function readonlyMutationError(routeLabel: string, language: UiLanguage): string
   return `${message} ${routeLabel}`;
 }
 
-async function readManagedActionLiveReadinessSnapshot(
-  dryRunAudit?: ManagedActionAuditSnapshot,
-): Promise<ManagedActionLiveReadinessSnapshot> {
-  const [audit, rolloutConfig] = await Promise.all([
-    dryRunAudit ? Promise.resolve(dryRunAudit) : readManagedActionDryRunAudits({ limit: 20 }),
-    loadManagedActionLiveRolloutConfig(),
-  ]);
+async function readManagedActionLiveReadinessSnapshot(input: {
+  dryRunAudit?: ManagedActionAuditSnapshot;
+  gate: ManagedActionLiveGate;
+  rolloutConfig: ManagedActionLiveRolloutConfig;
+  productionExecutorWired: boolean;
+}): Promise<ManagedActionLiveReadinessSnapshot> {
+  const audit = input.dryRunAudit ?? await readManagedActionDryRunAudits({ limit: 20 });
   return buildManagedActionLiveReadiness({
-    gate: runtimeManagedActionLiveGate(),
-    rolloutConfig,
+    gate: input.gate,
+    rolloutConfig: input.rolloutConfig,
     dryRunAudit: audit,
-    productionExecutorWired: false,
+    productionExecutorWired: input.productionExecutorWired,
   });
 }
 
@@ -21313,6 +21411,13 @@ function buildFallbackManagedActionLiveReadiness(): ManagedActionLiveReadinessSn
     },
     productionExecutorWired: false,
   });
+}
+
+function managedActionExecutorSummary(enabled: boolean): Record<string, unknown> {
+  return {
+    productionWired: enabled,
+    status: enabled ? "wired" : "missing",
+  };
 }
 
 function managedActionDryRunReferenceSummary(input: ManagedActionDryRunReferenceValidation): Record<string, unknown> {

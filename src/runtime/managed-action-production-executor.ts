@@ -7,6 +7,7 @@ export function createProductionManagedActionExecutor(): ManagedActionExecutor {
         ok: true,
         status: "executed_readonly_healthcheck",
         liveExecution: true,
+        mutatesOpenClawInstance: false,
         action: input.action,
         targetInstanceId: input.instance.id,
         operationRequestId: input.operationRequestId,
