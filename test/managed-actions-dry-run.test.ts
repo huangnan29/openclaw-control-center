@@ -136,6 +136,30 @@ test("managed action dry-run previews whitelisted actions without executing in r
     assert.equal(liveBody.rollout.allowed, false);
     assert.equal(liveBody.rollout.status, "disabled");
 
+    const readinessResponse = await fetch(`${baseUrl}/api/managed-actions/readiness`);
+    assert.equal(readinessResponse.status, 200);
+    const readinessBody = await readinessResponse.json() as {
+      ok: boolean;
+      status: string;
+      liveExecutionAvailable: boolean;
+      liveExecutionAttempted: boolean;
+      mutatesOpenClawInstance: boolean;
+      dryRun: { count: number; latest?: { operationRequestId?: string } };
+      executor: { productionWired: boolean; status: string };
+      blockers: Array<{ id: string }>;
+    };
+    assert.equal(readinessBody.ok, true);
+    assert.equal(readinessBody.status, "blocked");
+    assert.equal(readinessBody.liveExecutionAvailable, false);
+    assert.equal(readinessBody.liveExecutionAttempted, false);
+    assert.equal(readinessBody.mutatesOpenClawInstance, false);
+    assert(readinessBody.dryRun.count >= 1);
+    assert.equal(readinessBody.dryRun.latest?.operationRequestId, body.review.operationRequestId);
+    assert.equal(readinessBody.executor.productionWired, false);
+    assert.equal(readinessBody.executor.status, "missing");
+    assert(readinessBody.blockers.some((item) => item.id === "production_executor_missing"));
+    assert(!JSON.stringify(readinessBody).includes("LOCAL_API_TOKEN"));
+
     const invalidReferenceLiveResponse = await fetch(`${baseUrl}/api/managed-actions/live`, {
       method: "POST",
       headers: { "content-type": "application/json" },

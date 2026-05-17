@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-rollout 决策接入 live 响应：live 请求会同时返回 dry-run 引用校验和灰度配置匹配结果；当前仍不接真实执行器。
+只读 live readiness 诊断卡：页面和 API 只读展示真实执行前置条件，包括 live gate、dry-run 审计、rollout 灰度配置和生产执行器接入状态；当前仍不接真实执行器。
 
 ## 本轮不做
 
@@ -17,12 +17,15 @@ rollout 决策接入 live 响应：live 请求会同时返回 dry-run 引用校�
 
 ## 当前下一步
 
-设计只读 live readiness 诊断卡：
+部署只读 live readiness 诊断卡到 Tom 并验证行为不变：
 
-- 只读展示 live gate、dry-run 引用、rollout、执行器接入状态。
+- Tom 继续保持 `MANAGED_ACTIONS_LIVE_ENABLED=false`。
+- Tom 继续保持 `READONLY_MODE=true`。
+- Tom 不配置生产执行器。
+- `/api/managed-actions/readiness` 返回 `liveExecutionAttempted=false`。
+- 页面出现 `真实执行上线条件`，但不出现真实执行入口。
 - 不提供执行按钮。
 - 不触发 live API。
-- Tom 继续保持真实执行关闭。
 
 ## 最近完成
 
@@ -183,7 +186,15 @@ rollout 决策接入 live 响应：live 请求会同时返回 dry-run 引用校�
 - 已验证 Tom live 响应返回 `dryRunReference=valid`、`rollout.status=disabled`。
 - 已验证 Tom live 仍返回 `blocked_disabled`、`liveExecution=false`、`enabled=false`。
 - 已验证 Tom 页面仍无真实执行入口。
+- 已新增只读 readiness 建模：`src/runtime/managed-action-live-readiness.ts`。
+- 已新增 `GET /api/managed-actions/readiness`。
+- 已在多实例总览页和单实例详情页新增 `真实执行上线条件` 卡片。
+- 已验证 readiness 卡片只读展示 live gate、rollout、dry-run 审计和执行器接入状态。
+- 已验证 readiness API 返回 `liveExecutionAttempted=false`、`mutatesOpenClawInstance=false`。
+- 已验证页面卡片不调用 `/api/managed-actions/live`，不提供真实执行按钮。
+- 已验证 `npm test -- test/managed-action-live-readiness.test.ts test/managed-action-live-gate.test.ts test/managed-action-live-rollout.test.ts test/managed-actions-dry-run.test.ts test/managed-action-live-audit.test.ts test/managed-action-executor.test.ts test/phase9-routes-commands.test.ts test/readonly-multi-instance-safety.test.ts test/multi-instance-readonly.test.ts test/ui-render-smoke.test.ts`。
+- 已验证 `npm run build`。
 
 ## 阶段完成后的下一步
 
-只读 live readiness 诊断卡：在页面展示距离真实执行还缺哪些安全条件，不提供执行按钮。
+部署 Tom 验证 readiness 卡片不改变运行行为；通过后，进入生产执行器最小骨架设计，仍保持默认禁用、无页面执行入口。

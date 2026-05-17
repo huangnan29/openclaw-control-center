@@ -42,13 +42,20 @@ import {
   readManagedActionDryRunAudits,
   validateManagedActionDryRunReference,
   type ManagedActionAuditRecord,
+  type ManagedActionAuditSnapshot,
   type ManagedActionDryRunReferenceValidation,
 } from "../runtime/managed-action-audit";
+import {
+  buildManagedActionLiveReadiness,
+  type ManagedActionLiveReadinessFinding,
+  type ManagedActionLiveReadinessSnapshot,
+} from "../runtime/managed-action-live-readiness";
 import {
   evaluateManagedActionLiveGate,
   runtimeManagedActionLiveGate,
 } from "../runtime/managed-action-live";
 import {
+  defaultManagedActionLiveRolloutConfig,
   evaluateManagedActionLiveRollout,
   loadManagedActionLiveRolloutConfig,
   type ManagedActionLiveRolloutDecision,
@@ -77,7 +84,7 @@ import {
   type OpenClawSecuritySummary,
   type OpenClawUpdateSummary,
 } from "../runtime/openclaw-cli-insights";
-import { appendOperationAudit } from "../runtime/operation-audit";
+import { appendOperationAudit, OPERATION_AUDIT_LOG_PATH } from "../runtime/operation-audit";
 import { ApprovalActionService } from "../runtime/approval-action-service";
 import { buildActionQueueLinks } from "../runtime/action-queue-links";
 import {
@@ -1177,17 +1184,28 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
                 ? pickUiText(language, "Server not found. Showing all readonly instances.", "未找到该服务器，已显示全部只读实例。")
                 : undefined,
             ].filter((value): value is string => typeof value === "string" && value.length > 0);
+            const [managedActionAudit, managedActionReadiness] = await Promise.all([
+              readManagedActionDryRunAudits({ limit: 8 }),
+              readManagedActionLiveReadinessSnapshot(),
+            ]);
             const html = renderMultiInstanceOverview(
               scopedSnapshot ?? snapshot,
               language,
               warningParts.join("; ") || undefined,
               scopedSnapshot ? requestedServerId : undefined,
-              await readManagedActionDryRunAudits({ limit: 8 }),
+              managedActionAudit,
+              managedActionReadiness,
             );
             return writeText(res, 200, html, "text/html; charset=utf-8");
           }
 
-          const html = renderMultiInstanceDetail(snapshot, selectedInstance.id, language, section);
+          const html = renderMultiInstanceDetail(
+            snapshot,
+            selectedInstance.id,
+            language,
+            section,
+            await readManagedActionLiveReadinessSnapshot(),
+          );
           return writeText(res, 200, html, "text/html; charset=utf-8");
         }
 
@@ -1354,6 +1372,11 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
           action,
         });
         return writeJson(res, 200, audit);
+      }
+
+      if (method === "GET" && path === "/api/managed-actions/readiness") {
+        assertAllowedQueryParams(url.searchParams, [], true);
+        return writeJson(res, 200, await readManagedActionLiveReadinessSnapshot());
       }
 
       if (method === "POST" && path === "/api/managed-actions/dry-run") {
@@ -6981,6 +7004,7 @@ function renderMultiInstanceOverview(
   warning?: string,
   selectedServerId?: string,
   managedActionAudit?: Awaited<ReturnType<typeof readManagedActionDryRunAudits>>,
+  managedActionReadiness?: ManagedActionLiveReadinessSnapshot,
 ): string {
   const t = (en: string, zh: string): string => pickUiText(language, en, zh);
   const totalChips = [
@@ -7043,6 +7067,12 @@ function renderMultiInstanceOverview(
     .badge.partial { color: #92400e; background: #fffbeb; border-color: #fde68a; }
     .badge.not_connected, .badge.error { color: #b42318; background: #fef3f2; border-color: #fecdca; }
     .badge.running, .badge.waiting_approval { color: #005cb9; background: #eff8ff; border-color: #b2ddff; }
+    .status-chip.review { border-color: rgba(217, 119, 6, 0.3); background: #fffbeb; }
+    .status-chip.blocked { border-color: rgba(220, 38, 38, 0.28); background: #fef3f2; }
+    .readiness-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin: 10px 0; }
+    .readiness-list { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; }
+    .readiness-list li { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: start; color: var(--muted); font-size: 12px; border-bottom: 1px solid rgba(17, 24, 39, 0.08); padding-bottom: 8px; }
+    .readiness-list li:last-child { border-bottom: 0; padding-bottom: 0; }
     .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0; }
     .metric { border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
     .metric span { display: block; color: var(--muted); font-size: 12px; }
@@ -7090,6 +7120,7 @@ function renderMultiInstanceOverview(
     <section class="status-strip">${totalChips}</section>
     ${renderServerHealthPanel(snapshot, language, selectedServerId)}
     ${renderCollectorSnapshotPanel(snapshot.instances, language, snapshot.generatedAt)}
+    ${renderManagedActionReadinessPanel(managedActionReadiness ?? buildFallbackManagedActionLiveReadiness(), language)}
     ${renderManagedActionDryRunPanel(snapshot.instances, language, snapshot.selectedInstanceId)}
     ${renderManagedActionAuditPanel(managedActionAudit?.records ?? [], language)}
     <section class="overview-layout">
@@ -7177,6 +7208,102 @@ function renderManagedActionDryRunPanel(
       <pre class="action-result" data-managed-action-result hidden></pre>
     </form>
   </section>`;
+}
+
+function renderManagedActionReadinessPanel(
+  readiness: ManagedActionLiveReadinessSnapshot,
+  language: UiLanguage,
+): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const statusLabel = managedActionReadinessStatusLabel(readiness.status, language);
+  const statusBadgeClass = readiness.status === "ready" ? "connected" : readiness.status === "review_required" ? "partial" : "error";
+  const latestDryRun = readiness.dryRun.latest;
+  const latestDryRunText = latestDryRun
+    ? [
+        latestDryRun.action ? managedActionUiLabel(latestDryRun.action, language) : undefined,
+        latestDryRun.targetInstanceId,
+        latestDryRun.operationRequestId,
+      ].filter((value): value is string => Boolean(value)).join(" · ")
+    : t("No dry-run record", "暂无 dry-run 记录");
+  const rolloutPath = readiness.rollout.path ?? t("default config", "默认配置");
+  const chips = [
+    renderReadinessChip(t("Live gate", "Live 闸门"), readiness.gate.enabled ? t("enabled", "已开启") : t("disabled", "关闭"), readiness.gate.enabled ? "" : "blocked"),
+    renderReadinessChip(t("Readonly", "只读模式"), readiness.gate.readonlyMode ? t("enabled", "开启") : t("disabled", "关闭"), readiness.gate.readonlyMode ? "blocked" : ""),
+    renderReadinessChip(t("Whitelist", "动作白名单"), String(readiness.gate.allowedActions.length), readiness.gate.allowedActions.length > 0 ? "" : "blocked"),
+    renderReadinessChip(t("Rollout", "灰度规则"), `${readiness.rollout.enabledRules}/${readiness.rollout.rulesTotal}`, readiness.rollout.enabled && readiness.rollout.enabledRules > 0 ? "" : "blocked"),
+    renderReadinessChip(t("Dry-run audit", "Dry-run 审计"), String(readiness.dryRun.count), readiness.dryRun.count > 0 ? "" : "review"),
+    renderReadinessChip(t("Executor", "执行器"), readiness.executor.productionWired ? t("wired", "已接入") : t("missing", "未接入"), readiness.executor.productionWired ? "" : "blocked"),
+  ].join("");
+  const findingRows = readiness.findings
+    .map((finding) => {
+      const badgeClass = finding.severity === "block" ? "error" : "partial";
+      return `<li>${badge(badgeClass, finding.severity === "block" ? t("Block", "阻断") : t("Review", "复核"))}<span>${escapeHtml(managedActionReadinessFindingText(finding, language))}</span></li>`;
+    })
+    .join("");
+  const findingHtml = findingRows
+    ? `<ul class="readiness-list">${findingRows}</ul>`
+    : `<div class="empty-state">${escapeHtml(t("No missing live-readiness condition is reported.", "当前未发现缺失的真实执行前置条件。"))}</div>`;
+
+  return `<section class="panel" id="managed-actions-readiness">
+    <div class="panel-head">
+      <div>
+        <h2>${escapeHtml(t("Live action readiness", "真实执行上线条件"))}</h2>
+        <div class="meta">${escapeHtml(t("Readonly diagnostics only. This card does not call the live API or execute OpenClaw instance commands.", "仅只读诊断。本卡片不调用 live API，也不执行 OpenClaw 实例命令。"))}</div>
+      </div>
+      ${badge(statusBadgeClass, statusLabel)}
+    </div>
+    <div class="readiness-grid">${chips}</div>
+    <div class="meta">${escapeHtml(t("Rollout source", "灰度来源"))}: <code>${escapeHtml(rolloutPath)}</code></div>
+    <div class="meta">${escapeHtml(t("Allowed actions", "允许动作"))}: <code>${escapeHtml(readiness.gate.allowedActions.join(", ") || "-")}</code></div>
+    <div class="meta">${escapeHtml(t("Latest dry-run", "最近 dry-run"))}: <code>${escapeHtml(latestDryRunText || "-")}</code></div>
+    <div class="meta">${escapeHtml(t("Reference max age", "引用有效期"))}: ${escapeHtml(formatDurationMinutes(readiness.dryRun.referenceMaxAgeMs, language))}</div>
+    ${findingHtml}
+  </section>`;
+}
+
+function renderReadinessChip(label: string, value: string, statusClass = ""): string {
+  return `<div class="status-chip${statusClass ? ` ${escapeHtml(statusClass)}` : ""}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`;
+}
+
+function managedActionReadinessStatusLabel(
+  status: ManagedActionLiveReadinessSnapshot["status"],
+  language: UiLanguage,
+): string {
+  if (status === "ready") return pickUiText(language, "ready", "已就绪");
+  if (status === "review_required") return pickUiText(language, "review", "需复核");
+  return pickUiText(language, "blocked", "阻断中");
+}
+
+function managedActionReadinessFindingText(
+  finding: ManagedActionLiveReadinessFinding,
+  language: UiLanguage,
+): string {
+  switch (finding.id) {
+    case "live_gate_disabled":
+      return pickUiText(language, "MANAGED_ACTIONS_LIVE_ENABLED is still false.", "MANAGED_ACTIONS_LIVE_ENABLED 仍为 false。");
+    case "readonly_mode_enabled":
+      return pickUiText(language, "READONLY_MODE is still enabled.", "READONLY_MODE 仍处于开启状态。");
+    case "live_action_whitelist_empty":
+      return pickUiText(language, "No live managed action is whitelisted.", "尚未配置真实执行动作白名单。");
+    case "rollout_config_disabled":
+      return pickUiText(language, "Live rollout config is missing or disabled.", "真实执行灰度配置缺失或未启用。");
+    case "rollout_config_issues":
+      return pickUiText(language, `Rollout config has issues: ${finding.detail}`, `灰度配置存在问题：${finding.detail}`);
+    case "rollout_enabled_rules_empty":
+      return pickUiText(language, "Rollout config has no enabled rule.", "灰度配置中没有启用的规则。");
+    case "production_executor_missing":
+      return pickUiText(language, "Production executor is not wired yet.", "生产执行器尚未接入。");
+    case "dry_run_audit_empty":
+      return pickUiText(language, "No dry-run audit record is visible yet.", "当前还没有可见的 dry-run 审计记录。");
+    default:
+      return finding.detail;
+  }
+}
+
+function formatDurationMinutes(ms: number, language: UiLanguage): string {
+  const minutes = Math.round(ms / 60_000);
+  if (!Number.isFinite(minutes) || minutes <= 0) return "-";
+  return pickUiText(language, `${minutes} minutes`, `${minutes} 分钟`);
 }
 
 function managedActionUiLabel(action: ManagedActionName, language: UiLanguage): string {
@@ -7332,6 +7459,7 @@ function renderMultiInstanceDetail(
   selectedInstanceId: string,
   language: UiLanguage,
   section: DashboardSection,
+  managedActionReadiness?: ManagedActionLiveReadinessSnapshot,
 ): string {
   const t = (en: string, zh: string): string => pickUiText(language, en, zh);
   const overviewHref = `/?section=${encodeURIComponent(section)}&amp;lang=${encodeURIComponent(language)}`;
@@ -7462,6 +7590,12 @@ function renderMultiInstanceDetail(
     .badge.partial { color: #92400e; background: #fffbeb; border-color: #fde68a; }
     .badge.not_connected, .badge.error { color: #b42318; background: #fef3f2; border-color: #fecdca; }
     .badge.running, .badge.waiting_approval { color: #005cb9; background: #eff8ff; border-color: #b2ddff; }
+    .status-chip.review { border-color: rgba(217, 119, 6, 0.3); background: #fffbeb; }
+    .status-chip.blocked { border-color: rgba(220, 38, 38, 0.28); background: #fef3f2; }
+    .readiness-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin: 10px 0; }
+    .readiness-list { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; }
+    .readiness-list li { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: start; color: var(--muted); font-size: 12px; border-bottom: 1px solid rgba(17, 24, 39, 0.08); padding-bottom: 8px; }
+    .readiness-list li:last-child { border-bottom: 0; padding-bottom: 0; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th, td { text-align: left; border-bottom: 1px solid rgba(17, 24, 39, 0.08); padding: 8px 6px; vertical-align: top; }
     th { color: var(--muted); font-weight: 600; }
@@ -7492,6 +7626,7 @@ function renderMultiInstanceDetail(
     ${notFound}
     <section class="status-strip">${metrics}</section>
     ${selected ? renderCollectorSnapshotPanel([selected], language, snapshot.generatedAt) : ""}
+    ${renderManagedActionReadinessPanel(managedActionReadiness ?? buildFallbackManagedActionLiveReadiness(), language)}
     ${selected ? renderMultiInstanceHealthPanel([selected], language) : ""}
     ${selected ? renderMultiInstanceUsagePanel([selected], language) : ""}
     ${selected ? renderMultiInstanceAgentRosterPanel([selected], language) : ""}
@@ -21149,6 +21284,35 @@ function readonlyMutationError(routeLabel: string, language: UiLanguage): string
     "控制中心正以只读多实例模式运行，修改类接口已禁用。",
   );
   return `${message} ${routeLabel}`;
+}
+
+async function readManagedActionLiveReadinessSnapshot(
+  dryRunAudit?: ManagedActionAuditSnapshot,
+): Promise<ManagedActionLiveReadinessSnapshot> {
+  const [audit, rolloutConfig] = await Promise.all([
+    dryRunAudit ? Promise.resolve(dryRunAudit) : readManagedActionDryRunAudits({ limit: 20 }),
+    loadManagedActionLiveRolloutConfig(),
+  ]);
+  return buildManagedActionLiveReadiness({
+    gate: runtimeManagedActionLiveGate(),
+    rolloutConfig,
+    dryRunAudit: audit,
+    productionExecutorWired: false,
+  });
+}
+
+function buildFallbackManagedActionLiveReadiness(): ManagedActionLiveReadinessSnapshot {
+  return buildManagedActionLiveReadiness({
+    gate: runtimeManagedActionLiveGate(),
+    rolloutConfig: defaultManagedActionLiveRolloutConfig(),
+    dryRunAudit: {
+      ok: true,
+      path: OPERATION_AUDIT_LOG_PATH,
+      count: 0,
+      records: [],
+    },
+    productionExecutorWired: false,
+  });
 }
 
 function managedActionDryRunReferenceSummary(input: ManagedActionDryRunReferenceValidation): Record<string, unknown> {

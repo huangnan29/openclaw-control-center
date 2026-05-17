@@ -715,6 +715,25 @@ export function buildApiDocs(): ApiDocsPayload {
         },
       },
       {
+        method: "GET",
+        path: "/api/managed-actions/readiness",
+        summary:
+          "Readonly live-readiness diagnostics for managed actions. This route never calls the live API or executes instance commands.",
+        response: {
+          ok: "true",
+          status: "blocked|review_required|ready",
+          liveExecutionAvailable: "boolean",
+          liveExecutionAttempted: "false",
+          gate: "{ enabled, readonlyMode, allowedActions, requiredConfirmationText }",
+          rollout: "{ source, path?, enabled, rulesTotal, enabledRules, actions[], instances[], issues[] }",
+          dryRun: "{ auditPath, count, latest?, referenceMaxAgeMs }",
+          executor: "{ productionWired, status, mockOnly }",
+          findings: "ManagedActionLiveReadinessFinding[]",
+          blockers: "ManagedActionLiveReadinessFinding[]",
+          reviewItems: "ManagedActionLiveReadinessFinding[]",
+        },
+      },
+      {
         method: "POST",
         path: "/api/managed-actions/dry-run",
         summary:

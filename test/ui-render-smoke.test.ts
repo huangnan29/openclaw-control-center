@@ -290,6 +290,9 @@ test("multi-instance overview renders status metrics detail links and selected s
   assert(html.includes("Collector 快照"));
   assert(html.includes("快照新鲜"));
   assert(html.includes("snapshot.json"));
+  assert(html.includes("真实执行上线条件"));
+  assert(html.includes("本卡片不调用 live API"));
+  assert(html.includes("生产执行器尚未接入"));
   assert(html.includes("管理动作预览"));
   assert(html.includes("data-managed-action-form"));
   assert(html.includes("/api/managed-actions/dry-run"));
@@ -405,6 +408,8 @@ test("multi-instance routes render overview detail and invalid-instance fallback
     assert(detailHtml.includes("用量"));
     assert(detailHtml.includes("最近日志"));
     assert(detailHtml.includes("最近任务"));
+    assert(detailHtml.includes("真实执行上线条件"));
+    assert(detailHtml.includes("生产执行器尚未接入"));
     assert(!detailHtml.includes("管理动作预览"));
     assert(detailHtml.includes("数据来源"));
     assert(detailHtml.includes("实例配置优先"));
