@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "server": {
+    "id": "remote-oracle",
+    "name": "Remote Oracle",
+    "host": "10.0.0.12",
+    "region": "oracle"
+  },
+  "deployDir": "/srv/openclaw-collector-node",
+  "image": "openclaw-control-center:collector-node",
+  "buildContext": "/srv/openclaw-control-center-readonly/repo",
+  "collectorContainerName": "openclaw-collector-node",
+  "snapshotOutputPath": "/app/runtime/collectors/remote-oracle/snapshot.json",
+  "cronSchedule": "*/2 * * * *",
+  "instances": [
+    {
+      "id": "remote-main",
+      "name": "Remote Main",
+      "gatewayUrl": "ws://host.docker.internal:18789",
+      "configDir": "/srv/openclaw/config",
+      "workspaceDir": "/srv/openclaw/workspace"
+    }
+  ]
+}

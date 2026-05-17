@@ -202,6 +202,29 @@ cd /srv/openclaw-control-center-readonly
 ./collector-snapshot.sh
 ```
 
+### 远端 collector-only 节点
+
+第二台 Oracle 不需要运行完整中央 UI，也不需要把实例目录暴露给 Tom。可以在远端服务器上用 collector-only bootstrap 生成一个只负责产出 snapshot 的部署目录：
+
+```bash
+cp ops/collector-node/collector-node.example.json /tmp/collector-node.json
+ops/collector-node/bootstrap-collector-node.sh plan /tmp/collector-node.json
+CONFIRM_COLLECTOR_NODE_WRITE=I_UNDERSTAND_THIS_ONLY_WRITES_COLLECTOR_NODE_FILES \
+ops/collector-node/bootstrap-collector-node.sh write /tmp/collector-node.json
+```
+
+`plan` 只校验配置并输出将生成的文件；`write` 只写入 `docker-compose.collector.yml`、`config/instances.json`、`collector-snapshot.sh` 和 `install-collector-cron.sh`，不会启动容器、不会运行 collector、不会修改任何 OpenClaw 实例目录。生成的 compose 不暴露端口，不挂载 `/var/run/docker.sock`，实例目录只用 `:ro` 方式挂载。
+
+写入完成后，在远端服务器上执行：
+
+```bash
+cd /srv/openclaw-collector-node
+./collector-snapshot.sh
+./install-collector-cron.sh
+```
+
+远端 snapshot 生成后，再由 Tom 使用 `remote-collector-pull.sh` 只读拉取。
+
 Tom 进入 collector 灰度切流后，可以安装定时任务持续刷新快照：
 
 ```bash

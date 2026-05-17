@@ -145,12 +145,16 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   const liveHealthcheckRollout = path.join(ROOT, "ops", "tom-readonly", "managed-action-healthcheck-rollout.example.json");
   const remoteCollectorPull = path.join(ROOT, "ops", "tom-readonly", "remote-collector-pull.sh");
   const remoteCollectorPullExample = path.join(ROOT, "ops", "tom-readonly", "remote-collector-pull.sources.example.json");
+  const collectorNodeBootstrap = path.join(ROOT, "ops", "collector-node", "bootstrap-collector-node.sh");
+  const collectorNodeExample = path.join(ROOT, "ops", "collector-node", "collector-node.example.json");
 
   assert(doc.includes("OPENCLAW_INSTANCES_FILE"));
   assert(doc.includes("\"servers\""));
   assert(doc.includes("serverId"));
   assert(doc.includes("collectorSnapshotPath"));
   assert(doc.includes("collector:snapshot"));
+  assert(doc.includes("bootstrap-collector-node.sh"));
+  assert(doc.includes("I_UNDERSTAND_THIS_ONLY_WRITES_COLLECTOR_NODE_FILES"));
   assert(doc.includes("remote-collector-pull.sh"));
   assert(doc.includes("I_UNDERSTAND_THIS_ONLY_READS_REMOTE_COLLECTOR_SNAPSHOTS"));
   assert(doc.includes("install-collector-cron.sh"));
@@ -170,6 +174,16 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(existsSync(liveHealthcheckRollout));
   assert(existsSync(remoteCollectorPull));
   assert(existsSync(remoteCollectorPullExample));
+  assert(existsSync(collectorNodeBootstrap));
+  assert(existsSync(collectorNodeExample));
+  const collectorNodeBootstrapText = readFileSync(collectorNodeBootstrap, "utf8");
+  assert.match(collectorNodeBootstrapText, /CONFIRM_COLLECTOR_NODE_WRITE/);
+  assert.match(collectorNodeBootstrapText, /I_UNDERSTAND_THIS_ONLY_WRITES_COLLECTOR_NODE_FILES/);
+  assert.match(collectorNodeBootstrapText, /startsContainers: false/);
+  assert.match(collectorNodeBootstrapText, /mutatesOpenClawInstance: false/);
+  assert.doesNotMatch(collectorNodeBootstrapText, /api\/managed-actions\/live/);
+  const collectorNodeConfig = JSON.parse(readFileSync(collectorNodeExample, "utf8"));
+  assert.equal(collectorNodeConfig.server.id, "remote-oracle");
   const remoteCollectorPullText = readFileSync(remoteCollectorPull, "utf8");
   assert.match(remoteCollectorPullText, /CONFIRM_REMOTE_COLLECTOR_PULL/);
   assert.match(remoteCollectorPullText, /I_UNDERSTAND_THIS_ONLY_READS_REMOTE_COLLECTOR_SNAPSHOTS/);
