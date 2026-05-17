@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-live 执行器挂载开关：新增 `MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED`，默认关闭；只有显式打开且 live gate、dry-run 引用、rollout、确认短语全部通过时，才会把生产执行器接到 `/api/managed-actions/live`。
+healthcheck live 演练前置校验收尾：修复 Tom preflight 中 rollout 校验没有把实例和操作者传入容器的问题，确保脚本只读检查 rollout、live 开关和 readiness，不调用 `/api/managed-actions/live`。
 
 ## 本轮不做
 
@@ -17,12 +17,13 @@ live 执行器挂载开关：新增 `MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED`，�
 
 ## 当前下一步
 
-设计 healthcheck live 演练前置校验：
+准备一次人工批准的只读 healthcheck live 演练方案：
 
-- 检查 rollout 文件、live gate、executor 开关和允许动作是否一致。
-- 只输出诊断结果，不调用 `/api/managed-actions/live`。
-- Tom 仍不默认启用 live gate 或 executor。
-- 通过后再考虑一次人工确认的只读 healthcheck live 演练。
+- 新增临时配置切换与回滚脚本，只作用于 control-center 容器环境变量。
+- 演练动作仅允许 `healthcheck`，目标先限制为 Tom 单实例。
+- 执行前必须通过 dry-run 引用、rollout、确认短语、本地令牌和操作者校验。
+- 默认状态仍保持 `READONLY_MODE=true`、live gate 关闭、executor 关闭；未人工批准不执行 live API。
+- 演练完成后必须能回到只读监控状态，并重新通过 `healthcheck.sh`。
 
 ## 最近完成
 
@@ -236,7 +237,21 @@ live 执行器挂载开关：新增 `MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED`，�
 - 已验证 Tom 存在可执行 `live-healthcheck-smoke.sh` 和 rollout 样板。
 - 已验证 Tom `bash -n repo/ops/tom-readonly/live-healthcheck-smoke.sh` 通过。
 - 已验证 Tom readiness 仍返回 `liveExecutionAvailable=false`、`executor.productionWired=false`。
+- 已新增只读 preflight 脚本：`ops/tom-readonly/live-healthcheck-preflight.sh`，用于检查 rollout 样板、容器 live 开关和 readiness。
+- 已发现 Tom preflight 首次失败原因：rollout 校验运行在容器内，未接收到 `INSTANCE_ID` 和 `OPERATOR`。
+- 已修复 preflight 环境变量传递位置，只在 `check_rollout_file()` 的容器校验中传入 `INSTANCE_ID` 与 `OPERATOR`。
+- 已增强 `test/oss-readiness.test.ts`，精确断言 `check_rollout_file()` 段包含 `-e INSTANCE_ID` 与 `-e OPERATOR`。
+- 已验证 `bash -n ops/tom-readonly/live-healthcheck-preflight.sh`。
+- 已验证 `npm test -- test/oss-readiness.test.ts test/managed-actions-dry-run.test.ts test/managed-action-live-gate.test.ts`。
+- 已验证 `npm run build`。
+- 已提交并推送 `28ee982 fix: pass rollout inputs to live preflight`。
+- 已部署到 Tom，并验证运行提交 `28ee982`。
+- 已验证 Tom `healthcheck.sh` 通过，5 个 OpenClaw gateway 健康端口、容器只读边界和 collector 快照检查通过。
+- 已验证 Tom preflight 通过，rollout 样板匹配 `action=healthcheck`、`instanceId=tom`、`operator=Anan`。
+- 已验证 Tom 容器仍为 `READONLY_MODE=true`，`MANAGED_ACTIONS_LIVE_ENABLED` 与 `MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED` 均未启用。
+- 已验证 Tom readiness 仍为 `status=blocked`、`liveExecutionAvailable=false`、`executor.productionWired=false`。
+- 已验证 preflight 完成且未调用 live API。
 
 ## 阶段完成后的下一步
 
-healthcheck live 演练前置校验：先做只读 preflight，不调用 live API；通过后再人工决定是否临时启用一次只读 healthcheck 演练。
+只读 healthcheck live 演练准备：先做临时配置切换和回滚脚本，再在人工批准窗口内执行一次受控演练；演练前后都必须确认现有 OpenClaw 实例未被重启、未被写入、未被触发任务。

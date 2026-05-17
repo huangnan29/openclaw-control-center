@@ -6,7 +6,7 @@
 
 ## 当前阶段
 
-当前阶段推进 **healthcheck live 演练前置校验**：中央 control-center 已完成 dry-run API、dry-run UI、人工确认字段、审计检索视图、默认关闭的 live gate、测试用 mock executor、真实执行审计结果类型、dry-run 引用校验、灰度配置解析、rollout 决策响应、只读 readiness 卡片、生产执行器最小骨架、显式挂载开关和只读 healthcheck 人工演练材料。当前准备做只读 preflight；Tom 不默认启用 live gate 或 executor，不调用 OpenClaw 实例命令。
+当前阶段推进 **只读 healthcheck live 演练准备**：中央 control-center 已完成 dry-run API、dry-run UI、人工确认字段、审计检索视图、默认关闭的 live gate、测试用 mock executor、真实执行审计结果类型、dry-run 引用校验、灰度配置解析、rollout 决策响应、只读 readiness 卡片、生产执行器最小骨架、显式挂载开关、只读 healthcheck 人工演练材料和 Tom preflight。下一步只准备临时配置切换与回滚脚本；Tom 仍不默认启用 live gate 或 executor，未人工批准不调用 live API。
 
 ## 推进原则
 
@@ -125,5 +125,7 @@
 8. 单动作真实执行灰度配置文件：解析允许动作、实例、操作者和风险等级，默认禁用。
 9. rollout 决策接入 live gate 响应：即使 live 默认关闭，也能看到灰度规则是否匹配。
 10. live readiness 诊断卡：只读展示 live gate、dry-run 引用、rollout、执行器接入状态。
-11. 白名单真实执行灰度：默认关闭，只在单实例、单动作、人工确认下开启。
-12. 扩展跨服务器：等第二台 Oracle 能安全接入后，再按 collector 只读方式加入中央视图。
+11. healthcheck live preflight：只读检查 rollout、live 开关和 readiness，不调用 live API。
+12. live healthcheck 演练切换与回滚脚本：只作用于 control-center 容器配置，演练后必须回到只读监控状态。
+13. 白名单真实执行灰度：默认关闭，只在单实例、单动作、人工确认下开启。
+14. 扩展跨服务器：等第二台 Oracle 能安全接入后，再按 collector 只读方式加入中央视图。
