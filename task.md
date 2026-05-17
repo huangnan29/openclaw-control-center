@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-跨服务器只读接入收口：在第二台 Oracle host 暂缺的情况下，继续压缩拿到真实凭据后的手工步骤，新增 Tom 到远端 collector 节点的安全同步和 bootstrap 入口。
+跨服务器只读接入收口：在第二台 Oracle host 暂缺的情况下，继续压缩拿到真实凭据后的手工步骤，新增本机最终上线状态汇总入口，把本机 doctor 与 Tom 总闸门合并成一个可重复执行的检查命令。
 
 ## 本轮不做
 
@@ -19,6 +19,10 @@
 
 跨服务器只读监控下一步：
 
+- 每次判断最终上线距离时，先在本机运行总控状态入口：
+  `ops/local/final-go-live-status.sh status`
+- 需要同时验证 Tom 现有实例只读安全边界时，运行：
+  `ops/local/final-go-live-status.sh check`
 - 为第二台 Oracle 服务器准备本地 collector exporter，让该服务器自行生成 collector JSON。
 - 先在本机只读发现候选 SSH host/key：
   `ops/local/discover-remote-oracle-credentials.sh scan ops/local/discover-remote-oracle-credentials.example.json`

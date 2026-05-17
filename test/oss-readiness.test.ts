@@ -147,6 +147,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   const discoverRemoteOracleCredentials = path.join(ROOT, "ops", "local", "discover-remote-oracle-credentials.sh");
   const discoverRemoteOracleCredentialsExample = path.join(ROOT, "ops", "local", "discover-remote-oracle-credentials.example.json");
   const remoteOracleIntake = path.join(ROOT, "ops", "local", "remote-oracle-intake.sh");
+  const finalGoLiveStatus = path.join(ROOT, "ops", "local", "final-go-live-status.sh");
   const remoteCollectorOnboarding = path.join(ROOT, "ops", "tom-readonly", "remote-collector-onboarding.sh");
   const remoteCollectorOnboardingExample = path.join(ROOT, "ops", "tom-readonly", "remote-collector-onboarding.example.json");
   const remoteCollectorCredentials = path.join(ROOT, "ops", "tom-readonly", "remote-collector-credentials.sh");
@@ -176,6 +177,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(doc.includes("push-remote-collector-credentials.sh"));
   assert(doc.includes("discover-remote-oracle-credentials.sh"));
   assert(doc.includes("remote-oracle-intake.sh"));
+  assert(doc.includes("final-go-live-status.sh"));
   assert(doc.includes("render-push-config"));
   assert(doc.includes("I_UNDERSTAND_THIS_WRITES_LOCAL_PUSH_CONFIG_AND_TOM_RUNTIME_ONLY"));
   assert(doc.includes("I_UNDERSTAND_THIS_PUSHES_CREDENTIALS_AND_RUNS_TOM_SAFE_ROLLOUT"));
@@ -216,6 +218,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(existsSync(discoverRemoteOracleCredentials));
   assert(existsSync(discoverRemoteOracleCredentialsExample));
   assert(existsSync(remoteOracleIntake));
+  assert(existsSync(finalGoLiveStatus));
   assert(existsSync(remoteCollectorOnboarding));
   assert(existsSync(remoteCollectorOnboardingExample));
   assert(existsSync(remoteCollectorCredentials));
@@ -303,6 +306,16 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(remoteOracleIntakeText, /mutatesOpenClawInstance: false/);
   assert.match(remoteOracleIntakeText, /callsLiveApi: false/);
   assert.doesNotMatch(remoteOracleIntakeText, /api\/managed-actions\/live/);
+  const finalGoLiveStatusText = readFileSync(finalGoLiveStatus, "utf8");
+  assert.match(finalGoLiveStatusText, /final-go-live-status\.sh status/);
+  assert.match(finalGoLiveStatusText, /final-go-live-status\.sh check/);
+  assert.match(finalGoLiveStatusText, /remote-oracle-intake\.sh doctor/);
+  assert.match(finalGoLiveStatusText, /go-live-gate\.sh/);
+  assert.match(finalGoLiveStatusText, /writesTomRuntime: false/);
+  assert.match(finalGoLiveStatusText, /connectsSecondOracle: false/);
+  assert.match(finalGoLiveStatusText, /writesOpenClawInstanceDirs: false/);
+  assert.match(finalGoLiveStatusText, /callsManagedActionsLiveApi: false/);
+  assert.doesNotMatch(finalGoLiveStatusText, /api\/managed-actions\/live/);
   const pushRemoteCollectorCredentialsText = readFileSync(pushRemoteCollectorCredentials, "utf8");
   assert.match(pushRemoteCollectorCredentialsText, /CONFIRM_PUSH_REMOTE_COLLECTOR_CREDENTIALS/);
   assert.match(pushRemoteCollectorCredentialsText, /I_UNDERSTAND_THIS_ONLY_PUSHES_REMOTE_COLLECTOR_CREDENTIALS_TO_TOM_RUNTIME/);

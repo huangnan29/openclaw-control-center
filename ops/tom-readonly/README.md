@@ -31,6 +31,7 @@
 - `../local/discover-remote-oracle-credentials.sh`：在本机只读发现第二台 Oracle 的候选 SSH host/key，`probe` 需显式确认且只执行只读 SSH 探测；拿到明确 host/key 后可用 `write-push-config` 只写本机 push 配置。
 - `../local/discover-remote-oracle-credentials.example.json`：本机候选发现配置样板，不包含真实密钥内容。
 - `../local/remote-oracle-intake.sh`：本机侧凭据接入编排器；`doctor/plan` 不写文件不联网，`apply` 显式确认后只写本机 push 配置和 Tom control-center runtime，`run` 会继续触发 Tom 端安全 rollout。
+- `../local/final-go-live-status.sh`：本机侧最终上线状态汇总入口；`status/check` 同时读取本机 `remote-oracle-intake.sh doctor` 和 Tom `go-live-gate.sh`，不写本机 push 配置、不写 Tom runtime、不连接第二台 Oracle。
 - `../local/push-remote-collector-credentials.sh`：在本机把远端只读 SSH key 和 onboarding 配置推送到 Tom control-center runtime，不连接第二台 Oracle。
 - `managed-action-healthcheck-rollout.example.json`：只读 healthcheck live 演练的 rollout 样板，不会被默认加载。
 - `managed-action-dry-run-gate.sh`：管理动作 dry-run 证据闸门，默认只读检查 readiness 与 audit，显式确认后只创建 dry-run 审计记录。
@@ -109,6 +110,8 @@ BRANCH=multi-instance-readonly-control-center ./update.sh
 
 ```bash
 # 如果远端只读 SSH key 还在本机，可以先在本机执行：
+ops/local/final-go-live-status.sh status
+ops/local/final-go-live-status.sh check
 REMOTE_ORACLE_KEY_PATH=<可达候选 keyPath> \
 ops/local/remote-oracle-intake.sh doctor
 REMOTE_ORACLE_HOST=<可达候选 host> REMOTE_ORACLE_KEY_PATH=<可达候选 keyPath> \

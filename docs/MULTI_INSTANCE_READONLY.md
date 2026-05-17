@@ -245,6 +245,8 @@ OPENCLAW_COLLECTOR_CRON_SCHEDULE="*/2 * * * *" ./install-collector-cron.sh
 
 ```bash
 # 如果远端只读 SSH key 还在本机，可以先在本机推送到 Tom control-center runtime：
+ops/local/final-go-live-status.sh status
+ops/local/final-go-live-status.sh check
 REMOTE_ORACLE_HOST=<可达候选 host> REMOTE_ORACLE_KEY_PATH=<可达候选 keyPath> \
 ops/local/remote-oracle-intake.sh doctor
 REMOTE_ORACLE_HOST=<可达候选 host> REMOTE_ORACLE_KEY_PATH=<可达候选 keyPath> \
