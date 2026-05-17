@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-受控管理动作 dry-run 骨架：新增白名单管理动作的预览接口，只返回目标实例、命令预览、安全状态，并写入控制中心自己的审计日志，不对任何 OpenClaw 实例执行动作。
+受控管理动作 dry-run UI：在多实例总览页提供管理动作预览入口，允许选择实例、动作、原因与本地令牌，只调用 dry-run API 并展示预览结果。
 
 ## 本轮不做
 
@@ -23,6 +23,7 @@
 - `POST /api/managed-actions/dry-run` 只返回预览结果并写入 `operation-audit.log`。
 - Tom `healthcheck.sh` 继续通过。
 - 页面和现有 5 个 OpenClaw 实例不受影响。
+- 下一步：增强人工确认与审计字段，把 dry-run 预览升级为可复核的操作申请记录；仍不开放真实执行。
 
 ## 最近完成
 
@@ -77,7 +78,20 @@
 - 已验证 `npm test -- test/managed-actions-dry-run.test.ts test/readonly-multi-instance-safety.test.ts test/multi-instance-readonly.test.ts test/ui-render-smoke.test.ts`。
 - 已验证 `npm test -- test/phase9-routes-commands.test.ts`。
 - 已验证 `npm run build`。
+- 已提交并推送 `fc044df feat: add readonly managed action dry-run previews`。
+- 已部署到 Tom，并验证运行提交 `fc044df`。
+- 已验证 Tom `GET /api/managed-actions` 返回 3 个白名单动作：`healthcheck`、`collector_refresh`、`skill_run`。
+- 已验证 Tom 未带本地令牌的 `POST /api/managed-actions/dry-run` 返回 401。
+- 已验证 Tom 授权 dry-run 返回 `status=dry_run_ready`、`dryRun=true`、`liveExecution=false`、`mutatesOpenClawInstance=false`。
+- 已验证 Tom 审计日志出现 `managed_action_dry_run`，目标实例为 `tom`。
+- 已新增多实例总览页 `管理动作预览` UI，支持选择实例、动作、skill、原因和本地令牌。
+- 已确保实例详情页仍不挂载管理动作 UI。
+- 已提交并推送 `f09f899 feat: add managed action dry-run UI`。
+- 已部署到 Tom，并验证运行提交 `f09f899`。
+- 已验证页面包含 `管理动作预览`，浏览器页面树可见该入口。
+- 已验证 `npm test -- test/ui-render-smoke.test.ts test/managed-actions-dry-run.test.ts test/readonly-multi-instance-safety.test.ts test/multi-instance-readonly.test.ts`。
+- 已验证 `npm run build`。
 
 ## 阶段完成后的下一步
 
-部署 Tom 验证通过后，下一步进入管理入口可视化：在 UI 中添加 dry-run 动作入口，仍然只允许预览和审计，不开放真实执行。
+人工确认与审计增强：把 dry-run 预览结果扩展为操作申请记录，增加确认短语、操作者标识、原因必填、目标实例快照摘要和审计检索；仍然只允许预览，不开放真实执行。
