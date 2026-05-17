@@ -17,6 +17,7 @@ CONFIRM_FINAL_GO_LIVE_RUNNER="${CONFIRM_FINAL_GO_LIVE_RUNNER:-}"
 CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN="${CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN:-}"
 APPROVED_BY="${APPROVED_BY:-}"
 LOCAL_API_TOKEN="${LOCAL_API_TOKEN:-}"
+FINAL_GO_LIVE_OUTPUT="${FINAL_GO_LIVE_OUTPUT:-json}"
 
 fail() {
   printf '[失败] %s\n' "$*" >&2
@@ -42,6 +43,7 @@ usage() {
   run-approved：必须显式确认并提供 LOCAL_API_TOKEN，才会 SSH 到 Tom 执行 live-healthcheck-rollout-runner.sh run-approved。
   approve-and-run：必须显式确认、提供 APPROVED_BY 与 LOCAL_API_TOKEN；先执行 Tom approval review，只在 ready_for_human_approval 时记录 approval 并执行一次性 run-approved。
   verify-completed：只读复核 Tom 一次性演练是否已完成、报告是否通过、approval 是否已消费。
+  可设置 FINAL_GO_LIVE_OUTPUT=summary 输出短摘要；默认输出完整 JSON，便于自动化解析。
 
 run-approved 必须设置：
   CONFIRM_FINAL_GO_LIVE_RUNNER=I_UNDERSTAND_THIS_RUNS_APPROVED_FINAL_GO_LIVE
@@ -74,6 +76,7 @@ run_node() {
     CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN="$CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN" \
     APPROVED_BY="$APPROVED_BY" \
     LOCAL_API_TOKEN="$LOCAL_API_TOKEN" \
+    FINAL_GO_LIVE_OUTPUT="$FINAL_GO_LIVE_OUTPUT" \
     node <<'NODE'
 const fs = require("node:fs");
 const os = require("node:os");
@@ -90,6 +93,7 @@ const confirm = process.env.CONFIRM_FINAL_GO_LIVE_RUNNER || "";
 const confirmApproveAndRun = process.env.CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN || "";
 const approvedBy = String(process.env.APPROVED_BY || "").trim();
 const localApiToken = process.env.LOCAL_API_TOKEN || "";
+const outputMode = String(process.env.FINAL_GO_LIVE_OUTPUT || "json").trim().toLowerCase() === "summary" ? "summary" : "json";
 
 function normalizeTopologyMode(value) {
   const text = String(value || "").trim().toLowerCase();
@@ -755,11 +759,48 @@ function approveAndRun() {
 }
 
 function emit(report) {
-  console.log(JSON.stringify(report, null, 2));
+  if (outputMode === "summary") {
+    process.stdout.write(formatSummary(report));
+  } else {
+    console.log(JSON.stringify(report, null, 2));
+  }
   if (mode === "prepare" && String(report.status || "").startsWith("blocked_")) process.exit(2);
   if (mode === "run-approved" && report.status !== "completed_final_live_healthcheck") process.exit(2);
   if (mode === "approve-and-run" && report.status !== "completed_final_live_healthcheck") process.exit(2);
   if (mode === "verify-completed" && report.status !== "verified_final_live_healthcheck_completed") process.exit(2);
+}
+
+function formatSummary(report) {
+  const lines = [];
+  const reviewSummary = report.stages?.approvalReview?.report?.summary;
+  const afterStatus = report.stages?.after?.report?.status;
+  lines.push(`status: ${report.status || "unknown"}`);
+  lines.push(`mode: ${report.mode || mode}`);
+  lines.push(`topologyMode: ${report.topologyMode || topologyMode}`);
+  if (reviewSummary) {
+    lines.push(`readiness: ${reviewSummary.readiness || "unknown"}`);
+    lines.push(`approvalPacket: ${reviewSummary.approvalPacket || "unknown"}`);
+    lines.push(`approval: ${reviewSummary.approval || "unknown"}`);
+    lines.push(`inboxPendingCount: ${Number(reviewSummary.inboxPendingCount || 0)}`);
+  }
+  if (afterStatus) lines.push(`afterStatus: ${afterStatus}`);
+  const issues = Array.isArray(report.issues) ? report.issues.filter(Boolean) : [];
+  if (issues.length > 0) {
+    lines.push("issues:");
+    for (const issue of issues.slice(0, 8)) lines.push(`- ${issue}`);
+  }
+  const nextCommands = Array.isArray(report.nextCommands) ? report.nextCommands.filter(Boolean) : [];
+  if (nextCommands.length > 0) {
+    lines.push("nextCommands:");
+    for (const command of nextCommands.slice(0, 4)) lines.push(`- ${command}`);
+  }
+  const safety = report.safety || {};
+  lines.push("safety:");
+  lines.push(`- opensLiveGate: ${String(safety.opensLiveGate === true)}`);
+  lines.push(`- callsManagedActionsLiveApi: ${String(safety.callsManagedActionsLiveApi === true)}`);
+  lines.push(`- writesOpenClawInstanceDirs: ${String(safety.writesOpenClawInstanceDirs === true)}`);
+  lines.push(`- restartsOpenClawInstances: ${String(safety.restartsOpenClawInstances === true)}`);
+  return `${lines.join("\n")}\n`;
 }
 
 if (mode === "status") {

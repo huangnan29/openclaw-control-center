@@ -294,9 +294,11 @@ exit 2
   return { statusScript, ssh, sshCalls, discoveryConfig };
 }
 
-function runRunner(
+type RunnerMode = "status" | "prepare" | "run-approved" | "approve-and-run" | "verify-completed";
+
+function runRunnerRaw(
   harness: Awaited<ReturnType<typeof writeHarness>>,
-  mode: "status" | "prepare" | "run-approved" | "approve-and-run" | "verify-completed",
+  mode: RunnerMode,
   extraEnv: Record<string, string> = {},
 ) {
   const result = spawnSync(SCRIPT, [mode], {
@@ -313,6 +315,19 @@ function runRunner(
   });
   return {
     exitCode: typeof result.status === "number" ? result.status : 1,
+    stdout: result.stdout,
+    stderr: result.stderr,
+  };
+}
+
+function runRunner(
+  harness: Awaited<ReturnType<typeof writeHarness>>,
+  mode: RunnerMode,
+  extraEnv: Record<string, string> = {},
+) {
+  const result = runRunnerRaw(harness, mode, extraEnv);
+  return {
+    exitCode: result.exitCode,
     report: JSON.parse(result.stdout),
     stderr: result.stderr,
   };
@@ -329,6 +344,28 @@ test("final go-live runner status 只读取最终状态", async () => {
     assert.equal(report.safety.readsStatusOnly, true);
     assert.equal(report.safety.opensLiveGate, false);
     await assert.rejects(readFile(harness.sshCalls, "utf8"));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("final go-live runner summary 输出短摘要且默认 JSON 行为不变", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-final-go-live-runner-summary-"));
+  try {
+    const harness = await writeHarness(dir);
+    const summary = runRunnerRaw(harness, "prepare", {
+      FINAL_GO_LIVE_OUTPUT: "summary",
+    });
+
+    assert.equal(summary.exitCode, 0);
+    assert.match(summary.stdout, /^status: prepared_waiting_human_approval/m);
+    assert.match(summary.stdout, /^mode: prepare/m);
+    assert.match(summary.stdout, /^safety:/m);
+    assert.match(summary.stdout, /opensLiveGate: false/);
+    assert.match(summary.stdout, /callsManagedActionsLiveApi: false/);
+    const jsonDefault = runRunnerRaw(harness, "status");
+    assert.equal(JSON.parse(jsonDefault.stdout).mode, "status");
+    assert.throws(() => JSON.parse(summary.stdout));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
