@@ -4,6 +4,7 @@ set +x
 
 # 本机侧第二台 Oracle 凭据接入编排器。
 # plan 只渲染 push 配置摘要，不写文件、不联网。
+# doctor 只读取本机候选 SSH 配置并输出缺口报告，不写文件、不联网。
 # apply 必须显式确认，只写本机 push 配置，并通过 SSH 写 Tom control-center runtime。
 # run 额外显式确认后，会在 apply 后触发 Tom 端跨服务器只读 rollout runner。
 # 本脚本不会修改任何 OpenClaw 实例目录，不调用 managed-actions live API。
@@ -30,6 +31,7 @@ require_command() {
 usage() {
   cat <<'TEXT'
 用法：
+  remote-oracle-intake.sh doctor
   remote-oracle-intake.sh plan
   remote-oracle-intake.sh apply
   remote-oracle-intake.sh run
@@ -52,11 +54,153 @@ usage() {
     CONFIRM_REMOTE_ORACLE_INTAKE_RUNNER=I_UNDERSTAND_THIS_PUSHES_CREDENTIALS_AND_RUNS_TOM_SAFE_ROLLOUT
 
 安全边界：
+  doctor 不写文件、不联网，只读取本机 SSH config、host hint 和 key 文件元数据。
   plan 不写文件、不联网。
   apply 只写本机 push 配置和 Tom control-center runtime。
   apply 不连接第二台 Oracle、不写 registry、不修改任何 OpenClaw 实例目录、不调用 managed-actions live API。
   run 会通过 Tom 端 rollout runner 自动推进已满足安全门禁的阶段；它可能只读连接第二台 Oracle、写 Tom control-center registry，但不会写 OpenClaw 实例目录。
 TEXT
+}
+
+doctor_report() {
+  SCAN_OUTPUT="$1" RENDER_OUTPUT="${2:-}" RENDER_STATUS="${3:-skipped}" PUSH_CONFIG_FILE="$PUSH_CONFIG_FILE" node <<'NODE'
+function parse(name) {
+  try {
+    return JSON.parse(process.env[name] || "{}");
+  } catch (error) {
+    return { status: "invalid_json", error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+function readString(value) {
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
+}
+
+const scan = parse("SCAN_OUTPUT");
+const render = parse("RENDER_OUTPUT");
+const renderStatus = process.env.RENDER_STATUS || "skipped";
+const hostFromEnv = readString(process.env.REMOTE_ORACLE_HOST);
+const keyFromEnv = readString(process.env.REMOTE_ORACLE_KEY_PATH);
+const userFromEnv = readString(process.env.REMOTE_ORACLE_USER) || "ubuntu";
+const portFromEnv = readString(process.env.REMOTE_ORACLE_PORT) || "22";
+const keys = Array.isArray(scan.keys) ? scan.keys : [];
+const hosts = Array.isArray(scan.hosts) ? scan.hosts : [];
+const probes = Array.isArray(scan.probes) ? scan.probes : [];
+const reachable = probes.filter((item) => item && item.status === "reachable");
+
+let status = "needs_remote_host";
+if (hostFromEnv && keyFromEnv && renderStatus === "rendered") {
+  status = "ready_for_apply";
+} else if (hostFromEnv && !keyFromEnv) {
+  status = "needs_remote_key";
+} else if (!hostFromEnv && keyFromEnv) {
+  status = "needs_remote_host";
+} else if (reachable.length > 0) {
+  status = "reachable_candidate_found";
+} else if (hosts.length > 0 && keys.length > 0) {
+  status = "candidates_found";
+} else if (keys.length === 0) {
+  status = "needs_remote_host_and_key";
+}
+
+const selected = renderStatus === "rendered" ? {
+  host: render.remote?.host || render.server?.host || hostFromEnv,
+  user: render.remote?.user || userFromEnv,
+  port: render.remote?.port || Number.parseInt(portFromEnv, 10),
+  sourceSshKeyPath: render.remote?.sourceSshKeyPath || keyFromEnv,
+  targetSshKeyPath: render.remote?.targetSshKeyPath,
+  outputConfigFile: render.outputConfigFile,
+} : {
+  host: hostFromEnv,
+  user: userFromEnv,
+  port: Number.parseInt(portFromEnv, 10),
+  sourceSshKeyPath: keyFromEnv,
+};
+
+const firstReachable = reachable[0];
+const firstHost = hosts[0];
+const firstKey = keys[0];
+const suggestedHost = firstReachable?.host || firstHost?.host || "<真实第二台Oracle公网IP>";
+const suggestedKey = firstReachable?.keyPath || (keys.length === 1 ? firstKey?.path : undefined) || "<本机只读key路径>";
+
+const nextCommands = status === "ready_for_apply" ? [
+  "ops/local/remote-oracle-intake.sh plan",
+  "CONFIRM_REMOTE_ORACLE_INTAKE=I_UNDERSTAND_THIS_WRITES_LOCAL_PUSH_CONFIG_AND_TOM_RUNTIME_ONLY ops/local/remote-oracle-intake.sh apply",
+  "CONFIRM_REMOTE_ORACLE_INTAKE=I_UNDERSTAND_THIS_WRITES_LOCAL_PUSH_CONFIG_AND_TOM_RUNTIME_ONLY CONFIRM_REMOTE_ORACLE_INTAKE_RUNNER=I_UNDERSTAND_THIS_PUSHES_CREDENTIALS_AND_RUNS_TOM_SAFE_ROLLOUT ops/local/remote-oracle-intake.sh run",
+] : [
+  `REMOTE_ORACLE_HOST=${suggestedHost} REMOTE_ORACLE_KEY_PATH=${suggestedKey} ops/local/remote-oracle-intake.sh doctor`,
+  `REMOTE_ORACLE_HOST=${suggestedHost} REMOTE_ORACLE_KEY_PATH=${suggestedKey} ops/local/remote-oracle-intake.sh plan`,
+];
+
+console.log(JSON.stringify({
+  schemaVersion: 1,
+  status,
+  mode: "doctor",
+  generatedAt: new Date().toISOString(),
+  pushConfigFile: process.env.PUSH_CONFIG_FILE || "",
+  selected,
+  discovery: {
+    status: scan.status,
+    summary: scan.summary,
+    hosts: hosts.map((item) => ({
+      host: item.host,
+      user: item.user,
+      port: item.port,
+      sources: item.sources,
+    })),
+    keys: keys.map((item) => ({
+      path: item.path,
+      exists: item.exists,
+      mode: item.mode,
+      tooOpen: item.tooOpen,
+      sizeBytes: item.sizeBytes,
+      sources: item.sources,
+    })),
+    reachable: reachable.map((item) => ({
+      host: item.host,
+      user: item.user,
+      port: item.port,
+      keyPath: item.keyPath,
+      detail: item.detail,
+    })),
+  },
+  render: renderStatus === "rendered" ? {
+    status: "rendered",
+    serverId: render.server?.id,
+    remote: {
+      host: render.remote?.host,
+      user: render.remote?.user,
+      port: render.remote?.port,
+      sourceSshKeyPath: render.remote?.sourceSshKeyPath,
+      targetSshKeyPath: render.remote?.targetSshKeyPath,
+    },
+    outputConfigFile: render.outputConfigFile,
+  } : {
+    status: renderStatus,
+  },
+  missing: {
+    remoteHost: !hostFromEnv,
+    remoteKeyPath: !keyFromEnv,
+  },
+  nextCommands,
+  safety: {
+    readsLocalSshConfigOnly: true,
+    connectsSsh: false,
+    writesLocalFiles: false,
+    writesTomRuntime: false,
+    connectsTomSsh: false,
+    connectsSecondOracle: false,
+    writesRemoteFiles: false,
+    writesActiveRegistry: false,
+    writesOpenClawInstanceDirs: false,
+    startsContainers: false,
+    mutatesOpenClawInstance: false,
+    restartsOpenClawInstance: false,
+    callsLiveApi: false,
+    outputsPrivateKeyContent: false,
+  },
+}, null, 2));
+NODE
 }
 
 json_summary() {
@@ -353,6 +497,19 @@ main() {
   [ -x "$PUSH_SCRIPT" ] || fail "推送脚本不存在或不可执行：${PUSH_SCRIPT}"
 
   case "${1:-plan}" in
+    doctor)
+      local scan_output
+      local render_output
+      local render_status
+      scan_output="$("$DISCOVERY_SCRIPT" scan "$DISCOVERY_CONFIG")"
+      render_status="skipped_missing_env"
+      render_output="{}"
+      if [ -n "${REMOTE_ORACLE_HOST:-}" ] && [ -n "${REMOTE_ORACLE_KEY_PATH:-}" ]; then
+        render_output="$(render_push_config)"
+        render_status="rendered"
+      fi
+      doctor_report "$scan_output" "$render_output" "$render_status"
+      ;;
     plan)
       local rendered
       rendered="$(render_push_config)"

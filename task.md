@@ -29,6 +29,8 @@
 - 或显式确认后只写本机 push 配置文件：
   `CONFIRM_REMOTE_ORACLE_PUSH_CONFIG_WRITE=I_UNDERSTAND_THIS_ONLY_WRITES_LOCAL_PUSH_CONFIG REMOTE_ORACLE_HOST=<可达候选 host> REMOTE_ORACLE_KEY_PATH=<可达候选 keyPath> ops/local/discover-remote-oracle-credentials.sh write-push-config ops/local/discover-remote-oracle-credentials.example.json`
 - 如果已明确知道第二台 Oracle host/key，优先用 intake 编排器先预览再接入 Tom runtime：
+  `REMOTE_ORACLE_KEY_PATH=<可达候选 keyPath> ops/local/remote-oracle-intake.sh doctor`
+  `REMOTE_ORACLE_HOST=<可达候选 host> REMOTE_ORACLE_KEY_PATH=<可达候选 keyPath> ops/local/remote-oracle-intake.sh doctor`
   `REMOTE_ORACLE_HOST=<可达候选 host> REMOTE_ORACLE_KEY_PATH=<可达候选 keyPath> ops/local/remote-oracle-intake.sh plan`
   `CONFIRM_REMOTE_ORACLE_INTAKE=I_UNDERSTAND_THIS_WRITES_LOCAL_PUSH_CONFIG_AND_TOM_RUNTIME_ONLY REMOTE_ORACLE_HOST=<可达候选 host> REMOTE_ORACLE_KEY_PATH=<可达候选 keyPath> ops/local/remote-oracle-intake.sh apply`
 - 要在凭据接入后自动触发 Tom 端安全 rollout runner，使用：
@@ -112,6 +114,13 @@
 
 ## 最近完成
 
+- 已为 `ops/local/remote-oracle-intake.sh` 新增 `doctor` 模式。
+- `remote-oracle-intake.sh doctor` 只读取本机 SSH config、host hint 和 key 文件元数据；如果显式提供 `REMOTE_ORACLE_HOST/REMOTE_ORACLE_KEY_PATH`，只离线渲染配置摘要，不写文件、不联网、不连接 Tom、不连接第二台 Oracle。
+- `doctor` 会输出 `needs_remote_host`、`needs_remote_key`、`candidates_found` 或 `ready_for_apply`，并给出下一步 `plan/apply/run` 命令。
+- 本机执行 `ops/local/remote-oracle-intake.sh doctor`，当前状态为 `needs_remote_host`；发现 3 个本机 key 候选，但没有发现第二台 Oracle host。
+- 已验证 `npm test -- test/remote-oracle-intake.test.ts test/discover-remote-oracle-credentials.test.ts test/oss-readiness.test.ts`，21/21 通过。
+- 已验证跨服务器只读、总闸门、dry-run、凭据接入和远端 collector 自动引导回归集，58/58 通过。
+- 已验证 `npm run build`。
 - 已新增 `ops/tom-readonly/remote-collector-node-sync.sh`，用于把 Tom 已生成并校验过的 onboarding 接入包同步到第二台 Oracle 的 collector deploy 目录。
 - `remote-collector-node-sync.sh plan` 只读取 Tom 本地接入包，不联网、不写文件。
 - `remote-collector-node-sync.sh sync` 必须设置 `CONFIRM_REMOTE_COLLECTOR_NODE_SYNC=I_UNDERSTAND_THIS_ONLY_COPIES_COLLECTOR_BUNDLE_TO_REMOTE`，只通过 SSH+tar 写远端 collector deploy 目录，不写 OpenClaw 实例目录。

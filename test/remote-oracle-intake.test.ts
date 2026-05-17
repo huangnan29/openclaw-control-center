@@ -30,6 +30,37 @@ async function writeHarness(dir: string) {
 set -euo pipefail
 printf '%s\\n' "$*" >> "$DISCOVERY_CALLS"
 mode="$1"
+if [ "$mode" = "scan" ]; then
+  cat <<JSON
+{
+  "schemaVersion": 1,
+  "status": "needs_remote_host",
+  "summary": {
+    "hosts": 0,
+    "keys": 1,
+    "probeCombinations": 0
+  },
+  "hosts": [],
+  "keys": [
+    {
+      "path": "$REMOTE_ORACLE_KEY_PATH",
+      "exists": true,
+      "mode": "600",
+      "tooOpen": false,
+      "sizeBytes": 24,
+      "sources": ["test"]
+    }
+  ],
+  "safety": {
+    "readsLocalSshConfigOnly": true,
+    "connectsSsh": false,
+    "writesLocalFiles": false,
+    "outputsPrivateKeyContent": false
+  }
+}
+JSON
+  exit 0
+fi
 if [ "$mode" = "render-push-config" ]; then
   cat <<JSON
 {
@@ -219,6 +250,78 @@ test("remote Oracle intake plan renders the push config without writing or pushi
     assert.equal(existsSync(join(runtimeDir, "push-remote-collector-credentials.json")), false);
     assert.equal(existsSync(pushCalls), false);
     assert.match(await readFile(discoveryCalls, "utf8"), /render-push-config/);
+    assert.doesNotMatch(output, /fake remote readonly key/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("remote Oracle intake doctor reports missing host without writing or networking", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-remote-oracle-intake-"));
+  try {
+    const { discovery, push, discoveryCalls, pushCalls, keyFile, runtimeDir } = await writeHarness(dir);
+    const output = execFileSync(SCRIPT, ["doctor"], {
+      env: {
+        ...process.env,
+        DISCOVERY_SCRIPT: discovery,
+        PUSH_SCRIPT: push,
+        PUSH_CONFIG_FILE: join(runtimeDir, "push-remote-collector-credentials.json"),
+        DISCOVERY_CALLS: discoveryCalls,
+        PUSH_CALLS: pushCalls,
+        REMOTE_ORACLE_KEY_PATH: keyFile,
+      },
+      encoding: "utf8",
+    });
+    const report = JSON.parse(output);
+
+    assert.equal(report.status, "needs_remote_host");
+    assert.equal(report.missing.remoteHost, true);
+    assert.equal(report.missing.remoteKeyPath, false);
+    assert.equal(report.discovery.keys[0]?.path, keyFile);
+    assert.equal(report.safety.writesLocalFiles, false);
+    assert.equal(report.safety.connectsTomSsh, false);
+    assert.equal(report.safety.connectsSecondOracle, false);
+    assert.equal(existsSync(join(runtimeDir, "push-remote-collector-credentials.json")), false);
+    assert.equal(existsSync(pushCalls), false);
+    assert.match(await readFile(discoveryCalls, "utf8"), /scan/);
+    assert.doesNotMatch(output, /fake remote readonly key/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("remote Oracle intake doctor validates explicit host and key as ready for apply", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-remote-oracle-intake-"));
+  try {
+    const { discovery, push, discoveryCalls, pushCalls, keyFile, runtimeDir } = await writeHarness(dir);
+    const output = execFileSync(SCRIPT, ["doctor"], {
+      env: {
+        ...process.env,
+        DISCOVERY_SCRIPT: discovery,
+        PUSH_SCRIPT: push,
+        PUSH_CONFIG_FILE: join(runtimeDir, "push-remote-collector-credentials.json"),
+        DISCOVERY_CALLS: discoveryCalls,
+        PUSH_CALLS: pushCalls,
+        REMOTE_ORACLE_HOST: "129.146.10.20",
+        REMOTE_ORACLE_KEY_PATH: keyFile,
+      },
+      encoding: "utf8",
+    });
+    const report = JSON.parse(output);
+
+    assert.equal(report.status, "ready_for_apply");
+    assert.equal(report.selected.host, "129.146.10.20");
+    assert.equal(report.selected.sourceSshKeyPath, keyFile);
+    assert.equal(report.render.status, "rendered");
+    assert(report.nextCommands.some((command: string) => command.includes("remote-oracle-intake.sh run")));
+    assert.equal(report.safety.writesLocalFiles, false);
+    assert.equal(report.safety.connectsTomSsh, false);
+    assert.equal(report.safety.connectsSecondOracle, false);
+    assert.equal(existsSync(join(runtimeDir, "push-remote-collector-credentials.json")), false);
+    assert.equal(existsSync(pushCalls), false);
+    const calls = await readFile(discoveryCalls, "utf8");
+    assert.match(calls, /scan/);
+    assert.match(calls, /render-push-config/);
     assert.doesNotMatch(output, /fake remote readonly key/);
   } finally {
     await rm(dir, { recursive: true, force: true });

@@ -289,11 +289,14 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(remoteOracleIntakeText, /remote-oracle-intake\.sh plan/);
   assert.match(remoteOracleIntakeText, /remote-oracle-intake\.sh apply/);
   assert.match(remoteOracleIntakeText, /remote-oracle-intake\.sh run/);
+  assert.match(remoteOracleIntakeText, /remote-oracle-intake\.sh doctor/);
+  assert.match(remoteOracleIntakeText, /doctor 不写文件、不联网/);
   assert.match(remoteOracleIntakeText, /CONFIRM_REMOTE_ORACLE_INTAKE/);
   assert.match(remoteOracleIntakeText, /CONFIRM_REMOTE_ORACLE_INTAKE_RUNNER/);
   assert.match(remoteOracleIntakeText, /I_UNDERSTAND_THIS_WRITES_LOCAL_PUSH_CONFIG_AND_TOM_RUNTIME_ONLY/);
   assert.match(remoteOracleIntakeText, /I_UNDERSTAND_THIS_PUSHES_CREDENTIALS_AND_RUNS_TOM_SAFE_ROLLOUT/);
   assert.match(remoteOracleIntakeText, /writesTomControlCenterRuntimeOnly/);
+  assert.match(remoteOracleIntakeText, /readsLocalSshConfigOnly/);
   assert.match(remoteOracleIntakeText, /mayConnectSecondOracleViaTomReadonlyPreflight/);
   assert.match(remoteOracleIntakeText, /writesActiveRegistry: false/);
   assert.match(remoteOracleIntakeText, /writesOpenClawInstanceDirs: false/);
