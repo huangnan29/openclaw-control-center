@@ -260,6 +260,10 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(discoverRemoteOracleCredentialsText, /CONFIRM_REMOTE_ORACLE_DISCOVERY/);
   assert.match(discoverRemoteOracleCredentialsText, /I_UNDERSTAND_THIS_ONLY_PROBES_SSH_READONLY/);
   assert.match(discoverRemoteOracleCredentialsText, /render-push-config/);
+  assert.match(discoverRemoteOracleCredentialsText, /write-push-config/);
+  assert.match(discoverRemoteOracleCredentialsText, /CONFIRM_REMOTE_ORACLE_PUSH_CONFIG_WRITE/);
+  assert.match(discoverRemoteOracleCredentialsText, /I_UNDERSTAND_THIS_ONLY_WRITES_LOCAL_PUSH_CONFIG/);
+  assert.match(discoverRemoteOracleCredentialsText, /writesLocalPushConfigOnly/);
   assert.match(discoverRemoteOracleCredentialsText, /outputsPrivateKeyContent: false/);
   assert.match(discoverRemoteOracleCredentialsText, /writesTomRuntime: false/);
   assert.match(discoverRemoteOracleCredentialsText, /writesRemoteFiles: false/);

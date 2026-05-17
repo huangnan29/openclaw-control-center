@@ -5,9 +5,11 @@ set +x
 # 本机远端 Oracle 只读凭据候选发现工具。
 # scan 只读取本机 SSH 配置和候选 key 文件元数据，不联网、不写文件。
 # probe 必须显式确认，只用 SSH 执行只读探测命令，不写远端文件、不写 Tom runtime、不修改任何 OpenClaw 实例目录。
+# write-push-config 必须显式确认，只写本机 runtime/push-remote-collector-credentials.json。
 
 CONFIG_FILE="${CONFIG_FILE:-ops/local/discover-remote-oracle-credentials.example.json}"
 CONFIRM_REMOTE_ORACLE_DISCOVERY="${CONFIRM_REMOTE_ORACLE_DISCOVERY:-}"
+CONFIRM_REMOTE_ORACLE_PUSH_CONFIG_WRITE="${CONFIRM_REMOTE_ORACLE_PUSH_CONFIG_WRITE:-}"
 
 fail() {
   printf '[失败] %s\n' "$*" >&2
@@ -24,16 +26,20 @@ usage() {
   discover-remote-oracle-credentials.sh scan [config.json]
   discover-remote-oracle-credentials.sh probe [config.json]
   discover-remote-oracle-credentials.sh render-push-config [config.json]
+  discover-remote-oracle-credentials.sh write-push-config [config.json]
 
 说明：
   scan 只读取本机 SSH config 和候选 key 文件元数据，不联网、不写文件、不输出私钥内容。
   probe 会对候选 host/key 组合执行 SSH 只读探测命令：
     id -un / uname -n / uname -s
   render-push-config 只根据 REMOTE_ORACLE_HOST 和 REMOTE_ORACLE_KEY_PATH 输出 push 配置 JSON，不写文件、不联网。
+  write-push-config 只根据 REMOTE_ORACLE_HOST 和 REMOTE_ORACLE_KEY_PATH 写本机 push 配置文件，不联网。
 
 安全确认：
   probe 必须设置：
     CONFIRM_REMOTE_ORACLE_DISCOVERY=I_UNDERSTAND_THIS_ONLY_PROBES_SSH_READONLY
+  write-push-config 必须设置：
+    CONFIRM_REMOTE_ORACLE_PUSH_CONFIG_WRITE=I_UNDERSTAND_THIS_ONLY_WRITES_LOCAL_PUSH_CONFIG
 
 配置样板：
   ops/local/discover-remote-oracle-credentials.example.json
@@ -46,6 +52,7 @@ run_node() {
   MODE="$mode" \
     CONFIG_FILE="$config" \
     CONFIRM_REMOTE_ORACLE_DISCOVERY="$CONFIRM_REMOTE_ORACLE_DISCOVERY" \
+    CONFIRM_REMOTE_ORACLE_PUSH_CONFIG_WRITE="$CONFIRM_REMOTE_ORACLE_PUSH_CONFIG_WRITE" \
     node <<'NODE'
 const fs = require("node:fs");
 const os = require("node:os");
@@ -55,10 +62,14 @@ const { spawnSync } = require("node:child_process");
 const mode = process.env.MODE || "scan";
 const configFile = path.resolve(process.env.CONFIG_FILE || "ops/local/discover-remote-oracle-credentials.example.json");
 const confirm = process.env.CONFIRM_REMOTE_ORACLE_DISCOVERY || "";
+const writeConfirm = process.env.CONFIRM_REMOTE_ORACLE_PUSH_CONFIG_WRITE || "";
 const selectedHostFromEnv = readString(process.env.REMOTE_ORACLE_HOST);
 const selectedKeyFromEnv = readString(process.env.REMOTE_ORACLE_KEY_PATH);
 const selectedUserFromEnv = readString(process.env.REMOTE_ORACLE_USER);
 const selectedPortFromEnv = readString(process.env.REMOTE_ORACLE_PORT);
+const pushConfigOutputFromEnv = readString(process.env.REMOTE_ORACLE_PUSH_CONFIG_OUTPUT);
+const localRuntimeDirFromEnv = readString(process.env.LOCAL_RUNTIME_DIR);
+const overwritePushConfig = process.env.REMOTE_ORACLE_PUSH_CONFIG_OVERWRITE === "true";
 
 function fail(message) {
   console.error(`[失败] ${message}`);
@@ -531,6 +542,30 @@ function buildPushConfig(config, selected) {
   };
 }
 
+function localRuntimeDir() {
+  return path.resolve(expandHome(localRuntimeDirFromEnv || path.join(process.cwd(), "runtime")));
+}
+
+function resolvePushConfigOutput() {
+  const output = path.resolve(expandHome(pushConfigOutputFromEnv || path.join(localRuntimeDir(), "push-remote-collector-credentials.json")));
+  const runtimeRoot = `${localRuntimeDir()}${path.sep}`;
+  if (!output.startsWith(runtimeRoot)) {
+    throw new Error(`REMOTE_ORACLE_PUSH_CONFIG_OUTPUT 必须位于本机 runtime 目录下：${localRuntimeDir()}`);
+  }
+  return output;
+}
+
+function writePushConfigFile(file, pushConfig) {
+  if (fs.existsSync(file) && !overwritePushConfig) {
+    throw new Error(`push 配置已存在：${file}；如需覆盖请设置 REMOTE_ORACLE_PUSH_CONFIG_OVERWRITE=true`);
+  }
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const tmp = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.${Date.now()}.tmp`);
+  fs.writeFileSync(tmp, `${JSON.stringify(pushConfig, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  fs.chmodSync(tmp, 0o600);
+  fs.renameSync(tmp, file);
+}
+
 function statusFor(discovery, probes) {
   if (probes?.some((item) => item.status === "reachable")) return "reachable_candidate_found";
   if (discovery.hosts.length === 0) return "needs_remote_host";
@@ -562,6 +597,49 @@ if (mode === "probe") {
   try {
     const selected = selectForRender(config, discovery);
     console.log(JSON.stringify(buildPushConfig(config, selected), null, 2));
+    process.exit(0);
+  } catch (error) {
+    fail(formatError(error));
+  }
+} else if (mode === "write-push-config") {
+  if (writeConfirm !== "I_UNDERSTAND_THIS_ONLY_WRITES_LOCAL_PUSH_CONFIG") {
+    fail("必须设置 CONFIRM_REMOTE_ORACLE_PUSH_CONFIG_WRITE=I_UNDERSTAND_THIS_ONLY_WRITES_LOCAL_PUSH_CONFIG");
+  }
+  try {
+    const selected = selectForRender(config, discovery);
+    const pushConfig = buildPushConfig(config, selected);
+    const outputFile = resolvePushConfigOutput();
+    writePushConfigFile(outputFile, pushConfig);
+    console.log(JSON.stringify({
+      schemaVersion: 1,
+      status: "written",
+      mode,
+      configFile,
+      outputFile,
+      selected: {
+        host: selected.host,
+        user: selected.user,
+        port: selected.port,
+        keyPath: selected.keyPath,
+      },
+      nextCommands: [
+        `ops/local/push-remote-collector-credentials.sh plan ${path.relative(process.cwd(), outputFile)}`,
+        `CONFIRM_PUSH_REMOTE_COLLECTOR_CREDENTIALS=I_UNDERSTAND_THIS_ONLY_PUSHES_REMOTE_COLLECTOR_CREDENTIALS_TO_TOM_RUNTIME ops/local/push-remote-collector-credentials.sh apply ${path.relative(process.cwd(), outputFile)}`,
+      ],
+      safety: {
+        writesLocalPushConfigOnly: true,
+        writesLocalFiles: true,
+        connectsSsh: false,
+        writesTomRuntime: false,
+        connectsTomSsh: false,
+        connectsSecondOracle: false,
+        writesRemoteFiles: false,
+        writesActiveRegistry: false,
+        mutatesOpenClawInstance: false,
+        callsLiveApi: false,
+        outputsPrivateKeyContent: false,
+      },
+    }, null, 2));
     process.exit(0);
   } catch (error) {
     fail(formatError(error));
@@ -616,6 +694,9 @@ main() {
       ;;
     render-push-config)
       run_node "render-push-config" "${2:-$CONFIG_FILE}"
+      ;;
+    write-push-config)
+      run_node "write-push-config" "${2:-$CONFIG_FILE}"
       ;;
     -h|--help|help)
       usage

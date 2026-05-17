@@ -8,6 +8,7 @@ import test from "node:test";
 const ROOT = process.cwd();
 const SCRIPT = join(ROOT, "ops", "local", "discover-remote-oracle-credentials.sh");
 const PROBE_CONFIRM = "I_UNDERSTAND_THIS_ONLY_PROBES_SSH_READONLY";
+const WRITE_CONFIRM = "I_UNDERSTAND_THIS_ONLY_WRITES_LOCAL_PUSH_CONFIG";
 
 async function writeDiscoveryFixture(dir: string) {
   const sshDir = join(dir, ".ssh");
@@ -225,6 +226,62 @@ test("remote Oracle discovery renders a push config from explicit host and key w
     assert.equal(rendered.remote.targetSshKeyPath, "/srv/openclaw-control-center-readonly/runtime/ssh/remote-oracle-readonly.key");
     assert.equal(rendered.outputConfigFile, "/srv/openclaw-control-center-readonly/runtime/remote-collector-onboarding.json");
     assert.doesNotMatch(output, /secret-second-key/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("remote Oracle discovery write-push-config requires explicit confirmation", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-discover-remote-oracle-"));
+  try {
+    const { configFile, keyFile } = await writeDiscoveryFixture(dir);
+    const result = spawnSync(SCRIPT, ["write-push-config", configFile], {
+      env: {
+        ...process.env,
+        REMOTE_ORACLE_HOST: "129.146.10.20",
+        REMOTE_ORACLE_KEY_PATH: keyFile,
+        LOCAL_RUNTIME_DIR: join(dir, "runtime"),
+      },
+      encoding: "utf8",
+    });
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /CONFIRM_REMOTE_ORACLE_PUSH_CONFIG_WRITE/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("remote Oracle discovery write-push-config writes only the local push config", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-discover-remote-oracle-"));
+  try {
+    const { configFile, keyFile } = await writeDiscoveryFixture(dir);
+    const runtimeDir = join(dir, "runtime");
+    const outputFile = join(runtimeDir, "push-remote-collector-credentials.json");
+    const output = execFileSync(SCRIPT, ["write-push-config", configFile], {
+      env: {
+        ...process.env,
+        REMOTE_ORACLE_HOST: "129.146.10.20",
+        REMOTE_ORACLE_KEY_PATH: keyFile,
+        REMOTE_ORACLE_USER: "ubuntu",
+        REMOTE_ORACLE_PORT: "22",
+        LOCAL_RUNTIME_DIR: runtimeDir,
+        CONFIRM_REMOTE_ORACLE_PUSH_CONFIG_WRITE: WRITE_CONFIRM,
+      },
+      encoding: "utf8",
+    });
+    const report = JSON.parse(output);
+    const written = JSON.parse(await readFile(outputFile, "utf8"));
+
+    assert.equal(report.status, "written");
+    assert.equal(report.outputFile, outputFile);
+    assert.equal(report.safety.writesLocalPushConfigOnly, true);
+    assert.equal(report.safety.connectsSsh, false);
+    assert.equal(written.server.host, "129.146.10.20");
+    assert.equal(written.remote.host, "129.146.10.20");
+    assert.equal(written.remote.sourceSshKeyPath, keyFile);
+    assert.doesNotMatch(output, /secret-second-key/);
+    assert.doesNotMatch(await readFile(outputFile, "utf8"), /secret-second-key/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

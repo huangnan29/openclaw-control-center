@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-管理动作 dry-run 证据增强：在跨服务器 host 暂缺的情况下，补齐受控管理动作上线前的 dry-run 证据闸门，确保后续 live 演练不会卡在缺少可引用 dry-run 审计记录。
+跨服务器只读接入收口：在第二台 Oracle host 暂缺的情况下，继续压缩显式 host/key 接入步骤，新增本机安全写入 push 配置路径，减少拿到真实公网地址后的人为 JSON 编辑风险。
 
 ## 本轮不做
 
@@ -26,6 +26,8 @@
   `CONFIRM_REMOTE_ORACLE_DISCOVERY=I_UNDERSTAND_THIS_ONLY_PROBES_SSH_READONLY ops/local/discover-remote-oracle-credentials.sh probe ops/local/discover-remote-oracle-credentials.example.json`
 - 找到可达候选后，直接生成本机 push 配置：
   `REMOTE_ORACLE_HOST=<可达候选 host> REMOTE_ORACLE_KEY_PATH=<可达候选 keyPath> ops/local/discover-remote-oracle-credentials.sh render-push-config ops/local/discover-remote-oracle-credentials.example.json > runtime/push-remote-collector-credentials.json`
+- 或显式确认后只写本机 push 配置文件：
+  `CONFIRM_REMOTE_ORACLE_PUSH_CONFIG_WRITE=I_UNDERSTAND_THIS_ONLY_WRITES_LOCAL_PUSH_CONFIG REMOTE_ORACLE_HOST=<可达候选 host> REMOTE_ORACLE_KEY_PATH=<可达候选 keyPath> ops/local/discover-remote-oracle-credentials.sh write-push-config ops/local/discover-remote-oracle-credentials.example.json`
 - 在 Tom 先复制 `repo/ops/tom-readonly/remote-collector-onboarding.example.json` 到 `runtime/remote-collector-onboarding.json`，填入第二台 Oracle 的 SSH 信息和实例路径。
 - 任何阶段不确定下一步时，先运行：
   `repo/ops/tom-readonly/remote-collector-rollout.sh status runtime/remote-onboarding/<serverId>`
@@ -98,6 +100,14 @@
 
 ## 最近完成
 
+- 已增强 `ops/local/discover-remote-oracle-credentials.sh`，新增 `write-push-config` 模式。
+- `write-push-config` 必须设置 `CONFIRM_REMOTE_ORACLE_PUSH_CONFIG_WRITE=I_UNDERSTAND_THIS_ONLY_WRITES_LOCAL_PUSH_CONFIG`，只根据显式 `REMOTE_ORACLE_HOST` 和 `REMOTE_ORACLE_KEY_PATH` 写本机 `runtime/push-remote-collector-credentials.json`。
+- `write-push-config` 不联网、不连接 Tom、不连接第二台 Oracle、不写 Tom runtime、不写 registry、不修改任何 OpenClaw 实例目录，也不输出私钥内容。
+- 已扩展 `test/discover-remote-oracle-credentials.test.ts`，覆盖 `write-push-config` 缺确认被拒、显式确认后只写本机 push 配置且不泄露 key 内容。
+- 已验证 `bash -n ops/local/discover-remote-oracle-credentials.sh`。
+- 已验证 `npm test -- test/discover-remote-oracle-credentials.test.ts test/push-remote-collector-credentials.test.ts test/oss-readiness.test.ts`，17/17 通过。
+- 已验证跨服务器只读上线相关回归集，46/46 通过。
+- 已验证 `npm run build`。
 - 已新增 `ops/tom-readonly/managed-action-dry-run-gate.sh`，作为管理动作 dry-run 证据闸门。
 - `managed-action-dry-run-gate.sh status` 只读取 readiness 与 dry-run audit，不写文件、不调用 live API。
 - `managed-action-dry-run-gate.sh run` 必须设置 `CONFIRM_MANAGED_ACTION_DRY_RUN=I_UNDERSTAND_THIS_ONLY_CREATES_DRY_RUN_AUDIT_RECORD` 且提供 `LOCAL_API_TOKEN`，只调用 `/api/managed-actions/dry-run` 创建 dry-run 审计记录。
