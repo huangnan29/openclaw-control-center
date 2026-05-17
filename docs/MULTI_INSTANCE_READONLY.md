@@ -142,9 +142,7 @@ volumes:
       "instances": [
         {
           "id": "remote-main",
-          "name": "Remote Main",
-          "openclawHome": "/remote/main/config",
-          "workspaceRoot": "/remote/main/workspace"
+          "name": "Remote Main"
         }
       ]
     }
@@ -152,7 +150,7 @@ volumes:
 }
 ```
 
-当某个 server 配置了 `collectorSnapshotPath` 后，该 server 下的实例会优先使用快照文件中的状态，而不是在中央节点执行本地目录扫描。快照文件示例：
+当某个 server 配置了 `collectorSnapshotPath` 后，该 server 下的实例会优先使用快照文件中的状态，而不是在中央节点执行本地目录扫描。collector-only 远端实例可以只填写 `id` 和 `name`，不需要在中央 registry 中填写远端 `openclawHome` 或 `workspaceRoot`；中央会自动生成仅用于内部标识的 `/collector/<serverId>/<instanceId>/config` 路径。快照文件示例：
 
 ```json
 {

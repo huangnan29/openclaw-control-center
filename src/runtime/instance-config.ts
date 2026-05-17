@@ -129,16 +129,20 @@ function collectInstanceConfigs(input: {
 
     input.seenIds.add(id);
 
-    const instanceIssues = validateInstanceEntry(entry, id);
+    const instanceIssues = validateInstanceEntry(entry, id, {
+      allowCollectorOnly: Boolean(input.server?.collectorSnapshotPath),
+    });
     if (instanceIssues.length > 0) {
       input.issues.push(...instanceIssues);
       continue;
     }
 
     const name = readTrimmedString(entry.name) ?? readTrimmedString(entry.label) ?? id;
-    const openclawHome = readTrimmedString(entry.openclawHome) as string;
+    const openclawHome =
+      readTrimmedString(entry.openclawHome) ??
+      (input.server?.collectorSnapshotPath ? join("/collector", input.server.id, id, "config") : undefined);
     const gatewayUrl = readTrimmedString(entry.gatewayUrl) ?? input.inheritedGatewayUrl ?? DEFAULT_GATEWAY_URL;
-    const openclawConfigPath = readTrimmedString(entry.openclawConfigPath) ?? join(openclawHome, "openclaw.json");
+    const openclawConfigPath = readTrimmedString(entry.openclawConfigPath) ?? join(openclawHome as string, "openclaw.json");
     const workspaceRoot = readTrimmedString(entry.workspaceRoot);
 
     input.instances.push({
@@ -154,7 +158,7 @@ function collectInstanceConfigs(input: {
           }
         : {}),
       gatewayUrl,
-      openclawHome,
+      openclawHome: openclawHome as string,
       openclawConfigPath,
       ...(workspaceRoot ? { workspaceRoot } : {}),
       readonly: readBoolean(entry.readonly, true),
@@ -220,7 +224,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function validateInstanceEntry(entry: Record<string, unknown>, id: string): OpenClawInstanceConfigIssue[] {
+function validateInstanceEntry(
+  entry: Record<string, unknown>,
+  id: string,
+  options: { allowCollectorOnly?: boolean } = {},
+): OpenClawInstanceConfigIssue[] {
   const issues: OpenClawInstanceConfigIssue[] = [];
   if (entry.name !== undefined && readTrimmedString(entry.name) === undefined) {
     issues.push({ message: `invalid name for id: ${id}` });
@@ -230,9 +238,9 @@ function validateInstanceEntry(entry: Record<string, unknown>, id: string): Open
     issues.push({ message: `missing name for id: ${id}` });
   }
 
-  if (entry.openclawHome === undefined) {
+  if (entry.openclawHome === undefined && !options.allowCollectorOnly) {
     issues.push({ message: `missing openclawHome for id: ${id}` });
-  } else if (readTrimmedString(entry.openclawHome) === undefined) {
+  } else if (entry.openclawHome !== undefined && readTrimmedString(entry.openclawHome) === undefined) {
     issues.push({ message: `invalid openclawHome for id: ${id}` });
   }
 
