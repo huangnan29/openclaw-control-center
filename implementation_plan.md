@@ -6,7 +6,7 @@
 
 ## 当前阶段
 
-当前阶段推进 **生产执行器最小骨架部署验证**：中央 control-center 已完成 dry-run API、dry-run UI、人工确认字段、审计检索视图、默认关闭的 live gate、测试用 mock executor、真实执行审计结果类型、dry-run 引用校验、灰度配置解析、rollout 决策响应、只读 readiness 卡片和生产执行器最小骨架。当前准备部署到 Tom 验证行为不变；Tom 不挂载生产执行器、不开启真实执行、不调用 OpenClaw 实例命令。
+当前阶段推进 **live 执行器挂载开关设计**：中央 control-center 已完成 dry-run API、dry-run UI、人工确认字段、审计检索视图、默认关闭的 live gate、测试用 mock executor、真实执行审计结果类型、dry-run 引用校验、灰度配置解析、rollout 决策响应、只读 readiness 卡片和生产执行器最小骨架。当前准备设计显式挂载开关；Tom 不启用该开关、不开启真实执行、不调用 OpenClaw 实例命令。
 
 ## 推进原则
 

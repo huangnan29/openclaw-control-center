@@ -17,16 +17,13 @@
 
 ## 当前下一步
 
-部署生产执行器最小骨架到 Tom 并验证行为不变：
+设计 live 执行器挂载开关：
 
-- Tom 继续保持 `MANAGED_ACTIONS_LIVE_ENABLED=false`。
-- Tom 继续保持 `READONLY_MODE=true`。
-- Tom 不配置生产执行器。
-- `/api/managed-actions/readiness` 返回 `liveExecutionAttempted=false`。
-- `/api/managed-actions/readiness` 继续返回 `executor.productionWired=false`。
-- 页面出现 `真实执行上线条件`，但不出现真实执行入口。
-- 页面不提供执行按钮。
-- 页面不触发 live API。
+- 新增显式生产执行器挂载配置，默认关闭。
+- 关闭时 live 路由行为完全不变。
+- 关闭时 readiness 仍显示 `executor.productionWired=false`。
+- 打开配置也必须继续受 live gate、dry-run 引用、rollout、确认短语共同约束。
+- Tom 暂不启用该开关。
 
 ## 最近完成
 
@@ -207,7 +204,13 @@
 - 已验证该骨架当前仅被测试引用，未接入 live 路由。
 - 已验证 `npm test -- test/managed-action-executor.test.ts test/managed-action-live-readiness.test.ts test/managed-actions-dry-run.test.ts test/phase9-routes-commands.test.ts test/readonly-multi-instance-safety.test.ts test/multi-instance-readonly.test.ts test/ui-render-smoke.test.ts`。
 - 已验证 `npm run build`。
+- 已提交并推送 `ce71ff0 feat: add production managed action executor skeleton`。
+- 已部署到 Tom，并验证运行提交 `ce71ff0`。
+- 已验证 Tom `healthcheck.sh` 通过，5 个 gateway 健康端口通过，容器只读边界通过。
+- 已验证 Tom readiness 仍返回 `status=blocked`、`liveExecutionAvailable=false`、`liveExecutionAttempted=false`、`mutatesOpenClawInstance=false`。
+- 已验证 Tom readiness 仍返回 `executor.productionWired=false`、`executor.status=missing`。
+- 已验证 Tom 总览页仍无 `/api/managed-actions/live` 前端调用，也无真实执行确认短语。
 
 ## 阶段完成后的下一步
 
-部署 Tom 验证生产执行器骨架不改变运行行为；通过后，进入 live 执行器挂载开关设计，仍保持默认禁用、无页面执行入口。
+live 执行器挂载开关设计：只允许通过显式配置把生产执行器接到 live 路由，默认关闭；Tom 暂不启用。
