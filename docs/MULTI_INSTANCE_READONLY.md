@@ -106,3 +106,19 @@ LOCAL_TOKEN_AUTH_REQUIRED=true
 ## 回滚
 
 如果多实例配置异常，先移除 `OPENCLAW_INSTANCES_FILE` / `OPENCLAW_INSTANCES_JSON` 并重启控制中心。系统会回退到单实例 fallback 配置，但只要 `READONLY_MODE=true`，写接口仍会保持禁用。
+
+## Tom 灰度运维脚本
+
+Tom 的长期灰度部署可以使用 `ops/tom-readonly/` 下的脚本：
+
+- `healthcheck.sh`：检查 gateway、只读页面、写接口 403、容器端口、`privileged`、`docker.sock` 和实例只读挂载。
+- `update.sh`：拉取 `multi-instance-readonly-control-center` 分支，重建控制中心容器，并自动运行健康检查。
+- `rollback.sh`：回滚到指定提交；不传提交时使用最近一次更新前记录的 `previous-good.commit`。
+
+推荐把脚本安装到 Tom 的 `/srv/openclaw-control-center-readonly`，然后每次升级前后执行：
+
+```bash
+cd /srv/openclaw-control-center-readonly
+./healthcheck.sh
+./update.sh
+```
