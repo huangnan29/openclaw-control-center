@@ -183,6 +183,22 @@ function readLatestReport() {
   }
 }
 
+function parseLiveWindowStatus(result) {
+  const combined = `${result.stdout}\n${result.stderr}`;
+  return {
+    exitCode: result.exitCode,
+    readonlyMode: firstMatch(combined, /READONLY_MODE=([^\s]+)/) || "unknown",
+    liveEnabled: firstMatch(combined, /MANAGED_ACTIONS_LIVE_ENABLED=([^\s]+)/) || "unknown",
+    executorEnabled: firstMatch(combined, /MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED=([^\s]+)/) || "unknown",
+    rawLines: compactLines(combined, 80),
+  };
+}
+
+function firstMatch(text, pattern) {
+  const match = String(text || "").match(pattern);
+  return match ? match[1] : undefined;
+}
+
 function formatError(error) {
   return error instanceof Error ? error.message : String(error);
 }
@@ -404,13 +420,25 @@ function runApproved() {
 function verifyCompleted() {
   const readinessResult = run(scripts.readiness, ["check"]);
   const readiness = stage(readinessResult, "live healthcheck readiness");
+  const liveWindowStatusResult = run(scripts.liveWindow, ["status"]);
+  const liveWindowStatus = parseLiveWindowStatus(liveWindowStatusResult);
   const latestReport = readLatestReport();
   const report = latestReport.report || {};
   const issues = [];
   const readinessStatus = readiness.report?.status || "unknown";
-  if (readinessResult.exitCode !== 0 || readinessStatus !== "approval_consumed") {
+  const reportProvesCompletion = latestReport.status === "read"
+    && report.status === "passed"
+    && report.approval?.consumed === true
+    && report.audit?.liveResultFound === true
+    && report.audit?.liveExecution === true
+    && report.audit?.mutatesOpenClawInstance === false
+    && report.impact?.ok === true;
+  if ((readinessResult.exitCode !== 0 || readinessStatus !== "approval_consumed") && !reportProvesCompletion) {
     issues.push(`readiness 不是 approval_consumed：${readinessStatus}`);
   }
+  if (liveWindowStatus.readonlyMode !== "true") issues.push(`live window 未恢复只读：READONLY_MODE=${liveWindowStatus.readonlyMode}`);
+  if (liveWindowStatus.liveEnabled === "true") issues.push("live gate 仍处于开启状态");
+  if (liveWindowStatus.executorEnabled === "true") issues.push("live executor 仍处于开启状态");
   if (latestReport.status !== "read") {
     issues.push(...(Array.isArray(latestReport.issues) ? latestReport.issues : [`报告状态异常：${latestReport.status}`]));
   }
@@ -429,7 +457,7 @@ function verifyCompleted() {
     mode: "verify-completed",
     generatedAt: new Date().toISOString(),
     target: { instanceId, action: "healthcheck", operator },
-    stages: { readiness, latestReport },
+    stages: { readiness, liveWindowStatus, latestReport },
     issues,
     nextCommands: verified
       ? [

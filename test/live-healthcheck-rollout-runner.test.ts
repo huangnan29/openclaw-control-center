@@ -19,6 +19,7 @@ async function writeHarness(
     dryRunReady?: boolean;
     readinessStatus?: "waiting_human_approval" | "approved_ready_for_live_window";
     alreadyCompleted?: boolean;
+    completedReportOnly?: boolean;
     reportReady?: boolean;
   } = {},
 ) {
@@ -33,8 +34,8 @@ async function writeHarness(
   await mkdir(join(deployDir, "runtime"), { recursive: true });
   await mkdir(reportDir, { recursive: true });
   await mkdir(scriptDir, { recursive: true });
-  if (options.alreadyCompleted === true) {
-    await writeFile(consumedFile, "consumed\n", "utf8");
+  if (options.alreadyCompleted === true || options.completedReportOnly === true) {
+    if (options.alreadyCompleted === true) await writeFile(consumedFile, "consumed\n", "utf8");
     if (reportReady) {
       await writeFile(
         join(reportDir, "live-healthcheck-report-20260517T000000+0000.json"),
@@ -164,6 +165,14 @@ JSON
     `#!/usr/bin/env bash
 set -euo pipefail
 printf 'window %s confirm-window=%s confirm-live=%s token=%s\\n' "$*" "\${CONFIRM_LIVE_HEALTHCHECK_WINDOW:-}" "\${CONFIRM_LIVE_HEALTHCHECK:-}" "\${LOCAL_API_TOKEN:-}" >> "${logFile}"
+if [ "\${1:-status}" = "status" ]; then
+  cat <<'TEXT'
+READONLY_MODE=true
+MANAGED_ACTIONS_LIVE_ENABLED=<unset>
+MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED=<unset>
+TEXT
+  exit 0
+fi
 touch "${consumedFile}"
 cat > "${reportDir}/live-healthcheck-report-20260517T010000+0000.json" <<'JSON'
 {
@@ -357,11 +366,34 @@ test("live healthcheck rollout runner verify-completed 只读验收已完成演�
 
     assert.equal(report.status, "verified_live_healthcheck_completed");
     assert.equal(report.stages.readiness.report.status, "approval_consumed");
+    assert.equal(report.stages.liveWindowStatus.readonlyMode, "true");
     assert.equal(report.stages.latestReport.report.status, "passed");
     assert.equal(report.safety.opensLiveGate, false);
     assert.equal(report.safety.callsManagedActionsLiveApi, false);
     assert.equal(report.safety.writesOpenClawInstanceDirs, false);
     assert.match(log, /readiness check/);
+    assert.doesNotMatch(log, /window run/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("live healthcheck rollout runner verify-completed 在后续部署导致 readiness 阻塞时仍以 passed 报告验收", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-live-rollout-runner-verify-report-"));
+  try {
+    const harness = await writeHarness(dir, { completedReportOnly: true });
+    const report = runRunner(harness, "verify-completed");
+    const log = await readFile(harness.logFile, "utf8");
+
+    assert.equal(report.status, "verified_live_healthcheck_completed");
+    assert.equal(report.stages.readiness.report.status, "waiting_human_approval");
+    assert.equal(report.stages.latestReport.report.status, "passed");
+    assert.equal(report.stages.latestReport.report.approval.consumed, true);
+    assert.equal(report.stages.liveWindowStatus.readonlyMode, "true");
+    assert.equal(report.safety.opensLiveGate, false);
+    assert.equal(report.safety.callsManagedActionsLiveApi, false);
+    assert.match(log, /readiness check/);
+    assert.match(log, /window status/);
     assert.doesNotMatch(log, /window run/);
   } finally {
     await rm(dir, { recursive: true, force: true });
