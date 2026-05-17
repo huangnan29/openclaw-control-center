@@ -135,6 +135,8 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   const env = readFileSync(path.join(ROOT, ".env.example"), "utf8");
   const healthcheck = readFileSync(path.join(ROOT, "ops", "tom-readonly", "healthcheck.sh"), "utf8");
   const cron = path.join(ROOT, "ops", "tom-readonly", "install-collector-cron.sh");
+  const liveHealthcheckSmoke = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-smoke.sh");
+  const liveHealthcheckRollout = path.join(ROOT, "ops", "tom-readonly", "managed-action-healthcheck-rollout.example.json");
 
   assert(doc.includes("OPENCLAW_INSTANCES_FILE"));
   assert(doc.includes("\"servers\""));
@@ -148,7 +150,15 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(doc.includes("不挂载 /var/run/docker.sock"));
   assert(existsSync(path.join(ROOT, "ops", "tom-readonly", "collector-snapshot.sh")));
   assert(existsSync(cron));
+  assert(existsSync(liveHealthcheckSmoke));
+  assert(existsSync(liveHealthcheckRollout));
   assert.match(readFileSync(cron, "utf8"), /OPENCLAW_COLLECTOR_CRON_BEGIN/);
+  assert.match(readFileSync(liveHealthcheckSmoke, "utf8"), /CONFIRM_LIVE_HEALTHCHECK/);
+  assert.match(readFileSync(liveHealthcheckSmoke, "utf8"), /LIVE-ACTION-APPROVED/);
+  assert.match(readFileSync(liveHealthcheckSmoke, "utf8"), /DRY-RUN-ONLY/);
+  assert.match(readFileSync(liveHealthcheckSmoke, "utf8"), /set \+x/);
+  assert.match(readFileSync(liveHealthcheckRollout, "utf8"), /"action": "healthcheck"/);
+  assert.match(readFileSync(liveHealthcheckRollout, "utf8"), /"risk": "low"/);
   assert(healthcheck.includes("COLLECTOR_SNAPSHOT_MAX_AGE_SECONDS"));
   assert(compose.includes("OPENCLAW_INSTANCES_FILE"));
   assert(env.includes("OPENCLAW_INSTANCES_JSON"));

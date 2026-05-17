@@ -15,6 +15,8 @@
 - `install-collector-cron.sh`：幂等安装 Tom collector 快照定时任务，只更新 crontab 中的 OpenClaw 标记块。
 - `update.sh`：拉取 `multi-instance-readonly-control-center` 分支，重建控制中心容器，随后执行健康检查。
 - `rollback.sh`：回滚到指定提交；如果不传提交，则使用最近一次 `update.sh` 记录的 `previous-good.commit`。
+- `managed-action-healthcheck-rollout.example.json`：只读 healthcheck live 演练的 rollout 样板，不会被默认加载。
+- `live-healthcheck-smoke.sh`：手动 live healthcheck 演练脚本；只有显式提供本地令牌和确认环境变量才会调用 live API。
 
 ## Tom 上的常用命令
 
@@ -35,6 +37,16 @@ SERVER_ID=tom-oracle OUTPUT_PATH=/app/runtime/collectors/tom-oracle/snapshot.jso
 OPENCLAW_COLLECTOR_CRON_SCHEDULE="*/2 * * * *" ./install-collector-cron.sh
 COLLECTOR_SNAPSHOT_MAX_AGE_SECONDS=300 ./healthcheck.sh
 BRANCH=multi-instance-readonly-control-center ./update.sh
+```
+
+只读 healthcheck live 演练必须先人工准备 live gate、executor 和 rollout 配置；默认 Tom 不启用。确认后才可手动运行：
+
+```bash
+CONFIRM_LIVE_HEALTHCHECK=I_UNDERSTAND_THIS_CALLS_LIVE_API \
+LOCAL_API_TOKEN=<本地令牌> \
+INSTANCE_ID=tom \
+OPERATOR=Anan \
+./live-healthcheck-smoke.sh
 ```
 
 ## 验收标准

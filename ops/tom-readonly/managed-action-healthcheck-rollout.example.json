@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "rules": [
+    {
+      "action": "healthcheck",
+      "instanceId": "tom",
+      "operators": ["Anan"],
+      "risk": "low",
+      "enabled": true,
+      "maxDryRunAgeMinutes": 60
+    }
+  ]
+}
