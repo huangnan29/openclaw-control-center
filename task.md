@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-真实执行白名单闸门设计：新增默认关闭的 live gate API 和配置项，用于未来灰度真实执行前的安全校验；当前不实现执行器。
+真实执行前 mock executor 测试层：新增执行器接口和测试用 mock healthcheck，证明执行链必须先通过 live gate，生产路径仍不接执行器。
 
 ## 本轮不做
 
@@ -17,10 +17,10 @@
 
 ## 当前下一步
 
-设计单个低风险动作的 mock executor 测试：
+部署 mock executor 接口代码到 Tom：
 
-- 只在测试环境验证执行器接口形状。
-- 证明真实执行链必须经过 dry-run 申请、live gate、白名单和二次确认。
+- 确认 Tom 仍返回 `blocked_disabled`。
+- 确认页面仍无真实执行入口。
 - 不在 Tom 开启真实执行。
 - 不调用任何 OpenClaw 实例命令。
 
@@ -120,7 +120,14 @@
 - 已验证 Tom live gate 返回 `liveExecution=false`、`enabled=false`、`readonlyMode=true`、`allowedActions=[]`。
 - 已验证 Tom 页面仍只有 `管理动作预览` 与 `管理动作审计`，没有真实执行入口。
 - 已验证 Tom 审计日志写入 `managed_action_live_blocked`，且 `liveExecution=false`。
+- 已新增执行器接口：`src/runtime/managed-action-executor.ts`。
+- 已新增测试用 mock healthcheck executor。
+- 已验证 gate 未 ready 时不会调用执行器。
+- 已验证只有测试环境传入 mock executor 且 `gateReady=true` 时才会得到 `executed_mock`。
+- 已验证未注册动作返回 `executor_missing` 且 `liveExecution=false`。
+- 已验证 `npm test -- test/managed-action-executor.test.ts test/managed-actions-dry-run.test.ts test/phase9-routes-commands.test.ts test/readonly-multi-instance-safety.test.ts test/multi-instance-readonly.test.ts test/ui-render-smoke.test.ts`。
+- 已验证 `npm run build`。
 
 ## 阶段完成后的下一步
 
-mock executor 测试层：先为健康检查动作设计执行器接口和纯测试 mock，证明真实执行链必须经过 dry-run 申请、live gate、白名单和二次确认；Tom 仍保持禁用。
+部署 Tom 验证 mock executor 接口代码不改变运行行为；通过后，下一步设计真实执行审计结果类型，但仍不启用执行。

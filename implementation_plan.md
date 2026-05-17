@@ -6,7 +6,7 @@
 
 ## 当前阶段
 
-当前阶段推进 **真实执行前 mock executor 测试层**：中央 control-center 已完成 dry-run API、dry-run UI、人工确认字段、审计检索视图和默认关闭的 live gate。Tom 已验证 live gate 关闭；下一步只在测试环境设计执行器接口与 mock，不在 Tom 开启真实执行，不调用 OpenClaw 实例命令。
+当前阶段推进 **真实执行前 mock executor 测试层**：中央 control-center 已完成 dry-run API、dry-run UI、人工确认字段、审计检索视图和默认关闭的 live gate。当前只新增执行器接口和测试用 mock healthcheck；Tom 不接入执行器、不开启真实执行、不调用 OpenClaw 实例命令。
 
 ## 推进原则
 
