@@ -239,6 +239,29 @@ OPENCLAW_COLLECTOR_CRON_SCHEDULE="*/2 * * * *" ./install-collector-cron.sh
 
 `healthcheck.sh` 会读取 server registry 中的 `collectorSnapshotPath`，并用 `COLLECTOR_SNAPSHOT_MAX_AGE_SECONDS` 检查快照是否存在、可解析、包含实例且未过期。默认最大年龄是 300 秒。
 
+### 当前 Oracle 新增实例
+
+当前生产拓扑默认只有 Tom 这一台 Oracle。新增同一台 Oracle 上的 OpenClaw 实例时，先把新实例目录准备好，再用本机实例注册脚本审查并写入 control-center 自己的 registry 与 compose 只读挂载：
+
+```bash
+cd /srv/openclaw-control-center-readonly
+cp repo/ops/tom-readonly/register-local-instance.example.json runtime/register-local-instance.json
+# 编辑 runtime/register-local-instance.json：
+# - instance.id：实例唯一 id，例如 newbot
+# - instance.name：页面展示名称
+# - instance.gatewayUrl：新实例 gateway，例如 ws://host.docker.internal:18799
+# - instance.configDir：宿主机上的新实例 config 目录
+# - instance.workspaceDir：宿主机上的新实例 workspace 目录
+repo/ops/tom-readonly/register-local-instance.sh plan runtime/register-local-instance.json
+CONFIRM_LOCAL_INSTANCE_REGISTER=I_UNDERSTAND_THIS_ONLY_UPDATES_CONTROL_CENTER_LOCAL_REGISTRY \
+repo/ops/tom-readonly/register-local-instance.sh apply runtime/register-local-instance.json
+docker compose up -d control-center
+./collector-snapshot.sh
+./healthcheck.sh
+```
+
+`plan` 只读取配置、Tom registry、`docker-compose.yml` 和实例目录元数据，不写文件。`apply` 会先备份 `config/instances.json` 与 `docker-compose.yml`，再把新实例写入当前 `tom-oracle` server，并加入形如 `/srv/openclaw-new/config:/instances/newbot/config:ro` 的只读挂载。该脚本不会修改任何 OpenClaw 实例目录，不会重启任何 OpenClaw 实例，不会调用 managed action live API。控制中心容器需要重新 `up -d` 才能看到新增挂载；这只重建 control-center 容器，不会重启被监控的 OpenClaw 实例。
+
 ### 跨服务器只读拉取
 
 中央节点可以用 Tom 运维脚本拉取其他 Oracle 服务器已经生成好的 collector snapshot。这个步骤只通过 SSH 读取远端 JSON 文件，再写入中央节点自己的 `runtime/collectors` 目录；它不会运行远端 collector，不会修改远端 OpenClaw 实例目录，也不会调用 managed action live API。

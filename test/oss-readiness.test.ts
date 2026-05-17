@@ -161,6 +161,8 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   const goLiveGate = path.join(ROOT, "ops", "tom-readonly", "go-live-gate.sh");
   const remoteCollectorPull = path.join(ROOT, "ops", "tom-readonly", "remote-collector-pull.sh");
   const remoteCollectorPullExample = path.join(ROOT, "ops", "tom-readonly", "remote-collector-pull.sources.example.json");
+  const registerLocalInstance = path.join(ROOT, "ops", "tom-readonly", "register-local-instance.sh");
+  const registerLocalInstanceExample = path.join(ROOT, "ops", "tom-readonly", "register-local-instance.example.json");
   const registerRemoteCollector = path.join(ROOT, "ops", "tom-readonly", "register-remote-collector.sh");
   const registerRemoteCollectorExample = path.join(ROOT, "ops", "tom-readonly", "register-remote-collector.example.json");
   const collectorNodeBootstrap = path.join(ROOT, "ops", "collector-node", "bootstrap-collector-node.sh");
@@ -197,6 +199,8 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(doc.includes("I_UNDERSTAND_THIS_ONLY_READS_REMOTE_PREREQUISITES"));
   assert(doc.includes("remote-collector-pull.sh"));
   assert(doc.includes("I_UNDERSTAND_THIS_ONLY_READS_REMOTE_COLLECTOR_SNAPSHOTS"));
+  assert(doc.includes("register-local-instance.sh"));
+  assert(doc.includes("I_UNDERSTAND_THIS_ONLY_UPDATES_CONTROL_CENTER_LOCAL_REGISTRY"));
   assert(doc.includes("register-remote-collector.sh"));
   assert(doc.includes("I_UNDERSTAND_THIS_ONLY_UPDATES_CONTROL_CENTER_REGISTRY"));
   assert(doc.includes("install-collector-cron.sh"));
@@ -232,6 +236,8 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(existsSync(goLiveGate));
   assert(existsSync(remoteCollectorPull));
   assert(existsSync(remoteCollectorPullExample));
+  assert(existsSync(registerLocalInstance));
+  assert(existsSync(registerLocalInstanceExample));
   assert(existsSync(registerRemoteCollector));
   assert(existsSync(registerRemoteCollectorExample));
   assert(existsSync(collectorNodeBootstrap));
@@ -405,6 +411,17 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(remoteCollectorPullText, /runtime.*collectors/);
   const remoteCollectorExample = JSON.parse(readFileSync(remoteCollectorPullExample, "utf8"));
   assert.equal(remoteCollectorExample.sources[0]?.enabled, false);
+  const registerLocalInstanceText = readFileSync(registerLocalInstance, "utf8");
+  assert.match(registerLocalInstanceText, /CONFIRM_LOCAL_INSTANCE_REGISTER/);
+  assert.match(registerLocalInstanceText, /I_UNDERSTAND_THIS_ONLY_UPDATES_CONTROL_CENTER_LOCAL_REGISTRY/);
+  assert.match(registerLocalInstanceText, /updatesControlCenterRegistryAndComposeOnly: true/);
+  assert.match(registerLocalInstanceText, /writesOpenClawInstanceDirs: false/);
+  assert.match(registerLocalInstanceText, /restartsOpenClawInstance: false/);
+  assert.match(registerLocalInstanceText, /callsLiveApi: false/);
+  assert.doesNotMatch(registerLocalInstanceText, /api\/managed-actions\/live/);
+  const registerLocalInstanceConfig = JSON.parse(readFileSync(registerLocalInstanceExample, "utf8"));
+  assert.equal(registerLocalInstanceConfig.server.id, "tom-oracle");
+  assert.equal(registerLocalInstanceConfig.replaceExisting, false);
   const registerRemoteCollectorText = readFileSync(registerRemoteCollector, "utf8");
   assert.match(registerRemoteCollectorText, /CONFIRM_REMOTE_COLLECTOR_REGISTER/);
   assert.match(registerRemoteCollectorText, /I_UNDERSTAND_THIS_ONLY_UPDATES_CONTROL_CENTER_REGISTRY/);

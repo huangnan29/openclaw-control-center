@@ -24,6 +24,8 @@
 - `go-live-gate.sh`：最终上线总闸门，默认 `OPENCLAW_TOPOLOGY_MODE=local-only`，汇总 Tom 本机实例 healthcheck、dry-run 证据和 live 管理动作 readiness；显式 `cross-server` 时才把远端 collector 接入作为阻塞项。
 - `remote-collector-pull.sh`：从其他 Oracle 服务器只读拉取已经生成好的 collector JSON，校验后写入本机 `runtime/collectors`。
 - `remote-collector-pull.sources.example.json`：远端 collector 拉取配置样板，默认 `enabled=false`。
+- `register-local-instance.sh`：把当前 Oracle 上的新 OpenClaw 实例注册到 Tom `config/instances.json`，并在 `docker-compose.yml` 中加入只读挂载；默认 `plan` 不写入。
+- `register-local-instance.example.json`：本机实例注册配置样板。
 - `register-remote-collector.sh`：把已经拉取并校验过的远端 collector snapshot 注册到 Tom `config/instances.json`，默认 `plan` 不写入。
 - `register-remote-collector.example.json`：远端 collector 注册配置样板。
 - `update.sh`：拉取 `multi-instance-readonly-control-center` 分支，重建控制中心容器，随后执行健康检查。
@@ -84,6 +86,10 @@ repo/ops/tom-readonly/remote-collector-pull.sh plan runtime/remote-collector-pul
 CONFIRM_REMOTE_COLLECTOR_PULL=I_UNDERSTAND_THIS_ONLY_READS_REMOTE_COLLECTOR_SNAPSHOTS \
 repo/ops/tom-readonly/remote-collector-pull.sh pull runtime/remote-collector-pull.sources.json
 repo/ops/tom-readonly/remote-collector-pull.sh status runtime/remote-collector-pull.sources.json
+cp repo/ops/tom-readonly/register-local-instance.example.json runtime/register-local-instance.json
+repo/ops/tom-readonly/register-local-instance.sh plan runtime/register-local-instance.json
+CONFIRM_LOCAL_INSTANCE_REGISTER=I_UNDERSTAND_THIS_ONLY_UPDATES_CONTROL_CENTER_LOCAL_REGISTRY \
+repo/ops/tom-readonly/register-local-instance.sh apply runtime/register-local-instance.json
 repo/ops/tom-readonly/register-remote-collector.sh plan runtime/register-remote-collector.json
 CONFIRM_REMOTE_COLLECTOR_REGISTER=I_UNDERSTAND_THIS_ONLY_UPDATES_CONTROL_CENTER_REGISTRY \
 repo/ops/tom-readonly/register-remote-collector.sh apply runtime/register-remote-collector.json
@@ -106,6 +112,22 @@ OPENCLAW_COLLECTOR_CRON_SCHEDULE="*/2 * * * *" ./install-collector-cron.sh
 COLLECTOR_SNAPSHOT_MAX_AGE_SECONDS=300 ./healthcheck.sh
 BRANCH=multi-instance-readonly-control-center ./update.sh
 ```
+
+当前只有一台 Oracle 时，新增实例优先走本机注册入口：
+
+```bash
+cd /srv/openclaw-control-center-readonly
+cp repo/ops/tom-readonly/register-local-instance.example.json runtime/register-local-instance.json
+# 编辑 runtime/register-local-instance.json，填入新实例 id/name/gatewayUrl/configDir/workspaceDir。
+repo/ops/tom-readonly/register-local-instance.sh plan runtime/register-local-instance.json
+CONFIRM_LOCAL_INSTANCE_REGISTER=I_UNDERSTAND_THIS_ONLY_UPDATES_CONTROL_CENTER_LOCAL_REGISTRY \
+repo/ops/tom-readonly/register-local-instance.sh apply runtime/register-local-instance.json
+docker compose up -d control-center
+./collector-snapshot.sh
+./healthcheck.sh
+```
+
+`register-local-instance.sh plan` 只读取配置、registry、compose 和实例目录元数据，不写文件；`apply` 会先备份 `config/instances.json` 与 `docker-compose.yml`，再把新实例挂载为 `:ro` 并写入 registry。它不会修改任何 OpenClaw 实例目录，不会重启任何 OpenClaw 实例，不会调用 managed action live API。`docker compose up -d control-center` 只用于让控制中心容器重新加载新增的只读挂载。
 
 接第二台 Oracle 前，可以先在 Tom 生成一个可审查的 onboarding 接入包：
 

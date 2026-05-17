@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-单 Oracle 上线收口：把最终上线总闸门切到默认 `local-only` 拓扑，只管理当前 Oracle 上的实例；跨服务器远端凭据检查改为显式可选模式。
+单 Oracle 上线收口：把最终上线总闸门切到默认 `local-only` 拓扑，只管理当前 Oracle 上的实例；补齐本机新增实例的安全注册入口；跨服务器远端凭据检查改为显式可选模式。
 
 ## 本轮不做
 
@@ -25,7 +25,11 @@ Tom 单 Oracle 上线下一步：
   `ops/local/final-go-live-status.sh check`
 - 当前默认 `OPENCLAW_TOPOLOGY_MODE=local-only`，不要求第二台 Oracle host/key；如果未来要接第二台 Oracle，再显式运行：
   `OPENCLAW_TOPOLOGY_MODE=cross-server ops/local/final-go-live-status.sh check`
-- 本机实例扩展仍走 `config/instances.json` / collector snapshot 路径：新增实例目录只读挂载到 control-center 容器，再把实例写入 registry 并跑 `./healthcheck.sh`。
+- 本机实例扩展已走显式安全脚本：
+  `repo/ops/tom-readonly/register-local-instance.sh plan runtime/register-local-instance.json`
+  确认后再运行：
+  `CONFIRM_LOCAL_INSTANCE_REGISTER=I_UNDERSTAND_THIS_ONLY_UPDATES_CONTROL_CENTER_LOCAL_REGISTRY repo/ops/tom-readonly/register-local-instance.sh apply runtime/register-local-instance.json`
+  然后只重建 control-center 容器、刷新 collector snapshot，并跑 `./healthcheck.sh`。
 - 当前 managed action dry-run 证据已存在；local-only healthcheck 通过后，下一阶段是人工 approval、白名单和一次性 live healthcheck 窗口。
 
 后续跨服务器扩展预留步骤：

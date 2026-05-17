@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "server": {
+    "id": "tom-oracle",
+    "name": "Tom Oracle",
+    "host": "146.235.226.66"
+  },
+  "instance": {
+    "id": "new-instance",
+    "name": "New Instance",
+    "gatewayUrl": "ws://host.docker.internal:18799",
+    "configDir": "/srv/openclaw-new/config",
+    "workspaceDir": "/srv/openclaw-new/workspace"
+  },
+  "replaceExisting": false
+}
