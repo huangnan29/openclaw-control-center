@@ -492,6 +492,9 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   const liveHealthcheckRolloutRunnerText = readFileSync(liveHealthcheckRolloutRunner, "utf8");
   assert.match(liveHealthcheckRolloutRunnerText, /live-healthcheck-rollout-runner\.sh status/);
   assert.match(liveHealthcheckRolloutRunnerText, /live-healthcheck-rollout-runner\.sh prepare/);
+  assert.match(liveHealthcheckRolloutRunnerText, /live-healthcheck-rollout-runner\.sh run-approved/);
+  assert.match(liveHealthcheckRolloutRunnerText, /CONFIRM_LIVE_HEALTHCHECK_RUNNER/);
+  assert.match(liveHealthcheckRolloutRunnerText, /approved_ready_for_live_window/);
   assert.match(liveHealthcheckRolloutRunnerText, /live-healthcheck-readiness\.sh/);
   assert.match(liveHealthcheckRolloutRunnerText, /managed-action-dry-run-gate\.sh/);
   assert.match(liveHealthcheckRolloutRunnerText, /live-healthcheck-approval-packet\.sh/);

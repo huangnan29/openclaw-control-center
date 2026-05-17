@@ -4,7 +4,8 @@ set +x
 
 # live healthcheck 演练预备 runner。
 # status 只读取 readiness；prepare 只准备 approval 模板、生成/校验证据包并刷新 readiness。
-# 本脚本不会批准 approval，不会打开 live gate，不会调用 managed-actions live API。
+# run-approved 只在 approval 已批准、证据包通过且显式确认后执行一次性演练窗口。
+# 本脚本不会批准 approval，不会修改任何 OpenClaw 实例目录。
 
 DEPLOY_DIR="${DEPLOY_DIR:-/srv/openclaw-control-center-readonly}"
 SCRIPT_DIR="${SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
@@ -26,6 +27,7 @@ usage() {
 用法：
   live-healthcheck-rollout-runner.sh status
   live-healthcheck-rollout-runner.sh prepare
+  live-healthcheck-rollout-runner.sh run-approved
 
 说明：
   status 只调用 live-healthcheck-readiness.sh status，不写文件。
@@ -34,12 +36,17 @@ usage() {
     2. 准备 approval 模板，已存在则不覆盖。
     3. 生成并校验批准前证据包。
     4. 运行 live-healthcheck-readiness.sh check 汇总下一步。
+  run-approved 只在 readiness 为 approved_ready_for_live_window 后，调用一次性演练窗口。
 
 安全边界：
   - 不批准 approval。
-  - 不打开 live gate。
-  - 不调用 managed-actions live API。
+  - status/prepare 不打开 live gate，不调用 managed-actions live API。
+  - run-approved 必须显式确认，并只允许执行已批准的 healthcheck live 演练。
   - 不修改任何 OpenClaw 实例目录。
+
+run-approved 必须设置：
+  CONFIRM_LIVE_HEALTHCHECK_RUNNER=I_UNDERSTAND_THIS_RUNS_APPROVED_LIVE_HEALTHCHECK
+  LOCAL_API_TOKEN=<本地令牌>
 TEXT
 }
 
@@ -62,15 +69,18 @@ const topologyMode = process.env.OPENCLAW_TOPOLOGY_MODE || "local-only";
 const instanceId = process.env.INSTANCE_ID || "tom";
 const operator = process.env.OPERATOR || "Anan";
 const approvalFile = path.join(deployDir, "runtime", "live-healthcheck-approval.json");
+const runnerConfirm = process.env.CONFIRM_LIVE_HEALTHCHECK_RUNNER || "";
+const localApiToken = process.env.LOCAL_API_TOKEN || "";
 
 const scripts = {
   readiness: process.env.LIVE_HEALTHCHECK_RUNNER_READINESS_SCRIPT || path.join(scriptDir, "live-healthcheck-readiness.sh"),
   dryRunGate: process.env.LIVE_HEALTHCHECK_RUNNER_DRY_RUN_GATE_SCRIPT || path.join(scriptDir, "managed-action-dry-run-gate.sh"),
   approval: process.env.LIVE_HEALTHCHECK_RUNNER_APPROVAL_SCRIPT || path.join(scriptDir, "live-healthcheck-approval.sh"),
   approvalPacket: process.env.LIVE_HEALTHCHECK_RUNNER_APPROVAL_PACKET_SCRIPT || path.join(scriptDir, "live-healthcheck-approval-packet.sh"),
+  liveWindow: process.env.LIVE_HEALTHCHECK_RUNNER_WINDOW_SCRIPT || path.join(scriptDir, "live-healthcheck-window.sh"),
 };
 
-function run(command, args) {
+function run(command, args, extraEnv = {}) {
   const result = spawnSync(command, args, {
     cwd: deployDir,
     env: {
@@ -79,6 +89,7 @@ function run(command, args) {
       OPENCLAW_TOPOLOGY_MODE: topologyMode,
       INSTANCE_ID: instanceId,
       OPERATOR: operator,
+      ...extraEnv,
     },
     encoding: "utf8",
     maxBuffer: 32 * 1024 * 1024,
@@ -133,12 +144,12 @@ function formatError(error) {
 
 function safety(extra = {}) {
   return {
-    writesControlCenterRuntimeOnly: mode === "prepare",
+    writesControlCenterRuntimeOnly: mode === "prepare" || mode === "run-approved",
     writesApprovalTemplateOnly: mode === "prepare",
     generatesApprovalPacket: mode === "prepare",
     approvesLiveHealthcheck: false,
-    opensLiveGate: false,
-    callsManagedActionsLiveApi: false,
+    opensLiveGate: mode === "run-approved",
+    callsManagedActionsLiveApi: mode === "run-approved",
     writesOpenClawInstanceDirs: false,
     restartsOpenClawInstances: false,
     ...extra,
@@ -236,10 +247,116 @@ function prepare() {
   };
 }
 
+function runApproved() {
+  const readinessResult = run(scripts.readiness, ["check"]);
+  const readiness = stage(readinessResult, "live healthcheck readiness");
+  const readinessStatus = readiness.report?.status || "unknown";
+  if (readinessResult.exitCode !== 0 || readinessStatus !== "approved_ready_for_live_window") {
+    return {
+      schemaVersion: 1,
+      status: "blocked_not_approved",
+      mode,
+      generatedAt: new Date().toISOString(),
+      target: { instanceId, action: "healthcheck", operator },
+      stages: { readiness },
+      issues: [`readiness 不是 approved_ready_for_live_window：${readinessStatus}`],
+      nextCommands: Array.isArray(readiness.report?.nextCommands) ? readiness.report.nextCommands : [],
+      safety: safety({
+        writesControlCenterRuntimeOnly: false,
+        opensLiveGate: false,
+        callsManagedActionsLiveApi: false,
+        blockedBeforeLive: true,
+      }),
+    };
+  }
+
+  if (runnerConfirm !== "I_UNDERSTAND_THIS_RUNS_APPROVED_LIVE_HEALTHCHECK") {
+    return {
+      schemaVersion: 1,
+      status: "blocked_confirmation_required",
+      mode,
+      generatedAt: new Date().toISOString(),
+      target: { instanceId, action: "healthcheck", operator },
+      stages: { readiness },
+      issues: ["必须设置 CONFIRM_LIVE_HEALTHCHECK_RUNNER=I_UNDERSTAND_THIS_RUNS_APPROVED_LIVE_HEALTHCHECK"],
+      nextCommands: [
+        "CONFIRM_LIVE_HEALTHCHECK_RUNNER=I_UNDERSTAND_THIS_RUNS_APPROVED_LIVE_HEALTHCHECK LOCAL_API_TOKEN=<本地令牌> repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh run-approved",
+      ],
+      safety: safety({
+        writesControlCenterRuntimeOnly: false,
+        opensLiveGate: false,
+        callsManagedActionsLiveApi: false,
+        blockedBeforeLive: true,
+      }),
+    };
+  }
+
+  if (!localApiToken) {
+    return {
+      schemaVersion: 1,
+      status: "blocked_local_token_required",
+      mode,
+      generatedAt: new Date().toISOString(),
+      target: { instanceId, action: "healthcheck", operator },
+      stages: { readiness },
+      issues: ["必须通过 LOCAL_API_TOKEN 提供本地令牌"],
+      nextCommands: [
+        "CONFIRM_LIVE_HEALTHCHECK_RUNNER=I_UNDERSTAND_THIS_RUNS_APPROVED_LIVE_HEALTHCHECK LOCAL_API_TOKEN=<本地令牌> repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh run-approved",
+      ],
+      safety: safety({
+        writesControlCenterRuntimeOnly: false,
+        opensLiveGate: false,
+        callsManagedActionsLiveApi: false,
+        blockedBeforeLive: true,
+      }),
+    };
+  }
+
+  const liveWindowResult = run(scripts.liveWindow, ["run"], {
+    CONFIRM_LIVE_HEALTHCHECK_WINDOW: "I_UNDERSTAND_THIS_TEMPORARILY_ENABLES_LIVE_GATE",
+    CONFIRM_LIVE_HEALTHCHECK: "I_UNDERSTAND_THIS_CALLS_LIVE_API",
+    LOCAL_API_TOKEN: localApiToken,
+  });
+  const liveWindow = {
+    command: liveWindowResult.command,
+    exitCode: liveWindowResult.exitCode,
+    stdoutLines: compactLines(liveWindowResult.stdout, 120),
+    stderrLines: compactLines(liveWindowResult.stderr, 120),
+    error: liveWindowResult.error,
+  };
+
+  return {
+    schemaVersion: 1,
+    status: liveWindowResult.exitCode === 0 ? "completed_live_healthcheck" : "failed_live_healthcheck",
+    mode,
+    generatedAt: new Date().toISOString(),
+    target: { instanceId, action: "healthcheck", operator },
+    stages: { readiness, liveWindow },
+    issues: liveWindowResult.exitCode === 0 ? [] : [`live healthcheck window 失败：exit=${liveWindowResult.exitCode}`],
+    nextCommands: liveWindowResult.exitCode === 0
+      ? [
+        "repo/ops/tom-readonly/live-healthcheck-readiness.sh check",
+        "repo/ops/tom-readonly/live-healthcheck-report.sh report <before.json> <after.json> runtime/live-healthcheck-approval.json",
+      ]
+      : [
+        "repo/ops/tom-readonly/live-healthcheck-window.sh status",
+        "repo/ops/tom-readonly/live-healthcheck-window.sh disable",
+      ],
+    safety: safety({
+      readsStatusOnly: false,
+      checkRunsHealthcheckOnly: true,
+      requiresApprovedReadiness: true,
+      requiresRunnerConfirmation: true,
+    }),
+  };
+}
+
 if (mode === "status") {
   console.log(JSON.stringify(statusOnly(), null, 2));
 } else if (mode === "prepare") {
   console.log(JSON.stringify(prepare(), null, 2));
+} else if (mode === "run-approved") {
+  console.log(JSON.stringify(runApproved(), null, 2));
 } else {
   console.error(`[失败] 未知模式：${mode}`);
   process.exit(2);
@@ -255,6 +372,9 @@ main() {
       ;;
     prepare)
       run_node "prepare"
+      ;;
+    run-approved)
+      run_node "run-approved"
       ;;
     -h|--help|help)
       usage

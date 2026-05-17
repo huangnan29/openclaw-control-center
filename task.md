@@ -44,6 +44,9 @@ Tom 单 Oracle 上线下一步：
 - 自动推进到人工批准前：
   `repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh prepare`
   该 runner 会检查 dry-run、准备 approval 模板、生成并校验证据包、刷新 readiness，然后停在人工批准前；不会批准 approval、不会打开 live gate。
+- 人工 approval 已批准后，自动执行一次性演练：
+  `CONFIRM_LIVE_HEALTHCHECK_RUNNER=I_UNDERSTAND_THIS_RUNS_APPROVED_LIVE_HEALTHCHECK LOCAL_API_TOKEN=<本地令牌> repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh run-approved`
+  该模式会先确认 readiness 为 `approved_ready_for_live_window`，否则不会打开 live gate。
 
 后续跨服务器扩展预留步骤：
 
@@ -133,6 +136,7 @@ Tom 单 Oracle 上线下一步：
 - 批准前先生成并校验 `live-healthcheck-approval-packet.sh generate/check` 证据包，确认总闸门、dry-run、approval、live window、当前 commit 和影响快照都在预期状态；`live-healthcheck-approval.sh approve` 已强制先校验证据包才写 approval，`live-healthcheck-window.sh enable/run` 也会先校验证据包，再校验 approval 文件。
 - 可用 `live-healthcheck-readiness.sh status/check` 汇总当前是否为 `waiting_human_approval` 或 `approved_ready_for_live_window`。
 - 可用 `live-healthcheck-rollout-runner.sh prepare` 自动完成证据包准备并停在人工批准前。
+- 人工批准后可用 `live-healthcheck-rollout-runner.sh run-approved` 自动执行一次性 healthcheck live 演练。
 - 推荐批准方式：
   `CONFIRM_APPROVAL_RECORD=I_APPROVE_LIVE_HEALTHCHECK_RECORD APPROVED_BY=Anan repo/ops/tom-readonly/live-healthcheck-approval.sh approve runtime/live-healthcheck-approval.json`
 - 当前 Tom 已生成 approval 草稿，状态为 `needs_manual_approval`。

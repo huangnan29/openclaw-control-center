@@ -13,11 +13,18 @@ async function writeExecutable(file: string, text: string) {
   await chmod(file, 0o755);
 }
 
-async function writeHarness(dir: string, options: { dryRunReady?: boolean } = {}) {
+async function writeHarness(
+  dir: string,
+  options: {
+    dryRunReady?: boolean;
+    readinessStatus?: "waiting_human_approval" | "approved_ready_for_live_window";
+  } = {},
+) {
   const deployDir = join(dir, "deploy");
   const scriptDir = join(dir, "scripts");
   const logFile = join(dir, "commands.log");
   const dryRunReady = options.dryRunReady !== false;
+  const readinessStatus = options.readinessStatus || "waiting_human_approval";
   await mkdir(join(deployDir, "runtime"), { recursive: true });
   await mkdir(scriptDir, { recursive: true });
 
@@ -29,11 +36,11 @@ printf 'readiness %s\\n' "$*" >> "${logFile}"
 cat <<'JSON'
 {
   "schemaVersion": 1,
-  "status": "waiting_human_approval",
+  "status": "${readinessStatus}",
   "target": { "instanceId": "tom", "action": "healthcheck", "operator": "Anan" },
   "stages": {
     "approvalPacket": { "report": { "status": "ready" } },
-    "approval": { "report": { "status": "needs_manual_approval" } },
+    "approval": { "report": { "status": "${readinessStatus === "approved_ready_for_live_window" ? "approved" : "needs_manual_approval"}" } },
     "liveWindow": { "readonlyMode": "true", "liveEnabled": "<unset>" }
   },
   "issues": [],
@@ -116,16 +123,28 @@ JSON
 `,
   );
 
+  await writeExecutable(
+    join(scriptDir, "live-healthcheck-window.sh"),
+    `#!/usr/bin/env bash
+set -euo pipefail
+printf 'window %s confirm-window=%s confirm-live=%s token=%s\\n' "$*" "\${CONFIRM_LIVE_HEALTHCHECK_WINDOW:-}" "\${CONFIRM_LIVE_HEALTHCHECK:-}" "\${LOCAL_API_TOKEN:-}" >> "${logFile}"
+cat <<'TEXT'
+live healthcheck window completed
+TEXT
+`,
+  );
+
   return { deployDir, scriptDir, logFile };
 }
 
-function runRunner(harness: Awaited<ReturnType<typeof writeHarness>>, mode: "status" | "prepare") {
+function runRunner(harness: Awaited<ReturnType<typeof writeHarness>>, mode: "status" | "prepare" | "run-approved", extraEnv: Record<string, string> = {}) {
   const output = execFileSync(SCRIPT, [mode], {
     env: {
       ...process.env,
       DEPLOY_DIR: harness.deployDir,
       SCRIPT_DIR: harness.scriptDir,
       OPENCLAW_TOPOLOGY_MODE: "local-only",
+      ...extraEnv,
     },
     encoding: "utf8",
   });
@@ -186,6 +205,65 @@ test("live healthcheck rollout runner prepare 在 dry-run 不满足时停止", a
     assert(report.issues.some((issue: string) => issue.includes("dry-run 证据未 ready")));
     assert.match(log, /dry-run status/);
     assert.doesNotMatch(log, /approval prepare|packet generate|readiness check|approve/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("live healthcheck rollout runner run-approved 未批准时不会打开窗口", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-live-rollout-runner-unapproved-"));
+  try {
+    const harness = await writeHarness(dir);
+    const report = runRunner(harness, "run-approved");
+    const log = await readFile(harness.logFile, "utf8");
+
+    assert.equal(report.status, "blocked_not_approved");
+    assert.equal(report.safety.opensLiveGate, false);
+    assert.equal(report.safety.callsManagedActionsLiveApi, false);
+    assert.match(log, /readiness check/);
+    assert.doesNotMatch(log, /window run/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("live healthcheck rollout runner run-approved 缺确认时不会打开窗口", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-live-rollout-runner-confirm-"));
+  try {
+    const harness = await writeHarness(dir, { readinessStatus: "approved_ready_for_live_window" });
+    const report = runRunner(harness, "run-approved");
+    const log = await readFile(harness.logFile, "utf8");
+
+    assert.equal(report.status, "blocked_confirmation_required");
+    assert.equal(report.safety.opensLiveGate, false);
+    assert.equal(report.safety.callsManagedActionsLiveApi, false);
+    assert.match(log, /readiness check/);
+    assert.doesNotMatch(log, /window run/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("live healthcheck rollout runner run-approved 在批准和确认后调用一次性窗口", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-live-rollout-runner-live-"));
+  try {
+    const harness = await writeHarness(dir, { readinessStatus: "approved_ready_for_live_window" });
+    const report = runRunner(harness, "run-approved", {
+      CONFIRM_LIVE_HEALTHCHECK_RUNNER: "I_UNDERSTAND_THIS_RUNS_APPROVED_LIVE_HEALTHCHECK",
+      LOCAL_API_TOKEN: "test-token",
+    });
+    const log = await readFile(harness.logFile, "utf8");
+
+    assert.equal(report.status, "completed_live_healthcheck");
+    assert.equal(report.safety.opensLiveGate, true);
+    assert.equal(report.safety.callsManagedActionsLiveApi, true);
+    assert.equal(report.safety.requiresApprovedReadiness, true);
+    assert.equal(report.safety.requiresRunnerConfirmation, true);
+    assert.match(log, /readiness check/);
+    assert.match(log, /window run/);
+    assert.match(log, /confirm-window=I_UNDERSTAND_THIS_TEMPORARILY_ENABLES_LIVE_GATE/);
+    assert.match(log, /confirm-live=I_UNDERSTAND_THIS_CALLS_LIVE_API/);
+    assert.match(log, /token=test-token/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

@@ -410,6 +410,9 @@ repo/ops/tom-readonly/live-healthcheck-approval-packet.sh generate
 repo/ops/tom-readonly/live-healthcheck-approval-packet.sh check
 repo/ops/tom-readonly/live-healthcheck-readiness.sh status
 repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh prepare
+CONFIRM_LIVE_HEALTHCHECK_RUNNER=I_UNDERSTAND_THIS_RUNS_APPROVED_LIVE_HEALTHCHECK \
+LOCAL_API_TOKEN=<本地令牌> \
+repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh run-approved
 ```
 
 证据包会写入：
@@ -423,6 +426,8 @@ repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh prepare
 `live-healthcheck-readiness.sh status/check` 用于 openclaw 或人工查看下一步：它只读取总闸门、dry-run 证据、批准前证据包、approval 和 live window 状态，不生成新证据包、不写 approval、不打开 live gate、不调用 managed action live API。`status` 不执行现有实例 healthcheck；`check` 会让总闸门执行只读 healthcheck，确认 Tom 当前实例仍正常。
 
 `live-healthcheck-rollout-runner.sh prepare` 用于自动推进到人工批准前：如果 dry-run 证据已经 ready，它会准备 approval 模板、生成并校验批准前证据包，再运行 readiness `check`。它只写 control-center runtime 下的模板和证据文件，不批准 approval、不打开 live gate、不调用 managed action live API、不修改任何 OpenClaw 实例目录。
+
+人工 approval 已批准后，`live-healthcheck-rollout-runner.sh run-approved` 会先确认 readiness 为 `approved_ready_for_live_window`，再要求 `CONFIRM_LIVE_HEALTHCHECK_RUNNER` 与 `LOCAL_API_TOKEN`，最后调用一次性演练窗口。窗口脚本仍负责自动恢复只读状态、消费 approval、生成前后影响快照和演练报告。
 
 ## 推荐环境变量
 

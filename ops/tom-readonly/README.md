@@ -41,7 +41,7 @@
 - `live-healthcheck-approval.example.json`：批准记录样板，默认未批准。
 - `live-healthcheck-approval-packet.sh`：生成 live healthcheck 批准前证据包，汇总总闸门、dry-run、approval、live window 状态和影响快照。
 - `live-healthcheck-readiness.sh`：只读汇总 live healthcheck 演练 readiness；不生成证据包、不写 approval、不打开 live gate。
-- `live-healthcheck-rollout-runner.sh`：自动推进到人工批准前；`status` 只读，`prepare` 会准备 approval 模板、生成/校验证据包并刷新 readiness。
+- `live-healthcheck-rollout-runner.sh`：自动推进 live 演练阶段；`status` 只读，`prepare` 会准备 approval 模板、生成/校验证据包并刷新 readiness，`run-approved` 只在人工 approval 已批准且显式确认后执行一次性演练窗口。
 - `live-healthcheck-preflight.sh`：只读检查 healthcheck live 演练条件，不调用 live API。
 - `live-healthcheck-smoke.sh`：手动 live healthcheck 演练脚本；只有显式提供本地令牌和确认环境变量才会调用 live API。
 - `live-healthcheck-report.sh`：演练报告脚本；读取 approval、impact snapshots 和 operation audit，生成 JSON 与 Markdown 报告。
@@ -108,6 +108,9 @@ repo/ops/tom-readonly/live-healthcheck-readiness.sh status
 repo/ops/tom-readonly/live-healthcheck-readiness.sh check
 repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh status
 repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh prepare
+CONFIRM_LIVE_HEALTHCHECK_RUNNER=I_UNDERSTAND_THIS_RUNS_APPROVED_LIVE_HEALTHCHECK \
+LOCAL_API_TOKEN=<本地令牌> \
+repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh run-approved
 repo/ops/tom-readonly/live-healthcheck-window.sh status
 repo/ops/tom-readonly/instance-impact-snapshot.sh snapshot readonly-baseline
 ```
@@ -258,7 +261,7 @@ OPERATOR=Anan \
 repo/ops/tom-readonly/live-healthcheck-window.sh run
 ```
 
-`live-healthcheck-rollout-runner.sh prepare` 可以自动推进到人工批准前：先确认 dry-run 证据 ready，再准备 approval 模板，生成并校验批准前证据包，最后运行 readiness `check`。它不会批准 approval、不会打开 live gate、不会调用 managed action live API。`live-healthcheck-rollout-runner.sh status` 只读取 readiness，不写文件。
+`live-healthcheck-rollout-runner.sh prepare` 可以自动推进到人工批准前：先确认 dry-run 证据 ready，再准备 approval 模板，生成并校验批准前证据包，最后运行 readiness `check`。它不会批准 approval、不会打开 live gate、不会调用 managed action live API。`live-healthcheck-rollout-runner.sh status` 只读取 readiness，不写文件。人工 approval 已批准后，`run-approved` 会再次检查 readiness 必须为 `approved_ready_for_live_window`，并要求 `CONFIRM_LIVE_HEALTHCHECK_RUNNER` 和 `LOCAL_API_TOKEN`，随后才调用一次性演练窗口。
 
 `live-healthcheck-readiness.sh status/check` 会只读汇总总闸门、dry-run 证据、批准前证据包、approval 和 live window 状态，输出 `waiting_human_approval`、`approved_ready_for_live_window` 或 `blocked_preconditions` 等状态。它不会生成新证据包、不会写 approval、不会打开 live gate、不会调用 managed action live API。
 
