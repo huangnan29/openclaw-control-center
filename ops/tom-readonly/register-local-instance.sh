@@ -74,6 +74,7 @@ const configFile = path.resolve(process.env.CONFIG_FILE || path.join(deployDir, 
 const backupDir = path.resolve(process.env.BACKUP_DIR || path.join(deployDir, "runtime", "deploy-state"));
 const confirm = process.env.CONFIRM_LOCAL_INSTANCE_REGISTER || "";
 const idPattern = /^[a-z0-9_-]+$/;
+const directoryWarnings = [];
 
 function fail(message) {
   console.error(`[失败] ${message}`);
@@ -150,6 +151,10 @@ function readHostDir(value, label) {
   try {
     stat = fs.statSync(text);
   } catch (error) {
+    if (error && ["EACCES", "EPERM"].includes(error.code)) {
+      directoryWarnings.push(`${label} 当前用户无权读取元数据，已保留路径并要求后续用 docker compose/healthcheck 验证：${text}`);
+      return text;
+    }
     throw new Error(`${label} 无法读取：${text}：${formatError(error)}`);
   }
   if (!stat.isDirectory()) throw new Error(`${label} 必须是目录：${text}`);
@@ -409,6 +414,7 @@ const summary = {
   registryChanged,
   composeChanged,
   addedVolumes: nextCompose.addedVolumes,
+  directoryWarnings,
   safety: {
     updatesControlCenterRegistryOnly: false,
     updatesControlCenterRegistryAndComposeOnly: true,
