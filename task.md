@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-远端凭据发现增强：在已有 `go-live-gate.sh`、`remote-collector-rollout-runner.sh`、Tom 端 `remote-collector-credentials.sh` 和本机侧 `push-remote-collector-credentials.sh` 的基础上，新增本机侧 `discover-remote-oracle-credentials.sh`，只读发现第二台 Oracle 的候选 SSH host/key，缩短 `needs_remote_credentials` 阻塞。
+管理动作 dry-run 证据增强：在跨服务器 host 暂缺的情况下，补齐受控管理动作上线前的 dry-run 证据闸门，确保后续 live 演练不会卡在缺少可引用 dry-run 审计记录。
 
 ## 本轮不做
 
@@ -78,6 +78,10 @@
 
 受控管理动作下一步仍是人工批准后执行一次只读 healthcheck live 演练：
 
+- 先检查 dry-run 证据：
+  `repo/ops/tom-readonly/managed-action-dry-run-gate.sh status`
+- 如果没有有效 dry-run 审计，显式确认并带本地令牌创建 dry-run 记录：
+  `CONFIRM_MANAGED_ACTION_DRY_RUN=I_UNDERSTAND_THIS_ONLY_CREATES_DRY_RUN_AUDIT_RECORD LOCAL_API_TOKEN=<本地令牌> repo/ops/tom-readonly/managed-action-dry-run-gate.sh run`
 - 使用 `repo/ops/tom-readonly/live-healthcheck-window.sh run`。
 - 必须显式提供 `CONFIRM_LIVE_HEALTHCHECK_WINDOW`、`CONFIRM_LIVE_HEALTHCHECK` 和 `LOCAL_API_TOKEN`。
 - 演练窗口会临时启用 control-center live healthcheck 配置，动作仍限制为 `healthcheck`。
@@ -94,6 +98,17 @@
 
 ## 最近完成
 
+- 已新增 `ops/tom-readonly/managed-action-dry-run-gate.sh`，作为管理动作 dry-run 证据闸门。
+- `managed-action-dry-run-gate.sh status` 只读取 readiness 与 dry-run audit，不写文件、不调用 live API。
+- `managed-action-dry-run-gate.sh run` 必须设置 `CONFIRM_MANAGED_ACTION_DRY_RUN=I_UNDERSTAND_THIS_ONLY_CREATES_DRY_RUN_AUDIT_RECORD` 且提供 `LOCAL_API_TOKEN`，只调用 `/api/managed-actions/dry-run` 创建 dry-run 审计记录。
+- `go-live-gate.sh` 已纳入 `managedActionDryRunEvidence` 阶段；跨服务器只读和现有实例 healthcheck 通过后，如果缺少有效 dry-run 审计，会先阻塞在 `blocked_managed_action_dry_run`。
+- 已新增 `test/managed-action-dry-run-gate.test.ts`，覆盖已有有效审计、run 缺确认被拒、run 只调用 dry-run 不调用 live。
+- 已扩展 `test/go-live-gate.test.ts`，覆盖总闸门在缺少 dry-run 证据时先阻塞 `blocked_managed_action_dry_run`。
+- 已验证 `bash -n ops/tom-readonly/managed-action-dry-run-gate.sh` 与 `bash -n ops/tom-readonly/go-live-gate.sh`。
+- 已验证 `npm test -- test/managed-action-dry-run-gate.test.ts test/go-live-gate.test.ts test/oss-readiness.test.ts`，14/14 通过。
+- 已验证跨服务器只读上线相关回归集，44/44 通过。
+- 已验证 managed action 核心回归集，16/16 通过。
+- 已验证 `npm run build`。
 - 已新增 `ops/local/discover-remote-oracle-credentials.sh` 和 `discover-remote-oracle-credentials.example.json`，用于本机只读发现第二台 Oracle 候选 SSH host/key。
 - `discover-remote-oracle-credentials.sh scan` 只读取本机 SSH config 和候选 key 文件元数据，不联网、不写文件、不输出私钥内容。
 - `discover-remote-oracle-credentials.sh probe` 必须设置 `CONFIRM_REMOTE_ORACLE_DISCOVERY=I_UNDERSTAND_THIS_ONLY_PROBES_SSH_READONLY`，只执行 `id -un`、`uname -n`、`uname -s` 这类只读 SSH 探测，不写远端文件、不写 Tom runtime。
@@ -105,7 +120,7 @@
 - 已验证 `npm run build`。
 - 本机执行 `ops/local/discover-remote-oracle-credentials.sh scan ops/local/discover-remote-oracle-credentials.example.json`，当前发现 3 个候选 key，但没有发现 Tom 以外的候选 host，状态为 `needs_remote_host`。
 - 已新增 `ops/tom-readonly/go-live-gate.sh`，作为最终上线总闸门。
-- `go-live-gate.sh status` 只汇总跨服务器 rollout runner 状态与 live healthcheck window readiness，不运行 healthcheck、不写文件、不调用 live API。
+- `go-live-gate.sh status` 只汇总跨服务器 rollout runner 状态、managed action dry-run 证据与 live healthcheck window readiness，不运行 healthcheck、不写文件、不调用 live API。
 - `go-live-gate.sh check` 会额外运行 `./healthcheck.sh`，用于验证 Tom 现有实例仍正常、只读边界仍有效。
 - 总闸门会输出 `blocked_existing_instances`、`blocked_cross_server_readonly`、`ready_for_existing_instance_healthcheck`、`blocked_managed_actions` 或 `ready_for_live_healthcheck`，并附带下一步命令。
 - 已新增 `test/go-live-gate.test.ts`，覆盖缺远端凭据、只读监控通过后进入管理动作阻塞、现有实例 healthcheck 失败时优先阻塞。

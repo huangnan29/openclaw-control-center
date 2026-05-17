@@ -16,8 +16,16 @@ async function writeExecutable(file: string, content: string): Promise<void> {
 async function writeHarness(dir: string, options: {
   remoteStage: "needs_remote_credentials" | "ready_for_healthcheck";
   healthcheckExit?: number;
+  dryRunReady?: boolean;
   liveApprovalStatus?: string;
-}): Promise<{ deployDir: string; bundleDir: string; remoteScript: string; liveScript: string; healthcheckScript: string }> {
+}): Promise<{
+  deployDir: string;
+  bundleDir: string;
+  remoteScript: string;
+  dryRunScript: string;
+  liveScript: string;
+  healthcheckScript: string;
+}> {
   const deployDir = join(dir, "deploy");
   const bundleDir = join(deployDir, "runtime", "remote-onboarding", "remote-oracle");
   const binDir = join(dir, "bin");
@@ -25,6 +33,7 @@ async function writeHarness(dir: string, options: {
   await mkdir(bundleDir, { recursive: true });
 
   const remoteScript = join(binDir, "remote-runner.sh");
+  const dryRunScript = join(binDir, "dry-run-gate.sh");
   const liveScript = join(binDir, "live-window.sh");
   const healthcheckScript = join(binDir, "healthcheck.sh");
 
@@ -57,6 +66,40 @@ cat <<'JSON'
     "writesActiveRegistry": false,
     "mutatesOpenClawInstance": false,
     "callsLiveApi": false
+  }
+}
+JSON
+`,
+  );
+
+  const dryRunReady = options.dryRunReady ?? true;
+  await writeExecutable(
+    dryRunScript,
+    `#!/usr/bin/env bash
+cat <<'JSON'
+{
+  "schemaVersion": 1,
+  "status": "${dryRunReady ? "ready" : "blocked"}",
+  "target": {
+    "instanceId": "tom",
+    "action": "healthcheck",
+    "operator": "Anan"
+  },
+  "audit": {
+    "count": ${dryRunReady ? "1" : "0"},
+    "latest": ${dryRunReady ? "{\"operationRequestId\":\"dry-run-1\",\"action\":\"healthcheck\",\"targetInstanceId\":\"tom\",\"operator\":\"Anan\",\"confirmationTextMatched\":true,\"mutatesOpenClawInstance\":false}" : "null"}
+  },
+  "readiness": {
+    "status": "blocked",
+    "liveExecutionAvailable": false
+  },
+  "issues": ${dryRunReady ? "[]" : "[\"没有匹配的 managed action dry-run 审计记录\"]"},
+  "nextCommands": [
+    "CONFIRM_MANAGED_ACTION_DRY_RUN=I_UNDERSTAND_THIS_ONLY_CREATES_DRY_RUN_AUDIT_RECORD LOCAL_API_TOKEN=<本地令牌> repo/ops/tom-readonly/managed-action-dry-run-gate.sh run"
+  ],
+  "safety": {
+    "callsManagedActionsLiveApi": false,
+    "writesOpenClawInstanceDirs": false
   }
 }
 JSON
@@ -96,7 +139,7 @@ exit ${healthcheckExit}
 `,
   );
 
-  return { deployDir, bundleDir, remoteScript, liveScript, healthcheckScript };
+  return { deployDir, bundleDir, remoteScript, dryRunScript, liveScript, healthcheckScript };
 }
 
 function runGate(harness: Awaited<ReturnType<typeof writeHarness>>, mode: "status" | "check"): any {
@@ -105,6 +148,7 @@ function runGate(harness: Awaited<ReturnType<typeof writeHarness>>, mode: "statu
       ...process.env,
       DEPLOY_DIR: harness.deployDir,
       GO_LIVE_REMOTE_ROLLOUT_RUNNER_SCRIPT: harness.remoteScript,
+      GO_LIVE_MANAGED_ACTION_DRY_RUN_GATE_SCRIPT: harness.dryRunScript,
       GO_LIVE_HEALTHCHECK_WINDOW_SCRIPT: harness.liveScript,
       GO_LIVE_HEALTHCHECK_SCRIPT: harness.healthcheckScript,
     },
@@ -139,8 +183,25 @@ test("go-live gate moves to managed-action blockers after readonly monitoring an
     assert.equal(report.status, "blocked_managed_actions");
     assert.equal(report.stages.existingInstances.status, "passed");
     assert.equal(report.stages.crossServerReadonlyMonitoring.status, "ready_for_healthcheck");
+    assert.equal(report.stages.managedActionDryRunEvidence.status, "ready");
     assert.equal(report.stages.managedActions.status, "blocked");
     assert(report.nextCommands.some((command: string) => command.includes("live-healthcheck-approval.sh approve")));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("go-live gate requires managed action dry-run evidence before live approval", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-go-live-gate-"));
+  try {
+    const harness = await writeHarness(dir, { remoteStage: "ready_for_healthcheck", dryRunReady: false });
+    const report = runGate(harness, "check");
+
+    assert.equal(report.status, "blocked_managed_action_dry_run");
+    assert.equal(report.stages.existingInstances.status, "passed");
+    assert.equal(report.stages.crossServerReadonlyMonitoring.status, "ready_for_healthcheck");
+    assert.equal(report.stages.managedActionDryRunEvidence.status, "blocked");
+    assert(report.nextCommands.some((command: string) => command.includes("managed-action-dry-run-gate.sh run")));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

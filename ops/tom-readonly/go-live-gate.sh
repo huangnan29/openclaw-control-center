@@ -3,7 +3,7 @@ set -euo pipefail
 set +x
 
 # 最终上线总闸门。
-# 汇总 Tom 本体只读健康、跨服务器只读 collector 接入、管理动作 live readiness。
+# 汇总 Tom 本体只读健康、跨服务器只读 collector 接入、管理动作 dry-run 证据和 live readiness。
 # 本脚本不写远端文件、不修改任何 OpenClaw 实例目录、不重启实例、不调用 managed-actions live API。
 
 DEPLOY_DIR="${DEPLOY_DIR:-/srv/openclaw-control-center-readonly}"
@@ -54,6 +54,7 @@ const deployDir = path.resolve(process.env.DEPLOY_DIR || "/srv/openclaw-control-
 const bundleDir = path.resolve(process.env.BUNDLE_DIR || path.join(deployDir, "runtime", "remote-onboarding", "remote-oracle"));
 const scriptDir = process.env.SCRIPT_DIR || path.join(deployDir, "repo", "ops", "tom-readonly");
 const remoteRolloutRunnerScript = process.env.GO_LIVE_REMOTE_ROLLOUT_RUNNER_SCRIPT || path.join(scriptDir, "remote-collector-rollout-runner.sh");
+const managedActionDryRunGateScript = process.env.GO_LIVE_MANAGED_ACTION_DRY_RUN_GATE_SCRIPT || path.join(scriptDir, "managed-action-dry-run-gate.sh");
 const liveHealthcheckWindowScript = process.env.GO_LIVE_HEALTHCHECK_WINDOW_SCRIPT || path.join(scriptDir, "live-healthcheck-window.sh");
 const healthcheckScript = process.env.GO_LIVE_HEALTHCHECK_SCRIPT || path.join(deployDir, "healthcheck.sh");
 
@@ -198,7 +199,44 @@ function summarizeRemote(remote) {
   };
 }
 
-function buildNextCommands(decision, remoteSummary) {
+function summarizeDryRunEvidence(result) {
+  if (result.exitCode !== 0) {
+    return {
+      status: "blocked",
+      issues: [`dry-run 证据闸门脚本失败：exit=${result.exitCode}`],
+      nextCommands: [
+        "repo/ops/tom-readonly/managed-action-dry-run-gate.sh status",
+        "CONFIRM_MANAGED_ACTION_DRY_RUN=I_UNDERSTAND_THIS_ONLY_CREATES_DRY_RUN_AUDIT_RECORD LOCAL_API_TOKEN=<本地令牌> repo/ops/tom-readonly/managed-action-dry-run-gate.sh run",
+      ],
+      rawLines: compactLines(`${result.stdout}\n${result.stderr}`, 60),
+    };
+  }
+
+  const parsed = parseJson(result.stdout, "managed action dry-run gate");
+  if (parsed.status === "invalid_output") {
+    return {
+      status: "blocked",
+      issues: [`dry-run 证据闸门输出不是有效 JSON：${parsed.error}`],
+      nextCommands: [
+        "repo/ops/tom-readonly/managed-action-dry-run-gate.sh status",
+      ],
+      rawStatus: parsed,
+    };
+  }
+
+  const issues = Array.isArray(parsed.issues) ? parsed.issues : [];
+  return {
+    status: parsed.status === "ready" ? "ready" : "blocked",
+    target: parsed.target,
+    audit: parsed.audit,
+    readiness: parsed.readiness,
+    issues,
+    nextCommands: Array.isArray(parsed.nextCommands) ? parsed.nextCommands : [],
+    rawStatus: parsed,
+  };
+}
+
+function buildNextCommands(decision, remoteSummary, dryRunSummary) {
   const runnerCommand = `CONFIRM_REMOTE_COLLECTOR_ROLLOUT_RUNNER=I_UNDERSTAND_THIS_RUNS_SAFE_REMOTE_COLLECTOR_ROLLOUT_STEPS repo/ops/tom-readonly/remote-collector-rollout-runner.sh run ${relativeRuntimePath(bundleDir)}`;
   if (decision === "blocked_existing_instances") {
     return ["./healthcheck.sh"];
@@ -221,8 +259,15 @@ function buildNextCommands(decision, remoteSummary) {
   if (decision === "ready_for_existing_instance_healthcheck") {
     return [`repo/ops/tom-readonly/go-live-gate.sh check ${relativeRuntimePath(bundleDir)}`];
   }
+  if (decision === "blocked_managed_action_dry_run") {
+    return dryRunSummary.nextCommands.length > 0 ? dryRunSummary.nextCommands : [
+      "repo/ops/tom-readonly/managed-action-dry-run-gate.sh status",
+      "CONFIRM_MANAGED_ACTION_DRY_RUN=I_UNDERSTAND_THIS_ONLY_CREATES_DRY_RUN_AUDIT_RECORD LOCAL_API_TOKEN=<本地令牌> repo/ops/tom-readonly/managed-action-dry-run-gate.sh run",
+    ];
+  }
   if (decision === "blocked_managed_actions") {
     return [
+      "repo/ops/tom-readonly/managed-action-dry-run-gate.sh status",
       "repo/ops/tom-readonly/live-healthcheck-approval.sh prepare runtime/live-healthcheck-approval.json",
       "CONFIRM_APPROVAL_RECORD=I_APPROVE_LIVE_HEALTHCHECK_RECORD APPROVED_BY=Anan repo/ops/tom-readonly/live-healthcheck-approval.sh approve runtime/live-healthcheck-approval.json",
       "CONFIRM_LIVE_HEALTHCHECK_WINDOW=I_UNDERSTAND_THIS_TEMPORARILY_ENABLES_LIVE_GATE CONFIRM_LIVE_HEALTHCHECK=I_UNDERSTAND_THIS_CALLS_LIVE_API LOCAL_API_TOKEN=<本地令牌> INSTANCE_ID=tom OPERATOR=Anan repo/ops/tom-readonly/live-healthcheck-window.sh run",
@@ -237,10 +282,11 @@ function relativeRuntimePath(file) {
   return resolved.startsWith(root) ? path.relative(deployDir, resolved) : resolved;
 }
 
-function decide(remoteSummary, healthcheck, live) {
+function decide(remoteSummary, healthcheck, dryRunSummary, live) {
   if (healthcheck.status === "failed") return "blocked_existing_instances";
   if (remoteSummary.status !== "ready_for_healthcheck") return "blocked_cross_server_readonly";
   if (healthcheck.status === "skipped") return "ready_for_existing_instance_healthcheck";
+  if (dryRunSummary.status !== "ready") return "blocked_managed_action_dry_run";
   if (live.status !== "ready") return "blocked_managed_actions";
   return "ready_for_live_healthcheck";
 }
@@ -257,6 +303,9 @@ const remote = remoteRun.exitCode === 0 ? parseJson(remoteRun.stdout, "remote ro
 };
 const remoteSummary = summarizeRemote(remote);
 
+const dryRunGateRun = runScript(managedActionDryRunGateScript, ["status"]);
+const dryRunSummary = summarizeDryRunEvidence(dryRunGateRun);
+
 const liveRun = runScript(liveHealthcheckWindowScript, ["status"]);
 const live = deriveLiveStatus(liveRun);
 
@@ -272,7 +321,7 @@ if (mode === "check") {
   };
 }
 
-const decision = decide(remoteSummary, healthcheck, live);
+const decision = decide(remoteSummary, healthcheck, dryRunSummary, live);
 
 console.log(JSON.stringify({
   schemaVersion: 1,
@@ -284,9 +333,10 @@ console.log(JSON.stringify({
   stages: {
     existingInstances: healthcheck,
     crossServerReadonlyMonitoring: remoteSummary,
+    managedActionDryRunEvidence: dryRunSummary,
     managedActions: live,
   },
-  nextCommands: buildNextCommands(decision, remoteSummary),
+  nextCommands: buildNextCommands(decision, remoteSummary, dryRunSummary),
   safety: {
     readsStatusOnly: mode === "status",
     checkRunsHealthcheckOnly: mode === "check",
@@ -306,6 +356,10 @@ console.log(JSON.stringify({
     liveHealthcheckWindow: {
       command: liveRun.command,
       exitCode: liveRun.exitCode,
+    },
+    managedActionDryRunGate: {
+      command: dryRunGateRun.command,
+      exitCode: dryRunGateRun.exitCode,
     },
   },
 }, null, 2));

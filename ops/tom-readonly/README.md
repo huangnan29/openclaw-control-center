@@ -20,7 +20,7 @@
 - `remote-collector-preflight.sh`：对已生成的远端 collector 接入包执行 SSH 只读预检，检查 docker、目录和 gateway 前置条件。
 - `remote-collector-rollout.sh`：只读取 Tom 本地接入包、preflight、pull 和 registry 状态，输出跨服务器只读接入下一步。
 - `remote-collector-rollout-runner.sh`：按 rollout gate 当前阶段自动执行下一步安全脚本；缺凭据、远端 snapshot 未就绪或检查失败时停止。
-- `go-live-gate.sh`：最终上线总闸门，汇总 Tom 本体 healthcheck、跨服务器只读监控和 live 管理动作 readiness。
+- `go-live-gate.sh`：最终上线总闸门，汇总 Tom 本体 healthcheck、跨服务器只读监控、dry-run 证据和 live 管理动作 readiness。
 - `remote-collector-pull.sh`：从其他 Oracle 服务器只读拉取已经生成好的 collector JSON，校验后写入本机 `runtime/collectors`。
 - `remote-collector-pull.sources.example.json`：远端 collector 拉取配置样板，默认 `enabled=false`。
 - `register-remote-collector.sh`：把已经拉取并校验过的远端 collector snapshot 注册到 Tom `config/instances.json`，默认 `plan` 不写入。
@@ -31,6 +31,7 @@
 - `../local/discover-remote-oracle-credentials.example.json`：本机候选发现配置样板，不包含真实密钥内容。
 - `../local/push-remote-collector-credentials.sh`：在本机把远端只读 SSH key 和 onboarding 配置推送到 Tom control-center runtime，不连接第二台 Oracle。
 - `managed-action-healthcheck-rollout.example.json`：只读 healthcheck live 演练的 rollout 样板，不会被默认加载。
+- `managed-action-dry-run-gate.sh`：管理动作 dry-run 证据闸门，默认只读检查 readiness 与 audit，显式确认后只创建 dry-run 审计记录。
 - `live-healthcheck-approval.sh`：生成、校验或标记 live healthcheck 人工批准记录，不调用 live API。
 - `live-healthcheck-approval.example.json`：批准记录样板，默认未批准。
 - `live-healthcheck-preflight.sh`：只读检查 healthcheck live 演练条件，不调用 live API。
@@ -63,6 +64,7 @@ CONFIRM_REMOTE_COLLECTOR_ROLLOUT_RUNNER=I_UNDERSTAND_THIS_RUNS_SAFE_REMOTE_COLLE
 repo/ops/tom-readonly/remote-collector-rollout-runner.sh run runtime/remote-onboarding/<serverId>
 repo/ops/tom-readonly/go-live-gate.sh status runtime/remote-onboarding/<serverId>
 repo/ops/tom-readonly/go-live-gate.sh check runtime/remote-onboarding/<serverId>
+repo/ops/tom-readonly/managed-action-dry-run-gate.sh status
 repo/ops/tom-readonly/remote-collector-pull.sh plan runtime/remote-collector-pull.sources.json
 CONFIRM_REMOTE_COLLECTOR_PULL=I_UNDERSTAND_THIS_ONLY_READS_REMOTE_COLLECTOR_SNAPSHOTS \
 repo/ops/tom-readonly/remote-collector-pull.sh pull runtime/remote-collector-pull.sources.json
@@ -138,11 +140,16 @@ repo/ops/tom-readonly/go-live-gate.sh status runtime/remote-onboarding/<serverId
 repo/ops/tom-readonly/go-live-gate.sh check runtime/remote-onboarding/<serverId>
 ```
 
-`status` 只汇总 rollout 和 live readiness；`check` 会额外运行 `./healthcheck.sh` 验证 Tom 现有实例仍正常、只读边界仍有效。总闸门只输出下一步命令，不会调用 live API，不会修改实例目录。
+`status` 只汇总 rollout、dry-run 证据和 live readiness；`check` 会额外运行 `./healthcheck.sh` 验证 Tom 现有实例仍正常、只读边界仍有效。总闸门只输出下一步命令，不会调用 live API，不会修改实例目录。
 
 只读 healthcheck live 演练必须先人工准备 live gate、executor 和 rollout 配置；默认 Tom 不启用。确认后才可手动运行：
 
 ```bash
+repo/ops/tom-readonly/managed-action-dry-run-gate.sh status
+CONFIRM_MANAGED_ACTION_DRY_RUN=I_UNDERSTAND_THIS_ONLY_CREATES_DRY_RUN_AUDIT_RECORD \
+LOCAL_API_TOKEN=<本地令牌> \
+repo/ops/tom-readonly/managed-action-dry-run-gate.sh run
+
 ./live-healthcheck-preflight.sh
 
 EXPECT_LIVE_READY=true \

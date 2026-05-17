@@ -143,6 +143,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   const liveHealthcheckSmoke = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-smoke.sh");
   const liveHealthcheckWindow = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-window.sh");
   const liveHealthcheckRollout = path.join(ROOT, "ops", "tom-readonly", "managed-action-healthcheck-rollout.example.json");
+  const managedActionDryRunGate = path.join(ROOT, "ops", "tom-readonly", "managed-action-dry-run-gate.sh");
   const discoverRemoteOracleCredentials = path.join(ROOT, "ops", "local", "discover-remote-oracle-credentials.sh");
   const discoverRemoteOracleCredentialsExample = path.join(ROOT, "ops", "local", "discover-remote-oracle-credentials.example.json");
   const remoteCollectorOnboarding = path.join(ROOT, "ops", "tom-readonly", "remote-collector-onboarding.sh");
@@ -200,6 +201,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(existsSync(liveHealthcheckSmoke));
   assert(existsSync(liveHealthcheckWindow));
   assert(existsSync(liveHealthcheckRollout));
+  assert(existsSync(managedActionDryRunGate));
   assert(existsSync(discoverRemoteOracleCredentials));
   assert(existsSync(discoverRemoteOracleCredentialsExample));
   assert(existsSync(remoteCollectorOnboarding));
@@ -310,6 +312,8 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   const goLiveGateText = readFileSync(goLiveGate, "utf8");
   assert.match(goLiveGateText, /go-live-gate\.sh status/);
   assert.match(goLiveGateText, /go-live-gate\.sh check/);
+  assert.match(goLiveGateText, /managed-action-dry-run-gate\.sh/);
+  assert.match(goLiveGateText, /blocked_managed_action_dry_run/);
   assert.match(goLiveGateText, /remote-collector-rollout-runner\.sh/);
   assert.match(goLiveGateText, /live-healthcheck-window\.sh/);
   assert.match(goLiveGateText, /callsManagedActionsLiveApi: false/);
@@ -390,6 +394,14 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(liveWindowText, /compare "\$IMPACT_BEFORE" "\$impact_after"/);
   assert.match(readFileSync(liveHealthcheckRollout, "utf8"), /"action": "healthcheck"/);
   assert.match(readFileSync(liveHealthcheckRollout, "utf8"), /"risk": "low"/);
+  const dryRunGateText = readFileSync(managedActionDryRunGate, "utf8");
+  assert.match(dryRunGateText, /managed-action-dry-run-gate\.sh status/);
+  assert.match(dryRunGateText, /CONFIRM_MANAGED_ACTION_DRY_RUN/);
+  assert.match(dryRunGateText, /I_UNDERSTAND_THIS_ONLY_CREATES_DRY_RUN_AUDIT_RECORD/);
+  assert.match(dryRunGateText, /api\/managed-actions\/dry-run/);
+  assert.match(dryRunGateText, /callsManagedActionsLiveApi: false/);
+  assert.match(dryRunGateText, /writesOpenClawInstanceDirs: false/);
+  assert.doesNotMatch(dryRunGateText, /api\/managed-actions\/live/);
   assert(healthcheck.includes("COLLECTOR_SNAPSHOT_MAX_AGE_SECONDS"));
   assert(compose.includes("OPENCLAW_INSTANCES_FILE"));
   assert(env.includes("OPENCLAW_INSTANCES_JSON"));
