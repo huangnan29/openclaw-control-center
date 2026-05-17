@@ -25,6 +25,8 @@
 - 先执行 `repo/ops/tom-readonly/remote-collector-onboarding.sh plan runtime/remote-collector-onboarding.json`，确认只生成接入包计划、不写文件。
 - 确认后执行：
   `CONFIRM_REMOTE_COLLECTOR_ONBOARDING=I_UNDERSTAND_THIS_ONLY_WRITES_REMOTE_ONBOARDING_BUNDLE repo/ops/tom-readonly/remote-collector-onboarding.sh write runtime/remote-collector-onboarding.json`
+- 写入后先执行：
+  `repo/ops/tom-readonly/remote-collector-onboarding.sh verify runtime/remote-onboarding/<serverId>`
 - 审查 `runtime/remote-onboarding/<serverId>/RUNBOOK.md`、`collector-node.json`、`remote-collector-pull.sources.json`、`register-remote-collector.json`、`build-context-manifest.json` 和 `safety.json`。
 - 将接入包里的 `collector-node.json` 和 `bootstrap-collector-node.sh` 复制到第二台 Oracle。
 - 在第二台 Oracle 上先执行 `./bootstrap-collector-node.sh plan collector-node.json`，确认只写文件、不启动容器、不修改实例。
@@ -89,6 +91,9 @@
 - 已部署到 Tom，并验证运行提交 `1e9adcb`。
 - 已在 Tom 验证 onboarding 样板 `plan` 返回 `warnings=[]`、`bundlesBuildContext=true`、`remoteBuildContext=/srv/openclaw-collector-node/build-context`、`buildContextFiles=88`，未执行 write，未生成真实接入包。
 - 已验证 Tom `healthcheck.sh` 通过，现有 5 个实例仍只读；live window status 仍为 `needs_manual_approval`、`READONLY_MODE=true`、`readiness.status=blocked`，未调用 live API。
+- 已新增 `remote-collector-onboarding.sh verify <bundle-dir>`，只读取已生成接入包并离线校验，不 SSH、不写文件、不改 registry。
+- `verify` 会校验必需文件、serverId 一致性、safety 布尔边界、pull/register 路径、build-context manifest，并调用接入包内 `bootstrap-collector-node.sh plan` 确认不启动容器、不修改实例。
+- 已新增测试覆盖 `verify` 成功路径和篡改 `safety.connectsSsh=true` 后失败。
 - 已新增 `ops/tom-readonly/register-remote-collector.sh`，用于把已拉取的远端 collector snapshot 注册到 Tom `config/instances.json`。
 - 已新增 `ops/tom-readonly/register-remote-collector.example.json` 样板。
 - `register-remote-collector.sh plan` 只读取配置、Tom registry 和本机 snapshot，不写文件。

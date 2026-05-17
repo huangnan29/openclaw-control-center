@@ -248,9 +248,10 @@ cp repo/ops/tom-readonly/remote-collector-onboarding.example.json runtime/remote
 repo/ops/tom-readonly/remote-collector-onboarding.sh plan runtime/remote-collector-onboarding.json
 CONFIRM_REMOTE_COLLECTOR_ONBOARDING=I_UNDERSTAND_THIS_ONLY_WRITES_REMOTE_ONBOARDING_BUNDLE \
 repo/ops/tom-readonly/remote-collector-onboarding.sh write runtime/remote-collector-onboarding.json
+repo/ops/tom-readonly/remote-collector-onboarding.sh verify runtime/remote-onboarding/<serverId>
 ```
 
-`plan` 只校验配置并输出将生成的文件；`write` 只写 `runtime/remote-onboarding/<serverId>/` 下的接入包，不会 SSH、不会修改 `config/instances.json`、不会修改任何 OpenClaw 实例目录。接入包包含：
+`plan` 只校验配置并输出将生成的文件；`write` 只写 `runtime/remote-onboarding/<serverId>/` 下的接入包，不会 SSH、不会修改 `config/instances.json`、不会修改任何 OpenClaw 实例目录；`verify` 只读取接入包并离线校验 serverId、safety、pull/register 配置、build-context 和 bootstrap plan。接入包包含：
 
 - `collector-node.json`：复制到远端 Oracle 后供 `bootstrap-collector-node.sh` 使用。
 - `bootstrap-collector-node.sh`：远端 collector-only 节点引导脚本。

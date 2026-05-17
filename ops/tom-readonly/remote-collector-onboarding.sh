@@ -28,10 +28,12 @@ usage() {
 用法：
   remote-collector-onboarding.sh plan [onboarding.json]
   remote-collector-onboarding.sh write [onboarding.json]
+  remote-collector-onboarding.sh verify <bundle-dir>
 
 说明：
   plan 只校验配置并输出将生成的远端 collector 接入包，不写文件。
   write 只写 Tom control-center runtime/remote-onboarding/<serverId> 下的接入包。
+  verify 只读取已经生成的接入包并离线校验，不写文件、不联网。
   接入包包含 collector-node.json、bootstrap-collector-node.sh、remote-collector-pull.sources.json、register-remote-collector.json、RUNBOOK.md，并可默认携带远端 Docker build-context。
   本脚本不会 SSH，不会修改 Tom config/instances.json，不会修改任何 OpenClaw 实例目录，不会调用 managed-actions live API。
 
@@ -55,6 +57,7 @@ run_node() {
     node <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
+const { spawnSync } = require("node:child_process");
 
 const mode = process.env.MODE || "plan";
 const deployDir = path.resolve(process.env.DEPLOY_DIR || "/srv/openclaw-control-center-readonly");
@@ -79,6 +82,14 @@ function readJsonFile(file, label) {
     return JSON.parse(fs.readFileSync(file, "utf8"));
   } catch (error) {
     fail(`无法读取 ${label}：${file}：${formatError(error)}`);
+  }
+}
+
+function readJsonFileStrict(file, label) {
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch (error) {
+    throw new Error(`无法读取 ${label}：${file}：${formatError(error)}`);
   }
 }
 
@@ -133,6 +144,18 @@ function readOutputDir(value, serverId) {
   const allowedRoot = `${path.resolve(base)}${path.sep}`;
   if (!resolved.startsWith(allowedRoot)) {
     throw new Error(`outputDir 必须位于 ${base} 之下`);
+  }
+  return resolved;
+}
+
+function readBundleDir(value) {
+  const text = readString(value);
+  if (!text) throw new Error("verify 必须传入 bundle-dir");
+  const base = path.join(deployDir, "runtime", "remote-onboarding");
+  const resolved = path.resolve(path.isAbsolute(text) ? text : path.join(process.cwd(), text));
+  const allowedRoot = `${path.resolve(base)}${path.sep}`;
+  if (!resolved.startsWith(allowedRoot)) {
+    throw new Error(`bundle-dir 必须位于 ${base} 之下`);
   }
   return resolved;
 }
@@ -483,6 +506,119 @@ function buildFiles(config) {
   return { files, buildContextFiles };
 }
 
+function verifyBundle(bundleDir) {
+  const requiredFiles = {
+    collectorNode: path.join(bundleDir, "collector-node.json"),
+    pullConfig: path.join(bundleDir, "remote-collector-pull.sources.json"),
+    registerConfig: path.join(bundleDir, "register-remote-collector.json"),
+    bootstrapScript: path.join(bundleDir, "bootstrap-collector-node.sh"),
+    runbook: path.join(bundleDir, "RUNBOOK.md"),
+    safety: path.join(bundleDir, "safety.json"),
+  };
+  for (const [label, file] of Object.entries(requiredFiles)) {
+    if (!fs.existsSync(file)) throw new Error(`接入包缺少 ${label}：${file}`);
+  }
+
+  const collectorNode = readJsonFileStrict(requiredFiles.collectorNode, "collector-node.json");
+  const pullConfig = readJsonFileStrict(requiredFiles.pullConfig, "remote-collector-pull.sources.json");
+  const registerConfig = readJsonFileStrict(requiredFiles.registerConfig, "register-remote-collector.json");
+  const safety = readJsonFileStrict(requiredFiles.safety, "safety.json");
+  const runbookText = fs.readFileSync(requiredFiles.runbook, "utf8");
+
+  if (!asRecord(collectorNode) || collectorNode.schemaVersion !== 1) throw new Error("collector-node.json schemaVersion 必须为 1");
+  if (!asRecord(pullConfig) || pullConfig.schemaVersion !== 1) throw new Error("remote-collector-pull.sources.json schemaVersion 必须为 1");
+  if (!asRecord(registerConfig) || registerConfig.schemaVersion !== 1) throw new Error("register-remote-collector.json schemaVersion 必须为 1");
+  if (!asRecord(safety) || safety.schemaVersion !== 1) throw new Error("safety.json schemaVersion 必须为 1");
+
+  const serverId = readId(asRecord(collectorNode.server)?.id, "collectorNode.server.id");
+  const pullSource = Array.isArray(pullConfig.sources) ? asRecord(pullConfig.sources[0]) : undefined;
+  if (!pullSource) throw new Error("remote-collector-pull.sources.json 必须包含 sources[0]");
+  if (pullSource.serverId !== serverId) throw new Error("pull source serverId 与 collector-node 不一致");
+  if (asRecord(registerConfig.server)?.id !== serverId) throw new Error("register serverId 与 collector-node 不一致");
+  if (safety.serverId !== serverId) throw new Error("safety serverId 与 collector-node 不一致");
+
+  const expectedContainerSnapshotPath = `/app/runtime/collectors/${serverId}/snapshot.json`;
+  if (asRecord(collectorNode.server)?.collectorSnapshotPath !== expectedContainerSnapshotPath) {
+    throw new Error("collector-node server.collectorSnapshotPath 不符合约定路径");
+  }
+  if (collectorNode.snapshotOutputPath !== expectedContainerSnapshotPath) {
+    throw new Error("collector-node snapshotOutputPath 不符合约定路径");
+  }
+  if (registerConfig.collectorSnapshotPath !== expectedContainerSnapshotPath) {
+    throw new Error("register collectorSnapshotPath 不符合约定路径");
+  }
+  if (!String(pullSource.remoteSnapshotPath || "").startsWith("/")) {
+    throw new Error("pull remoteSnapshotPath 必须是绝对路径");
+  }
+  const localSnapshotPath = path.resolve(String(pullSource.localSnapshotPath || ""));
+  const allowedCollectorRoot = `${path.join(deployDir, "runtime", "collectors")}${path.sep}`;
+  if (!localSnapshotPath.startsWith(allowedCollectorRoot)) {
+    throw new Error("pull localSnapshotPath 必须位于 Tom runtime/collectors 下");
+  }
+
+  const boolChecks = [
+    ["writesOnboardingBundleOnly", true],
+    ["writesActiveRegistry", false],
+    ["connectsSsh", false],
+    ["mutatesOpenClawInstance", false],
+    ["restartsOpenClawInstance", false],
+    ["callsLiveApi", false],
+  ];
+  for (const [key, expected] of boolChecks) {
+    if (safety[key] !== expected) throw new Error(`safety.${key} 必须为 ${expected}`);
+  }
+
+  let buildContextFiles = 0;
+  if (safety.bundlesBuildContext === true) {
+    const buildContextDir = path.join(bundleDir, "build-context");
+    const manifestFile = path.join(bundleDir, "build-context-manifest.json");
+    if (!fs.existsSync(buildContextDir)) throw new Error("接入包声明携带 build-context，但目录不存在");
+    const manifest = readJsonFileStrict(manifestFile, "build-context-manifest.json");
+    if (!Array.isArray(manifest.files) || manifest.files.length === 0) throw new Error("build-context manifest files 不能为空");
+    for (const required of ["Dockerfile", "package.json", "package-lock.json", "src/index.ts"]) {
+      if (!manifest.files.includes(required)) throw new Error(`build-context manifest 缺少 ${required}`);
+      if (!fs.existsSync(path.join(buildContextDir, required))) throw new Error(`build-context 缺少 ${required}`);
+    }
+    if (collectorNode.buildContext !== safety.remoteBuildContext) {
+      throw new Error("collector-node buildContext 必须等于 safety.remoteBuildContext");
+    }
+    buildContextFiles = manifest.files.length;
+  }
+
+  if (/api\/managed-actions\/live/.test(runbookText)) {
+    throw new Error("RUNBOOK 不能包含 managed action live API 调用");
+  }
+
+  const plan = spawnSync(requiredFiles.bootstrapScript, ["plan", requiredFiles.collectorNode], {
+    encoding: "utf8",
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  if (plan.status !== 0) {
+    throw new Error(`bootstrap plan 失败：${(plan.stderr || plan.stdout || "").trim()}`);
+  }
+  const bootstrapPlan = JSON.parse(plan.stdout);
+  if (bootstrapPlan.safety?.startsContainers !== false) throw new Error("bootstrap plan safety.startsContainers 必须为 false");
+  if (bootstrapPlan.safety?.mutatesOpenClawInstance !== false) throw new Error("bootstrap plan safety.mutatesOpenClawInstance 必须为 false");
+
+  return {
+    status: "verified",
+    bundleDir,
+    serverId,
+    instances: Array.isArray(collectorNode.instances) ? collectorNode.instances.length : 0,
+    bundlesBuildContext: safety.bundlesBuildContext === true,
+    buildContextFiles,
+    safety: {
+      writesOnboardingBundleOnly: true,
+      writesActiveRegistry: false,
+      connectsSsh: false,
+      mutatesOpenClawInstance: false,
+      restartsOpenClawInstance: false,
+      callsLiveApi: false,
+      bootstrapStartsContainers: false,
+    },
+  };
+}
+
 function summarizeFiles(config) {
   const files = [
     path.join(config.outputDir, "collector-node.json"),
@@ -514,6 +650,17 @@ function formatError(error) {
 let config;
 let files;
 let buildContextFiles;
+
+if (mode === "verify") {
+  try {
+    const bundleDir = readBundleDir(configFile);
+    console.log(JSON.stringify(verifyBundle(bundleDir), null, 2));
+  } catch (error) {
+    fail(formatError(error));
+  }
+  process.exit(0);
+}
+
 try {
   config = normalizeConfig(readJsonFile(configFile, "onboarding 配置"));
   const built = buildFiles(config);
@@ -581,6 +728,9 @@ main() {
       ;;
     write)
       run_node "write" "${2:-$CONFIG_FILE}"
+      ;;
+    verify)
+      run_node "verify" "${2:-}"
       ;;
     -h|--help|help)
       usage

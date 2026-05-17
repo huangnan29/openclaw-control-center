@@ -198,9 +198,11 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.equal(collectorNodeConfig.server.id, "remote-oracle");
   const remoteCollectorOnboardingText = readFileSync(remoteCollectorOnboarding, "utf8");
   assert.match(remoteCollectorOnboardingText, /CONFIRM_REMOTE_COLLECTOR_ONBOARDING/);
+  assert.match(remoteCollectorOnboardingText, /verify <bundle-dir>/);
   assert.match(remoteCollectorOnboardingText, /I_UNDERSTAND_THIS_ONLY_WRITES_REMOTE_ONBOARDING_BUNDLE/);
   assert.match(remoteCollectorOnboardingText, /bundleBuildContext/);
   assert.match(remoteCollectorOnboardingText, /build-context-manifest\.json/);
+  assert.match(remoteCollectorOnboardingText, /bootstrapStartsContainers: false/);
   assert.match(remoteCollectorOnboardingText, /writesActiveRegistry: false/);
   assert.match(remoteCollectorOnboardingText, /connectsSsh: false/);
   assert.match(remoteCollectorOnboardingText, /mutatesOpenClawInstance: false/);

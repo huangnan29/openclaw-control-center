@@ -138,6 +138,18 @@ test("remote collector onboarding writes a reviewable bundle only after confirma
     );
     assert.equal(generatedPlan.status, "planned");
     assert.equal(generatedPlan.safety.startsContainers, false);
+
+    const verified = JSON.parse(
+      execFileSync(SCRIPT, ["verify", outputDir], {
+        env,
+        encoding: "utf8",
+      }),
+    );
+    assert.equal(verified.status, "verified");
+    assert.equal(verified.serverId, "remote-oracle");
+    assert.equal(verified.safety.writesActiveRegistry, false);
+    assert.equal(verified.safety.connectsSsh, false);
+    assert.equal(verified.safety.bootstrapStartsContainers, false);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -189,6 +201,45 @@ test("remote collector onboarding bundles a build context when no remote buildCo
     assert.match(runbook, /scp' '-r'/);
     assert.match(runbook, /cp -a \/tmp\/build-context/);
     assert.doesNotMatch(runbook, /api\/managed-actions\/live/);
+
+    const verified = JSON.parse(
+      execFileSync(SCRIPT, ["verify", outputDir], {
+        env: { ...process.env, DEPLOY_DIR: deployDir },
+        encoding: "utf8",
+      }),
+    );
+    assert.equal(verified.status, "verified");
+    assert.equal(verified.bundlesBuildContext, true);
+    assert(verified.buildContextFiles > 10);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("remote collector onboarding verify rejects unsafe bundle metadata", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-remote-onboarding-"));
+  try {
+    const { configFile, deployDir, outputDir } = await writeConfig(dir);
+    execFileSync(SCRIPT, ["write", configFile], {
+      env: {
+        ...process.env,
+        DEPLOY_DIR: deployDir,
+        CONFIRM_REMOTE_COLLECTOR_ONBOARDING: "I_UNDERSTAND_THIS_ONLY_WRITES_REMOTE_ONBOARDING_BUNDLE",
+      },
+      encoding: "utf8",
+    });
+
+    const safetyFile = join(outputDir, "safety.json");
+    const safety = JSON.parse(await readFile(safetyFile, "utf8"));
+    safety.connectsSsh = true;
+    await writeFile(safetyFile, `${JSON.stringify(safety, null, 2)}\n`, "utf8");
+
+    const result = spawnSync(SCRIPT, ["verify", outputDir], {
+      env: { ...process.env, DEPLOY_DIR: deployDir },
+      encoding: "utf8",
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /safety\.connectsSsh 必须为 false/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
