@@ -324,6 +324,8 @@ repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh run-approved
 
 `live-healthcheck-readiness.sh status/check` 会只读汇总总闸门、dry-run 证据、批准前证据包、approval 和 live window 状态，输出 `waiting_human_approval`、`approved_ready_for_live_window` 或 `blocked_preconditions` 等状态；它给出的下一步命令统一指向 `live-healthcheck-rollout-runner.sh prepare/run-approved` 主链路。它不会生成新证据包、不会写 approval、不会打开 live gate、不会调用 managed action live API。
 
+`live-healthcheck-approval-review.sh status/check` 是给人工批准前使用的只读汇总入口。它聚合 readiness、approval packet、approval、dry-run inbox cron 和 inbox pending 状态，输出 `ready_for_human_approval`、`approved_ready_for_live_window` 或 `blocked_preconditions`。`status` 不运行 healthcheck；`check` 只让 readiness 执行只读 healthcheck。它不会生成新证据包、不会批准 approval、不会打开 live gate、不会调用 managed action live API，也不会修改 OpenClaw 实例目录。
+
 `live-healthcheck-approval-packet.sh generate` 会写入：
 
 ```bash

@@ -150,6 +150,13 @@ Tom 单 Oracle 上线下一步：
 
 ## 最近完成
 
+- 已新增 `ops/tom-readonly/live-healthcheck-approval-review.sh`，作为人工 approval 前的只读审查汇总入口。
+- `live-healthcheck-approval-review.sh status` 只读取 readiness、approval packet、approval、dry-run inbox cron 和 inbox pending 状态，不运行 healthcheck。
+- `live-healthcheck-approval-review.sh check` 只让 readiness 执行只读 healthcheck，用于确认 Tom 现有实例仍正常。
+- approval review 输出 `ready_for_human_approval`、`approved_ready_for_live_window` 或 `blocked_preconditions`，并给出下一步 approval 或 run-approved 命令。
+- approval review 不生成新证据包、不批准 approval、不打开 live gate、不调用 managed action live API、不修改 OpenClaw 实例目录、不重启实例。
+- 已新增 `test/live-healthcheck-approval-review.test.ts`，覆盖等待人工批准、已批准可演练、inbox 有 pending 时阻塞三种路径。
+- 已验证 `npm test -- test/live-healthcheck-approval-review.test.ts`，3/3 通过。
 - 已新增并部署 `ops/tom-readonly/install-managed-action-inbox-cron.sh`，作为 Tom 上自动消费 OpenClaw workspace inbox 的 dry-run cron 安装器。
 - 本地已验证 `bash -n ops/tom-readonly/install-managed-action-inbox-cron.sh`。
 - 本地已验证 `npm test -- test/managed-action-inbox-cron.test.ts test/managed-action-inbox-runner.test.ts test/managed-action-text-bridge.test.ts test/managed-action-command-runner.test.ts test/managed-actions-dry-run.test.ts test/managed-action-live-readiness.test.ts test/managed-action-live-gate.test.ts test/oss-readiness.test.ts test/readonly-multi-instance-safety.test.ts`，39/39 通过。

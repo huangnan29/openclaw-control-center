@@ -139,6 +139,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   const liveHealthcheckApproval = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-approval.sh");
   const liveHealthcheckApprovalExample = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-approval.example.json");
   const liveHealthcheckApprovalPacket = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-approval-packet.sh");
+  const liveHealthcheckApprovalReview = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-approval-review.sh");
   const liveHealthcheckPreflight = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-preflight.sh");
   const liveHealthcheckReadiness = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-readiness.sh");
   const liveHealthcheckReport = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-report.sh");
@@ -213,6 +214,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(doc.includes("register-remote-collector.sh"));
   assert(doc.includes("I_UNDERSTAND_THIS_ONLY_UPDATES_CONTROL_CENTER_REGISTRY"));
   assert(doc.includes("live-healthcheck-approval-packet.sh"));
+  assert(doc.includes("live-healthcheck-approval-review.sh"));
   assert(doc.includes("live-healthcheck-approval-packets"));
   assert(doc.includes("install-collector-cron.sh"));
   assert(doc.includes("install-managed-action-inbox-cron.sh"));
@@ -226,6 +228,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(existsSync(liveHealthcheckApproval));
   assert(existsSync(liveHealthcheckApprovalExample));
   assert(existsSync(liveHealthcheckApprovalPacket));
+  assert(existsSync(liveHealthcheckApprovalReview));
   assert(existsSync(liveHealthcheckPreflight));
   assert(existsSync(liveHealthcheckReadiness));
   assert(existsSync(liveHealthcheckReport));
@@ -501,6 +504,20 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(approvalPacketText, /callsManagedActionsLiveApi: false/);
   assert.match(approvalPacketText, /writesOpenClawInstanceDirs: false/);
   assert.doesNotMatch(approvalPacketText, /api\/managed-actions\/live/);
+  const approvalReviewText = readFileSync(liveHealthcheckApprovalReview, "utf8");
+  assert.match(approvalReviewText, /live-healthcheck-approval-review\.sh status/);
+  assert.match(approvalReviewText, /live-healthcheck-approval-review\.sh check/);
+  assert.match(approvalReviewText, /live-healthcheck-readiness\.sh/);
+  assert.match(approvalReviewText, /install-managed-action-inbox-cron\.sh/);
+  assert.match(approvalReviewText, /managed-action-inbox-runner\.sh/);
+  assert.match(approvalReviewText, /ready_for_human_approval/);
+  assert.match(approvalReviewText, /approved_ready_for_live_window/);
+  assert.match(approvalReviewText, /generatesApprovalPacket: false/);
+  assert.match(approvalReviewText, /writesApprovalFile: false/);
+  assert.match(approvalReviewText, /opensLiveGate: false/);
+  assert.match(approvalReviewText, /callsManagedActionsLiveApi: false/);
+  assert.match(approvalReviewText, /writesOpenClawInstanceDirs: false/);
+  assert.doesNotMatch(approvalReviewText, /api\/managed-actions\/live/);
   const readinessText = readFileSync(liveHealthcheckReadiness, "utf8");
   assert.match(readinessText, /live-healthcheck-readiness\.sh status/);
   assert.match(readinessText, /live-healthcheck-readiness\.sh check/);

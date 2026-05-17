@@ -500,6 +500,8 @@ repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh run-approved
 
 `live-healthcheck-readiness.sh status/check` 用于 openclaw 或人工查看下一步：它只读取总闸门、dry-run 证据、批准前证据包、approval 和 live window 状态，并把下一步命令统一收敛到 `live-healthcheck-rollout-runner.sh prepare/run-approved` 主链路。它不生成新证据包、不写 approval、不打开 live gate、不调用 managed action live API。`status` 不执行现有实例 healthcheck；`check` 会让总闸门执行只读 healthcheck，确认 Tom 当前实例仍正常。
 
+`live-healthcheck-approval-review.sh status/check` 是人工批准前的只读审查入口：它聚合 readiness、approval packet、approval、dry-run inbox cron 和 inbox pending 状态，输出 `ready_for_human_approval`、`approved_ready_for_live_window` 或 `blocked_preconditions`。`status` 不执行 healthcheck；`check` 只让 readiness 执行只读 healthcheck。它不生成新证据包、不写 approval、不打开 live gate、不调用 managed action live API，也不修改任何 OpenClaw 实例目录。
+
 `live-healthcheck-rollout-runner.sh prepare` 用于自动推进到人工批准前：如果 dry-run 证据已经 ready，它会准备 approval 模板、生成并校验批准前证据包，再运行 readiness `check`。它只写 control-center runtime 下的模板和证据文件，不批准 approval、不打开 live gate、不调用 managed action live API、不修改任何 OpenClaw 实例目录。
 
 `ops/local/final-go-live-runner.sh prepare` 是本机侧总入口：它先运行 `final-go-live-status.sh check`，确认 Tom 当前实例 healthcheck 通过且总闸门下一步确实是 Tom `live-healthcheck-rollout-runner.sh prepare` 后，才 SSH 到 Tom 自动推进到人工批准前。它不批准 approval、不打开 live gate、不调用 managed action live API。`run-approved` 必须额外提供 `CONFIRM_FINAL_GO_LIVE_RUNNER` 和 `LOCAL_API_TOKEN`，并由 Tom runner 再次校验 approval/readiness。
