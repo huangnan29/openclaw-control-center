@@ -775,14 +775,16 @@ Tom 单 Oracle 上线下一步：
 - 已新增 `ops/tom-readonly/managed-action-text-bridge.sh`。
 - 该脚本支持 `parse <command.txt|->`、`plan <command.txt|->`、`dry-run <command.txt|->`，也支持 `MANAGED_ACTION_TEXT` 和 `MANAGED_ACTION_TEXT_FILE`。
 - 桥接层会把机器人文本统一写入 control-center runtime 的 `managed-action-command.txt`，再调用底层 `managed-action-command-runner.sh parse-text/plan-text/dry-run-text`。
+- 已修正 Tom repo 布局下的默认 runtime 位置：从 `repo/ops/tom-readonly` 调用时，桥接层默认写部署根目录的 `runtime/managed-action-command.txt`，并把同一个 `DEPLOY_DIR` 传给底层 runner。
 - `parse/plan` 只写 control-center runtime 文本副本并返回精简 JSON 摘要；不联网、不写审计、不调用 live。
 - `dry-run` 必须设置 `CONFIRM_MANAGED_ACTION_TEXT_BRIDGE=I_UNDERSTAND_THIS_ONLY_RUNS_MANAGED_ACTION_DRY_RUN_TEXT`，随后才会自动补齐底层 runner 的 dry-run 确认并调用 `dry-run-text`。
 - 输出摘要包含 `runnerStatus`、`target`、`operationRequestId`、`commandPreview` 和安全字段，便于机器人直接回传给 Discord/OpenClaw。
-- 已新增 `test/managed-action-text-bridge.test.ts`，覆盖 parse 写入 runtime 并调用 runner、plan 只调用 `plan-text`、dry-run 缺桥接确认不调用 runner、dry-run 设置底层确认且不泄露令牌。
+- 已新增 `test/managed-action-text-bridge.test.ts`，覆盖 parse 写入 runtime 并调用 runner、plan 只调用 `plan-text`、dry-run 缺桥接确认不调用 runner、dry-run 设置底层确认且不泄露令牌、Tom repo 布局下默认写部署根 runtime。
 - 已更新 `ops/tom-readonly/README.md`、`docs/MULTI_INSTANCE_READONLY.md`、`implementation_plan.md` 和 `test/oss-readiness.test.ts`，记录桥接入口和安全边界。
 - 已验证 `bash -n ops/tom-readonly/managed-action-text-bridge.sh`。
+- 已验证 `npm test -- test/managed-action-text-bridge.test.ts`，5/5 通过。
 - 已验证 `npm test -- test/managed-action-text-bridge.test.ts test/managed-action-command-runner.test.ts test/oss-readiness.test.ts`，18/18 通过。
-- 已验证 `npm test -- test/managed-action-text-bridge.test.ts test/managed-action-command-runner.test.ts test/managed-actions-dry-run.test.ts test/managed-action-live-readiness.test.ts test/managed-action-live-gate.test.ts test/oss-readiness.test.ts test/readonly-multi-instance-safety.test.ts`，28/28 通过。
+- 已验证 `npm test -- test/managed-action-text-bridge.test.ts test/managed-action-command-runner.test.ts test/managed-actions-dry-run.test.ts test/managed-action-live-readiness.test.ts test/managed-action-live-gate.test.ts test/oss-readiness.test.ts test/readonly-multi-instance-safety.test.ts`，29/29 通过。
 - 已验证 `npm run build`。
 - 已验证 `git diff --check`。
 

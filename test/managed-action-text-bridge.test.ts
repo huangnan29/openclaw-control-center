@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -110,8 +110,9 @@ function runBridge(
   mode: "parse" | "plan" | "dry-run",
   input: string | undefined,
   env: Record<string, string>,
+  script = SCRIPT,
 ) {
-  const result = spawnSync(SCRIPT, input ? [mode, input] : [mode], {
+  const result = spawnSync(script, input ? [mode, input] : [mode], {
     cwd: ROOT,
     env: {
       ...process.env,
@@ -245,6 +246,37 @@ test("managed action text bridge dry-run 设置 runner 确认并隐藏令牌", a
     assert.equal(call.confirm, "I_UNDERSTAND_THIS_ONLY_CALLS_MANAGED_ACTION_DRY_RUN_API");
     assert.equal(call.tokenSource, "container");
     assert.equal(call.hasLocalToken, true);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("managed action text bridge 在 Tom repo 布局下默认写部署根 runtime", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-managed-action-text-bridge-layout-"));
+  try {
+    const deployDir = join(dir, "deploy");
+    const scriptDir = join(deployDir, "repo", "ops", "tom-readonly");
+    await mkdir(scriptDir, { recursive: true });
+    await mkdir(join(deployDir, "runtime"), { recursive: true });
+    const copiedScript = join(scriptDir, "managed-action-text-bridge.sh");
+    await copyFile(SCRIPT, copiedScript);
+    await chmod(copiedScript, 0o755);
+    const input = await writeInput(dir);
+    const { runner, log } = await makeFakeRunner(dir);
+
+    const { exitCode, report } = runBridge("parse", input, {
+      MANAGED_ACTION_COMMAND_RUNNER: runner,
+      FAKE_RUNNER_CALL_LOG: log,
+    }, copiedScript);
+
+    assert.equal(exitCode, 0);
+    assert.equal(report.status, "bridge_parse_completed");
+    assert.equal(report.inputPath, join(deployDir, "runtime", "managed-action-command.txt"));
+    const written = await readFile(join(deployDir, "runtime", "managed-action-command.txt"), "utf8");
+    assert.equal(written, "对 tom 运行 zhihu-human-ops-writing dry-run\n");
+    assert.equal(existsSync(join(deployDir, "repo", "runtime", "managed-action-command.txt")), false);
+    const call = JSON.parse(await readFile(log, "utf8"));
+    assert.equal(call.file, join(deployDir, "runtime", "managed-action-command.txt"));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

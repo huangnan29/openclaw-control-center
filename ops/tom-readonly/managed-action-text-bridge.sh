@@ -7,7 +7,12 @@ set +x
 # parse/plan 不联网；dry-run 需要桥接层确认，并且只会继续调用 runner 的 dry-run-text。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEPLOY_DIR="${DEPLOY_DIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
+DEFAULT_DEPLOY_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+if [ "$(basename "$DEFAULT_DEPLOY_DIR")" = "repo" ] && [ -d "${DEFAULT_DEPLOY_DIR}/../runtime" ]; then
+  DEFAULT_DEPLOY_DIR="$(cd "${DEFAULT_DEPLOY_DIR}/.." && pwd)"
+fi
+DEPLOY_DIR="${DEPLOY_DIR:-$DEFAULT_DEPLOY_DIR}"
+export DEPLOY_DIR
 RUNTIME_DIR="${RUNTIME_DIR:-${DEPLOY_DIR}/runtime}"
 MANAGED_ACTION_COMMAND_RUNNER="${MANAGED_ACTION_COMMAND_RUNNER:-${SCRIPT_DIR}/managed-action-command-runner.sh}"
 MANAGED_ACTION_TEXT="${MANAGED_ACTION_TEXT:-}"
