@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-只读 healthcheck live 演练留证增强：新增实例影响快照脚本，并接入一次性演练窗口，确保后续真实演练会自动生成 before/after 证据并比较控制中心是否回到只读状态、gateway 是否稳定、实例挂载是否仍只读。
+只读 healthcheck live 演练人工批准收口：新增 approval JSON 模板与校验脚本，并让一次性演练窗口在打开 live gate 前强制校验批准记录。
 
 ## 本轮不做
 
@@ -22,6 +22,7 @@
 - 使用 `repo/ops/tom-readonly/live-healthcheck-window.sh run`。
 - 必须显式提供 `CONFIRM_LIVE_HEALTHCHECK_WINDOW`、`CONFIRM_LIVE_HEALTHCHECK` 和 `LOCAL_API_TOKEN`。
 - 演练窗口会临时启用 control-center live healthcheck 配置，动作仍限制为 `healthcheck`。
+- 必须先生成并人工填写 `runtime/live-healthcheck-approval.json`，通过 `live-healthcheck-approval.sh check` 后才允许打开窗口。
 - 脚本退出前必须恢复只读状态，并重新通过 `healthcheck.sh`。
 - 脚本会自动生成 before/after 实例影响快照并比较。
 - 未获得人工批准前，不执行 `/api/managed-actions/live`。
@@ -283,7 +284,23 @@
 - 已在 Tom 只读状态下生成 before/after 快照，并验证 `instance-impact-snapshot.sh compare` 通过。
 - 已验证 Tom `live-healthcheck-window.sh status` 仍显示未检测到临时 override，`READONLY_MODE=true`，live gate 与 executor 未启用，readiness 仍为 `blocked`。
 - 本轮仍未执行 `/api/managed-actions/live`。
+- 已新增人工批准记录脚本：`ops/tom-readonly/live-healthcheck-approval.sh`。
+- 已新增批准记录样板：`ops/tom-readonly/live-healthcheck-approval.example.json`，默认 `approved=false`。
+- 批准记录校验要求：`approved=true`、`approvedAt` 可解析且未过期、`approvedBy` 已填写、实例为 `tom`、动作为 `healthcheck`、操作者为 `Anan`、风险为 `low`、确认短语匹配、`mutatesOpenClawInstance=false`，并且 checklist 全部为 true。
+- 已让 `live-healthcheck-window.sh enable/run` 在写入临时 compose override 前调用 `live-healthcheck-approval.sh check`。
+- 已让窗口脚本把 `INSTANCE_ID` 与 `OPERATOR` 显式传给 preflight 和 smoke。
+- 已更新 `ops/tom-readonly/README.md`，记录 approval 模板生成、人工编辑和校验流程。
+- 已增强 `test/oss-readiness.test.ts`，覆盖 approval 脚本、样板和窗口脚本接入。
+- 已验证 `bash -n ops/tom-readonly/live-healthcheck-approval.sh && bash -n ops/tom-readonly/live-healthcheck-window.sh`。
+- 已验证 approval 模板默认校验失败，人工填入 `approved=true`、`approvedAt`、`approvedBy` 和 checklist 后校验通过。
+- 已验证 `npm test -- test/oss-readiness.test.ts test/managed-actions-dry-run.test.ts test/managed-action-live-gate.test.ts`。
+- 已验证 `npm run build`。
+- 已提交并推送 `e6c629f ops: require approval record for live healthcheck`。
+- 已部署到 Tom，并验证运行提交 `e6c629f`。
+- 已在 Tom 生成候选 approval 模板，并验证未批准模板不会通过校验。
+- 已验证 Tom `live-healthcheck-window.sh status` 仍显示未检测到临时 override，`READONLY_MODE=true`，live gate 与 executor 未启用，readiness 仍为 `blocked`。
+- 本轮未执行 `enable` 或 `run`，未调用 `/api/managed-actions/live`。
 
 ## 阶段完成后的下一步
 
-人工批准后执行一次只读 healthcheck live 演练；演练前后都必须确认现有 OpenClaw 实例未被重启、未被写入、未被触发任务。若演练通过，再进入单动作灰度策略收口；若失败，保持只读并先修复失败点。
+人工填写并校验 `runtime/live-healthcheck-approval.json` 后，执行一次只读 healthcheck live 演练；演练前后都必须确认现有 OpenClaw 实例未被重启、未被写入、未被触发任务。若演练通过，再进入单动作灰度策略收口；若失败，保持只读并先修复失败点。

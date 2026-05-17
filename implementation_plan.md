@@ -6,7 +6,7 @@
 
 ## 当前阶段
 
-当前阶段推进 **人工批准的只读 healthcheck live 演练**：中央 control-center 已完成 dry-run API、dry-run UI、人工确认字段、审计检索视图、默认关闭的 live gate、测试用 mock executor、真实执行审计结果类型、dry-run 引用校验、灰度配置解析、rollout 决策响应、只读 readiness 卡片、生产执行器最小骨架、显式挂载开关、只读 healthcheck 人工演练材料、Tom preflight、一次性演练窗口脚本和实例影响快照留证。Tom 仍不默认启用 live gate 或 executor；下一步只有在人工批准并提供本地令牌后，才执行一次 `healthcheck` live 演练。
+当前阶段推进 **人工批准的只读 healthcheck live 演练**：中央 control-center 已完成 dry-run API、dry-run UI、人工确认字段、审计检索视图、默认关闭的 live gate、测试用 mock executor、真实执行审计结果类型、dry-run 引用校验、灰度配置解析、rollout 决策响应、只读 readiness 卡片、生产执行器最小骨架、显式挂载开关、只读 healthcheck 人工演练材料、Tom preflight、一次性演练窗口脚本、实例影响快照留证和结构化 approval 记录。Tom 仍不默认启用 live gate 或 executor；下一步只有在 approval 文件人工填写并校验通过、且提供本地令牌后，才执行一次 `healthcheck` live 演练。
 
 ## 推进原则
 
@@ -128,5 +128,6 @@
 11. healthcheck live preflight：只读检查 rollout、live 开关和 readiness，不调用 live API。
 12. live healthcheck 演练切换与回滚脚本：只作用于 control-center 容器配置，演练后必须回到只读监控状态。
 13. 实例影响快照留证：演练前后比较 gateway、监听端口、容器挂载、live 开关和 readiness。
-14. 白名单真实执行灰度：默认关闭，只在单实例、单动作、人工确认下开启。
-15. 扩展跨服务器：等第二台 Oracle 能安全接入后，再按 collector 只读方式加入中央视图。
+14. 结构化人工批准记录：打开 live 窗口前校验 approval 文件，记录批准人、时间、动作、确认短语和 checklist。
+15. 白名单真实执行灰度：默认关闭，只在单实例、单动作、人工确认下开启。
+16. 扩展跨服务器：等第二台 Oracle 能安全接入后，再按 collector 只读方式加入中央视图。
