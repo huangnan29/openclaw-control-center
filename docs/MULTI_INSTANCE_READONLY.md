@@ -435,6 +435,17 @@ repo/ops/tom-readonly/managed-action-inbox-runner.sh run-pending
 
 `managed-action-inbox-runner.sh` 不移动、不删除、不修改 OpenClaw workspace 中的请求文件；它只把处理状态、结果和已处理 key 写入 control-center runtime 的 `managed-action-inbox-runner/`。重复运行时，同一路径同一内容不会重复执行；如果文本被修改，会作为新的请求重新评估。`run-pending` 与 `run-next` 一样必须显式确认，只会调用 dry-run，并且最多处理 `MANAGED_ACTION_INBOX_MAX_PER_RUN` 条待处理请求，适合后续接 cron 或手动一键处理。该方式把“Discord 消息 → Tom workspace 文本 → control-center dry-run 审计”串起来，同时保持 OpenClaw 实例目录只读读取、live gate 关闭、真实 skill 不执行。
 
+如果要让 control-center 自动消费 inbox dry-run 请求，可以先审查再安装受控 cron：
+
+```bash
+repo/ops/tom-readonly/install-managed-action-inbox-cron.sh status
+repo/ops/tom-readonly/install-managed-action-inbox-cron.sh plan
+CONFIRM_MANAGED_ACTION_INBOX_CRON=I_UNDERSTAND_THIS_ONLY_INSTALLS_DRY_RUN_INBOX_CRON \
+repo/ops/tom-readonly/install-managed-action-inbox-cron.sh apply
+```
+
+`install-managed-action-inbox-cron.sh` 只更新当前用户 crontab 中的 `OPENCLAW_MANAGED_ACTION_INBOX_CRON` 标记块。它安装的命令只会执行 `managed-action-inbox-runner.sh run-pending`，不调用 managed action live API，不修改 OpenClaw 实例目录，不重启实例；如需关闭，使用同一个确认短语执行 `remove`。
+
 为了让 Tom 在 Discord 中稳定使用 inbox，可以安装一段受控 `AGENTS.md` 规范：
 
 ```bash

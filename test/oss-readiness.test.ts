@@ -149,6 +149,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   const managedActionCommandRunner = path.join(ROOT, "ops", "tom-readonly", "managed-action-command-runner.sh");
   const managedActionTextBridge = path.join(ROOT, "ops", "tom-readonly", "managed-action-text-bridge.sh");
   const managedActionInboxRunner = path.join(ROOT, "ops", "tom-readonly", "managed-action-inbox-runner.sh");
+  const managedActionInboxCronInstaller = path.join(ROOT, "ops", "tom-readonly", "install-managed-action-inbox-cron.sh");
   const managedActionAgentsInstaller = path.join(ROOT, "ops", "tom-readonly", "install-managed-action-agents-instructions.sh");
   const managedActionDryRunGate = path.join(ROOT, "ops", "tom-readonly", "managed-action-dry-run-gate.sh");
   const discoverRemoteOracleCredentials = path.join(ROOT, "ops", "local", "discover-remote-oracle-credentials.sh");
@@ -214,6 +215,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(doc.includes("live-healthcheck-approval-packet.sh"));
   assert(doc.includes("live-healthcheck-approval-packets"));
   assert(doc.includes("install-collector-cron.sh"));
+  assert(doc.includes("install-managed-action-inbox-cron.sh"));
   assert(doc.includes("服务器健康"));
   assert(doc.includes("/srv/openclaw-work"));
   assert(doc.includes(":ro"));
@@ -233,6 +235,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(existsSync(liveHealthcheckRollout));
   assert(existsSync(managedActionTextBridge));
   assert(existsSync(managedActionInboxRunner));
+  assert(existsSync(managedActionInboxCronInstaller));
   assert(existsSync(managedActionAgentsInstaller));
   assert(existsSync(managedActionDryRunGate));
   assert(existsSync(discoverRemoteOracleCredentials));
@@ -610,6 +613,20 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(managedActionInboxRunnerText, /callsManagedActionsLiveApi: false/);
   assert.match(managedActionInboxRunnerText, /writesOpenClawInstanceDirs: false/);
   assert.doesNotMatch(managedActionInboxRunnerText, /api\/managed-actions\/live/);
+  const managedActionInboxCronInstallerText = readFileSync(managedActionInboxCronInstaller, "utf8");
+  assert.match(managedActionInboxCronInstallerText, /install-managed-action-inbox-cron\.sh status/);
+  assert.match(managedActionInboxCronInstallerText, /install-managed-action-inbox-cron\.sh plan/);
+  assert.match(managedActionInboxCronInstallerText, /install-managed-action-inbox-cron\.sh apply/);
+  assert.match(managedActionInboxCronInstallerText, /OPENCLAW_MANAGED_ACTION_INBOX_CRON_BEGIN/);
+  assert.match(managedActionInboxCronInstallerText, /managed-action-inbox-runner\.sh run-pending/);
+  assert.match(managedActionInboxCronInstallerText, /CONFIRM_MANAGED_ACTION_INBOX_CRON/);
+  assert.match(managedActionInboxCronInstallerText, /I_UNDERSTAND_THIS_ONLY_INSTALLS_DRY_RUN_INBOX_CRON/);
+  assert.match(managedActionInboxCronInstallerText, /CONFIRM_MANAGED_ACTION_INBOX_RUNNER/);
+  assert.match(managedActionInboxCronInstallerText, /MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container/);
+  assert.match(managedActionInboxCronInstallerText, /writesCrontabOnly/);
+  assert.match(managedActionInboxCronInstallerText, /callsManagedActionsLiveApi: false/);
+  assert.match(managedActionInboxCronInstallerText, /writesOpenClawInstanceDirs: false/);
+  assert.doesNotMatch(managedActionInboxCronInstallerText, /api\/managed-actions\/live/);
   const managedActionAgentsInstallerText = readFileSync(managedActionAgentsInstaller, "utf8");
   assert.match(managedActionAgentsInstallerText, /install-managed-action-agents-instructions\.sh status/);
   assert.match(managedActionAgentsInstallerText, /install-managed-action-agents-instructions\.sh plan/);

@@ -897,6 +897,23 @@ Tom 单 Oracle 上线下一步：
 
 当前已经停在人工批准前。下一步有两个可选路径：优先让 Anan 从 Discord 发“控制中心 dry-run：对 tom 运行 zhihu-human-ops-writing dry-run”，完成真实 Discord/OpenClaw inbox smoke；如果要继续 live healthcheck 演练，则必须由 Anan 审查证据包后显式运行 `CONFIRM_APPROVAL_RECORD=I_APPROVE_LIVE_HEALTHCHECK_RECORD APPROVED_BY=Anan repo/ops/tom-readonly/live-healthcheck-approval.sh approve runtime/live-healthcheck-approval.json`，之后才允许执行一次性 `run-approved`。仍不得绕过人工 approval。
 
+## 本轮新增（inbox dry-run cron 安装器）
+
+- 已新增 `ops/tom-readonly/install-managed-action-inbox-cron.sh`。
+- 该脚本支持 `status`、`plan`、`apply`、`remove`。
+- `status/plan` 只读取当前用户 crontab，并展示将安装的 `OPENCLAW_MANAGED_ACTION_INBOX_CRON` 受控块，不写 crontab。
+- `apply/remove` 必须设置 `CONFIRM_MANAGED_ACTION_INBOX_CRON=I_UNDERSTAND_THIS_ONLY_INSTALLS_DRY_RUN_INBOX_CRON`。
+- 安装后的 cron 只调用 `managed-action-inbox-runner.sh run-pending`，并自动带上 `CONFIRM_MANAGED_ACTION_INBOX_RUNNER`、`MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container`、`MANAGED_ACTION_INBOX_SOURCE=control-center-container`、`MANAGED_ACTION_INBOX_MAX_PER_RUN`。
+- 安装器安全字段保持 `callsManagedActionsLiveApi=false`、`writesOpenClawInstanceDirs=false`、`restartsOpenClawInstances=false`、`opensLiveGate=false`。
+- 已新增 `test/managed-action-inbox-cron.test.ts`，覆盖 plan 不写 crontab、apply 缺确认阻断、apply 安装受控块、remove 移除受控块、runner 缺失阻断。
+- 已更新 `ops/tom-readonly/README.md`、`docs/MULTI_INSTANCE_READONLY.md`、`implementation_plan.md` 和 `test/oss-readiness.test.ts`，记录 cron 安装器和安全边界。
+- 已验证 `bash -n ops/tom-readonly/install-managed-action-inbox-cron.sh`。
+- 已验证 `npm test -- test/managed-action-inbox-cron.test.ts`，4/4 通过。
+
+## 阶段完成后的下一步
+
+继续验证 cron 安装器相关回归和构建；部署到 Tom 后先执行 `status/plan` 审查，不直接安装 cron。若 plan 结果符合预期，再等待 Anan 确认是否安装 dry-run inbox cron；仍不得执行 approval `approve`、不得打开 live gate。
+
 ## 本轮新增（inbox dry-run 批处理入口）
 
 - 已扩展 `ops/tom-readonly/managed-action-inbox-runner.sh`，新增 `run-pending` 模式。

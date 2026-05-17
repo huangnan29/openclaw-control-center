@@ -12,6 +12,8 @@
 
 补充 dry-run inbox 状态：`managed-action-inbox-runner.sh run-pending` 已作为 `run-next` 的批处理入口，必须使用同一个显式确认短语，最多处理 `MANAGED_ACTION_INBOX_MAX_PER_RUN` 条待处理请求，只调用文本桥接层 dry-run，只写 control-center runtime，不移动、不删除、不修改 OpenClaw workspace 请求文件。
 
+补充自动消费状态：`install-managed-action-inbox-cron.sh` 已作为 `run-pending` 的受控 cron 安装入口设计；`status/plan` 不写 crontab，`apply/remove` 必须显式确认，只更新当前用户 crontab 的 `OPENCLAW_MANAGED_ACTION_INBOX_CRON` 标记块。它只用于自动创建 dry-run 审计，不调用 live API、不修改实例目录、不重启实例。
+
 ## 推进原则
 
 1. 每次只推进一个可验证的小闭环。
