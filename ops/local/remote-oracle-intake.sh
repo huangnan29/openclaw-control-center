@@ -5,7 +5,8 @@ set +x
 # 本机侧第二台 Oracle 凭据接入编排器。
 # plan 只渲染 push 配置摘要，不写文件、不联网。
 # apply 必须显式确认，只写本机 push 配置，并通过 SSH 写 Tom control-center runtime。
-# 本脚本不连接第二台 Oracle，不写 Tom registry，不修改任何 OpenClaw 实例目录，不调用 managed-actions live API。
+# run 额外显式确认后，会在 apply 后触发 Tom 端跨服务器只读 rollout runner。
+# 本脚本不会修改任何 OpenClaw 实例目录，不调用 managed-actions live API。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
@@ -14,6 +15,7 @@ PUSH_SCRIPT="${PUSH_SCRIPT:-${SCRIPT_DIR}/push-remote-collector-credentials.sh}"
 DISCOVERY_CONFIG="${DISCOVERY_CONFIG:-${ROOT_DIR}/ops/local/discover-remote-oracle-credentials.example.json}"
 PUSH_CONFIG_FILE="${PUSH_CONFIG_FILE:-${ROOT_DIR}/runtime/push-remote-collector-credentials.json}"
 CONFIRM_REMOTE_ORACLE_INTAKE="${CONFIRM_REMOTE_ORACLE_INTAKE:-}"
+CONFIRM_REMOTE_ORACLE_INTAKE_RUNNER="${CONFIRM_REMOTE_ORACLE_INTAKE_RUNNER:-}"
 REMOTE_ORACLE_INTAKE_OVERWRITE="${REMOTE_ORACLE_INTAKE_OVERWRITE:-false}"
 
 fail() {
@@ -30,6 +32,7 @@ usage() {
 用法：
   remote-oracle-intake.sh plan
   remote-oracle-intake.sh apply
+  remote-oracle-intake.sh run
 
 必填环境变量：
   REMOTE_ORACLE_HOST=<真实第二台 Oracle 公网 IP 或域名>
@@ -45,11 +48,14 @@ usage() {
 安全确认：
   apply 必须设置：
     CONFIRM_REMOTE_ORACLE_INTAKE=I_UNDERSTAND_THIS_WRITES_LOCAL_PUSH_CONFIG_AND_TOM_RUNTIME_ONLY
+  run 还必须设置：
+    CONFIRM_REMOTE_ORACLE_INTAKE_RUNNER=I_UNDERSTAND_THIS_PUSHES_CREDENTIALS_AND_RUNS_TOM_SAFE_ROLLOUT
 
 安全边界：
   plan 不写文件、不联网。
   apply 只写本机 push 配置和 Tom control-center runtime。
   apply 不连接第二台 Oracle、不写 registry、不修改任何 OpenClaw 实例目录、不调用 managed-actions live API。
+  run 会通过 Tom 端 rollout runner 自动推进已满足安全门禁的阶段；它可能只读连接第二台 Oracle、写 Tom control-center registry，但不会写 OpenClaw 实例目录。
 TEXT
 }
 
@@ -155,6 +161,47 @@ console.log(JSON.stringify({
 NODE
 }
 
+parse_run_report() {
+  APPLY_REPORT="$1" RUNNER_REPORT="$2" PUSH_CONFIG_FILE="$PUSH_CONFIG_FILE" node <<'NODE'
+function parse(name) {
+  try {
+    return JSON.parse(process.env[name] || "{}");
+  } catch (error) {
+    return { status: "invalid_json", error: error instanceof Error ? error.message : String(error) };
+  }
+}
+const apply = parse("APPLY_REPORT");
+const runner = parse("RUNNER_REPORT");
+console.log(JSON.stringify({
+  schemaVersion: 1,
+  status: runner.exitCode === 0 ? "ran_rollout_runner" : "blocked_after_intake",
+  mode: "run",
+  generatedAt: new Date().toISOString(),
+  pushConfigFile: process.env.PUSH_CONFIG_FILE,
+  apply,
+  rolloutRunner: runner,
+  nextCommands: [
+    "repo/ops/tom-readonly/go-live-gate.sh status runtime/remote-onboarding/remote-oracle",
+    "repo/ops/tom-readonly/go-live-gate.sh check runtime/remote-onboarding/remote-oracle",
+  ],
+  safety: {
+    writesLocalPushConfig: true,
+    writesTomControlCenterRuntime: true,
+    mayUpdateTomControlCenterRegistry: true,
+    connectsTomSsh: true,
+    mayConnectSecondOracleViaTomReadonlyPreflight: true,
+    writesRemoteCollectorNode: false,
+    writesOpenClawInstanceDirs: false,
+    startsContainers: false,
+    mutatesOpenClawInstance: false,
+    restartsOpenClawInstance: false,
+    callsLiveApi: false,
+    outputsPrivateKeyContent: false,
+  },
+}, null, 2));
+NODE
+}
+
 render_push_config() {
   "$DISCOVERY_SCRIPT" render-push-config "$DISCOVERY_CONFIG"
 }
@@ -164,6 +211,140 @@ write_push_config() {
     REMOTE_ORACLE_PUSH_CONFIG_OUTPUT="$PUSH_CONFIG_FILE" \
     REMOTE_ORACLE_PUSH_CONFIG_OVERWRITE="$REMOTE_ORACLE_INTAKE_OVERWRITE" \
     "$DISCOVERY_SCRIPT" write-push-config "$DISCOVERY_CONFIG"
+}
+
+run_apply_flow() {
+  local write_output
+  local plan_output
+  local apply_output
+  write_output="$(write_push_config)"
+  plan_output="$("$PUSH_SCRIPT" plan "$PUSH_CONFIG_FILE")"
+  apply_output="$(CONFIRM_PUSH_REMOTE_COLLECTOR_CREDENTIALS=I_UNDERSTAND_THIS_ONLY_PUSHES_REMOTE_COLLECTOR_CREDENTIALS_TO_TOM_RUNTIME "$PUSH_SCRIPT" apply "$PUSH_CONFIG_FILE")"
+  parse_apply_report "$write_output" "$plan_output" "$apply_output"
+}
+
+run_tom_rollout_runner() {
+  PUSH_CONFIG_FILE="$PUSH_CONFIG_FILE" node <<'NODE'
+const fs = require("node:fs");
+const { spawnSync } = require("node:child_process");
+
+function fail(message) {
+  console.error(`[失败] ${message}`);
+  process.exit(2);
+}
+
+function asRecord(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : undefined;
+}
+
+function readString(value, fallback = "") {
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : fallback;
+}
+
+function readPort(value, fallback) {
+  const parsed = Number.parseInt(String(value ?? fallback), 10);
+  if (!Number.isFinite(parsed) || parsed < 1 || parsed > 65535) fail("tom.port 必须在 1-65535 之间");
+  return parsed;
+}
+
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
+const configFile = process.env.PUSH_CONFIG_FILE;
+if (!configFile) fail("PUSH_CONFIG_FILE 必须填写");
+let config;
+try {
+  config = JSON.parse(fs.readFileSync(configFile, "utf8"));
+} catch (error) {
+  fail(`无法读取 push 配置：${error instanceof Error ? error.message : String(error)}`);
+}
+
+const tom = asRecord(config.tom) || {};
+const server = asRecord(config.server) || {};
+const host = readString(tom.host);
+if (!host) fail("tom.host 必须填写");
+const user = readString(tom.user, "ubuntu");
+const port = readPort(tom.port, 22);
+const deployDir = readString(tom.deployDir, "/srv/openclaw-control-center-readonly");
+const serverId = readString(server.id, "remote-oracle");
+const strictHostKeyChecking = readString(tom.strictHostKeyChecking, "accept-new");
+const connectTimeoutSeconds = readPort(tom.connectTimeoutSeconds, 15);
+const sshKey = readString(tom.sshKey);
+const knownHostsFile = readString(tom.knownHostsFile);
+const bundlePath = `runtime/remote-onboarding/${serverId}`;
+const remoteCommand = [
+  `cd ${shellQuote(deployDir)}`,
+  `CONFIRM_REMOTE_COLLECTOR_ROLLOUT_RUNNER=I_UNDERSTAND_THIS_RUNS_SAFE_REMOTE_COLLECTOR_ROLLOUT_STEPS repo/ops/tom-readonly/remote-collector-rollout-runner.sh run ${shellQuote(bundlePath)}`,
+  `repo/ops/tom-readonly/go-live-gate.sh status ${shellQuote(bundlePath)}`,
+].join(" && ");
+
+const args = [
+  "-p",
+  String(port),
+  "-o",
+  "BatchMode=yes",
+  "-o",
+  `ConnectTimeout=${connectTimeoutSeconds}`,
+  "-o",
+  `StrictHostKeyChecking=${strictHostKeyChecking}`,
+];
+if (knownHostsFile) args.push("-o", `UserKnownHostsFile=${knownHostsFile}`);
+if (sshKey) args.push("-i", sshKey);
+args.push(`${user}@${host}`, remoteCommand);
+
+const result = spawnSync("ssh", args, {
+  encoding: "utf8",
+  maxBuffer: 20 * 1024 * 1024,
+});
+
+function compact(text) {
+  return String(text || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 120);
+}
+
+console.log(JSON.stringify({
+  status: result.status === 0 ? "completed" : "failed",
+  exitCode: typeof result.status === "number" ? result.status : 1,
+  target: {
+    host,
+    user,
+    port,
+    deployDir,
+    serverId,
+    bundlePath,
+  },
+  commandPreview: [
+    `ssh ${user}@${host} <tom rollout runner>`,
+  ],
+  stdoutLines: compact(result.stdout),
+  stderrLines: compact(result.stderr),
+  safety: {
+    connectsTomSsh: true,
+    mayConnectSecondOracleViaTomReadonlyPreflight: true,
+    writesRemoteCollectorNode: false,
+    writesOpenClawInstanceDirs: false,
+    startsContainers: false,
+    mutatesOpenClawInstance: false,
+    restartsOpenClawInstance: false,
+    callsLiveApi: false,
+    outputsPrivateKeyContent: false,
+  },
+}, null, 2));
+NODE
+}
+
+require_intake_confirm() {
+  [ "$CONFIRM_REMOTE_ORACLE_INTAKE" = "I_UNDERSTAND_THIS_WRITES_LOCAL_PUSH_CONFIG_AND_TOM_RUNTIME_ONLY" ] || \
+    fail "必须设置 CONFIRM_REMOTE_ORACLE_INTAKE=I_UNDERSTAND_THIS_WRITES_LOCAL_PUSH_CONFIG_AND_TOM_RUNTIME_ONLY"
+}
+
+require_runner_confirm() {
+  [ "$CONFIRM_REMOTE_ORACLE_INTAKE_RUNNER" = "I_UNDERSTAND_THIS_PUSHES_CREDENTIALS_AND_RUNS_TOM_SAFE_ROLLOUT" ] || \
+    fail "必须设置 CONFIRM_REMOTE_ORACLE_INTAKE_RUNNER=I_UNDERSTAND_THIS_PUSHES_CREDENTIALS_AND_RUNS_TOM_SAFE_ROLLOUT"
 }
 
 main() {
@@ -178,16 +359,19 @@ main() {
       INPUT_JSON="$rendered" STATUS="planned" MODE="plan" PUSH_CONFIG_FILE="$PUSH_CONFIG_FILE" json_summary
       ;;
     apply)
-      [ "$CONFIRM_REMOTE_ORACLE_INTAKE" = "I_UNDERSTAND_THIS_WRITES_LOCAL_PUSH_CONFIG_AND_TOM_RUNTIME_ONLY" ] || \
-        fail "必须设置 CONFIRM_REMOTE_ORACLE_INTAKE=I_UNDERSTAND_THIS_WRITES_LOCAL_PUSH_CONFIG_AND_TOM_RUNTIME_ONLY"
+      require_intake_confirm
       require_command ssh
-      local write_output
-      local plan_output
-      local apply_output
-      write_output="$(write_push_config)"
-      plan_output="$("$PUSH_SCRIPT" plan "$PUSH_CONFIG_FILE")"
-      apply_output="$(CONFIRM_PUSH_REMOTE_COLLECTOR_CREDENTIALS=I_UNDERSTAND_THIS_ONLY_PUSHES_REMOTE_COLLECTOR_CREDENTIALS_TO_TOM_RUNTIME "$PUSH_SCRIPT" apply "$PUSH_CONFIG_FILE")"
-      parse_apply_report "$write_output" "$plan_output" "$apply_output"
+      run_apply_flow
+      ;;
+    run)
+      require_intake_confirm
+      require_runner_confirm
+      require_command ssh
+      local apply_report
+      local runner_report
+      apply_report="$(run_apply_flow)"
+      runner_report="$(run_tom_rollout_runner)"
+      parse_run_report "$apply_report" "$runner_report"
       ;;
     -h|--help|help)
       usage

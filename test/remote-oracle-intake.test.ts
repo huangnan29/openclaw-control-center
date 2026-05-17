@@ -3,7 +3,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import test from "node:test";
 
 const ROOT = process.cwd();
@@ -17,8 +17,10 @@ async function writeHarness(dir: string) {
   await mkdir(runtimeDir, { recursive: true });
   const discovery = join(binDir, "discover.sh");
   const push = join(binDir, "push.sh");
+  const fakeSsh = join(binDir, "ssh");
   const discoveryCalls = join(dir, "discovery-calls.txt");
   const pushCalls = join(dir, "push-calls.txt");
+  const sshCalls = join(dir, "ssh-calls.txt");
   const keyFile = join(dir, "remote-readonly.key");
   await writeFile(keyFile, "fake remote readonly key\n", "utf8");
   await chmod(keyFile, 0o600);
@@ -166,9 +168,28 @@ exit 2
 `,
     "utf8",
   );
+  await writeFile(
+    fakeSsh,
+    `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> "$SSH_CALLS"
+cat <<'JSON'
+{
+  "status": "ready",
+  "stage": "ready_for_healthcheck",
+  "safety": {
+    "mutatesOpenClawInstance": false,
+    "callsLiveApi": false
+  }
+}
+JSON
+`,
+    "utf8",
+  );
   await chmod(discovery, 0o755);
   await chmod(push, 0o755);
-  return { discovery, push, discoveryCalls, pushCalls, keyFile, runtimeDir };
+  await chmod(fakeSsh, 0o755);
+  return { discovery, push, discoveryCalls, pushCalls, sshCalls, keyFile, runtimeDir, binDir };
 }
 
 test("remote Oracle intake plan renders the push config without writing or pushing", async () => {
@@ -269,6 +290,83 @@ test("remote Oracle intake apply writes local config and pushes only to Tom runt
     assert.match(pushLog, /plan/);
     assert.match(pushLog, /apply/);
     assert.doesNotMatch(pushLog, /129\.146\.10\.20/);
+    assert.doesNotMatch(output, /fake remote readonly key/);
+    assert.doesNotMatch(output, /api\/managed-actions\/live/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("remote Oracle intake run requires the rollout confirmation before writing", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-remote-oracle-intake-"));
+  try {
+    const { discovery, push, discoveryCalls, pushCalls, sshCalls, keyFile, runtimeDir, binDir } = await writeHarness(dir);
+    const result = spawnSync(SCRIPT, ["run"], {
+      env: {
+        ...process.env,
+        PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}`,
+        DISCOVERY_SCRIPT: discovery,
+        PUSH_SCRIPT: push,
+        PUSH_CONFIG_FILE: join(runtimeDir, "push-remote-collector-credentials.json"),
+        DISCOVERY_CALLS: discoveryCalls,
+        PUSH_CALLS: pushCalls,
+        SSH_CALLS: sshCalls,
+        REMOTE_ORACLE_HOST: "129.146.10.20",
+        REMOTE_ORACLE_KEY_PATH: keyFile,
+        CONFIRM_REMOTE_ORACLE_INTAKE: CONFIRM,
+      },
+      encoding: "utf8",
+    });
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /CONFIRM_REMOTE_ORACLE_INTAKE_RUNNER/);
+    assert.equal(existsSync(join(runtimeDir, "push-remote-collector-credentials.json")), false);
+    assert.equal(existsSync(discoveryCalls), false);
+    assert.equal(existsSync(pushCalls), false);
+    assert.equal(existsSync(sshCalls), false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("remote Oracle intake run pushes credentials and triggers Tom safe rollout", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-remote-oracle-intake-"));
+  try {
+    const { discovery, push, discoveryCalls, pushCalls, sshCalls, keyFile, runtimeDir, binDir } = await writeHarness(dir);
+    const pushConfigFile = join(runtimeDir, "push-remote-collector-credentials.json");
+    const output = execFileSync(SCRIPT, ["run"], {
+      env: {
+        ...process.env,
+        PATH: `${binDir}${delimiter}${process.env.PATH ?? ""}`,
+        DISCOVERY_SCRIPT: discovery,
+        PUSH_SCRIPT: push,
+        PUSH_CONFIG_FILE: pushConfigFile,
+        DISCOVERY_CALLS: discoveryCalls,
+        PUSH_CALLS: pushCalls,
+        SSH_CALLS: sshCalls,
+        REMOTE_ORACLE_HOST: "129.146.10.20",
+        REMOTE_ORACLE_KEY_PATH: keyFile,
+        CONFIRM_REMOTE_ORACLE_INTAKE: CONFIRM,
+        CONFIRM_REMOTE_ORACLE_INTAKE_RUNNER: "I_UNDERSTAND_THIS_PUSHES_CREDENTIALS_AND_RUNS_TOM_SAFE_ROLLOUT",
+      },
+      encoding: "utf8",
+    });
+    const report = JSON.parse(output);
+    const pushConfig = JSON.parse(await readFile(pushConfigFile, "utf8"));
+    const sshLog = await readFile(sshCalls, "utf8");
+
+    assert.equal(report.status, "ran_rollout_runner");
+    assert.equal(report.apply.status, "applied");
+    assert.equal(report.rolloutRunner.exitCode, 0);
+    assert.equal(report.safety.connectsTomSsh, true);
+    assert.equal(report.safety.mayConnectSecondOracleViaTomReadonlyPreflight, true);
+    assert.equal(report.safety.writesOpenClawInstanceDirs, false);
+    assert.equal(report.safety.callsLiveApi, false);
+    assert.equal(pushConfig.remote.host, "129.146.10.20");
+    assert.match(sshLog, /ubuntu@146\.235\.226\.66/);
+    assert.match(sshLog, /remote-collector-rollout-runner\.sh run/);
+    assert.match(sshLog, /go-live-gate\.sh status/);
+    assert.doesNotMatch(sshLog, /129\.146\.10\.20/);
     assert.doesNotMatch(output, /fake remote readonly key/);
     assert.doesNotMatch(output, /api\/managed-actions\/live/);
   } finally {

@@ -177,6 +177,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(doc.includes("remote-oracle-intake.sh"));
   assert(doc.includes("render-push-config"));
   assert(doc.includes("I_UNDERSTAND_THIS_WRITES_LOCAL_PUSH_CONFIG_AND_TOM_RUNTIME_ONLY"));
+  assert(doc.includes("I_UNDERSTAND_THIS_PUSHES_CREDENTIALS_AND_RUNS_TOM_SAFE_ROLLOUT"));
   assert(doc.includes("I_UNDERSTAND_THIS_ONLY_PROBES_SSH_READONLY"));
   assert(doc.includes("I_UNDERSTAND_THIS_ONLY_PUSHES_REMOTE_COLLECTOR_CREDENTIALS_TO_TOM_RUNTIME"));
   assert(doc.includes("remote-collector-credentials.sh"));
@@ -279,11 +280,15 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   const remoteOracleIntakeText = readFileSync(remoteOracleIntake, "utf8");
   assert.match(remoteOracleIntakeText, /remote-oracle-intake\.sh plan/);
   assert.match(remoteOracleIntakeText, /remote-oracle-intake\.sh apply/);
+  assert.match(remoteOracleIntakeText, /remote-oracle-intake\.sh run/);
   assert.match(remoteOracleIntakeText, /CONFIRM_REMOTE_ORACLE_INTAKE/);
+  assert.match(remoteOracleIntakeText, /CONFIRM_REMOTE_ORACLE_INTAKE_RUNNER/);
   assert.match(remoteOracleIntakeText, /I_UNDERSTAND_THIS_WRITES_LOCAL_PUSH_CONFIG_AND_TOM_RUNTIME_ONLY/);
+  assert.match(remoteOracleIntakeText, /I_UNDERSTAND_THIS_PUSHES_CREDENTIALS_AND_RUNS_TOM_SAFE_ROLLOUT/);
   assert.match(remoteOracleIntakeText, /writesTomControlCenterRuntimeOnly/);
-  assert.match(remoteOracleIntakeText, /connectsSecondOracle: false/);
+  assert.match(remoteOracleIntakeText, /mayConnectSecondOracleViaTomReadonlyPreflight/);
   assert.match(remoteOracleIntakeText, /writesActiveRegistry: false/);
+  assert.match(remoteOracleIntakeText, /writesOpenClawInstanceDirs: false/);
   assert.match(remoteOracleIntakeText, /mutatesOpenClawInstance: false/);
   assert.match(remoteOracleIntakeText, /callsLiveApi: false/);
   assert.doesNotMatch(remoteOracleIntakeText, /api\/managed-actions\/live/);
@@ -310,7 +315,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   const remoteCollectorRolloutText = readFileSync(remoteCollectorRollout, "utf8");
   assert.match(remoteCollectorRolloutText, /remote-collector-rollout\.sh status/);
   assert.match(remoteCollectorRolloutText, /needs_remote_credentials/);
-  assert.match(remoteCollectorRolloutText, /remote-oracle-intake\.sh apply/);
+  assert.match(remoteCollectorRolloutText, /remote-oracle-intake\.sh run/);
   assert.match(remoteCollectorRolloutText, /write-push-config/);
   assert.match(remoteCollectorRolloutText, /needs_remote_preflight/);
   assert.match(remoteCollectorRolloutText, /needs_remote_collector_pull/);
