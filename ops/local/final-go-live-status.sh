@@ -3,8 +3,8 @@ set -euo pipefail
 set +x
 
 # 本机侧最终上线状态汇总入口。
-# status/check 会同时读取本机远端 Oracle 凭据 doctor 与 Tom 最终上线总闸门。
-# 本脚本不写本机 push 配置、不写 Tom runtime、不连接第二台 Oracle、不修改任何 OpenClaw 实例目录、不调用 managed-actions live API。
+# status/check 会读取 Tom 最终上线总闸门；local-only 模式下不要求第二台 Oracle 凭据。
+# 本脚本不写本机 push 配置、不写 Tom runtime、不修改任何 OpenClaw 实例目录、不调用 managed-actions live API。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
@@ -12,6 +12,7 @@ DISCOVERY_CONFIG="${DISCOVERY_CONFIG:-${ROOT_DIR}/ops/local/discover-remote-orac
 INTAKE_SCRIPT="${INTAKE_SCRIPT:-${SCRIPT_DIR}/remote-oracle-intake.sh}"
 TOM_BUNDLE="${TOM_BUNDLE:-runtime/remote-onboarding/remote-oracle}"
 SSH_BIN="${FINAL_GO_LIVE_STATUS_SSH_BIN:-ssh}"
+OPENCLAW_TOPOLOGY_MODE="${OPENCLAW_TOPOLOGY_MODE:-local-only}"
 
 fail() {
   printf '[失败] %s\n' "$*" >&2
@@ -37,13 +38,14 @@ usage() {
   INTAKE_SCRIPT=ops/local/remote-oracle-intake.sh
   TOM_BUNDLE=runtime/remote-onboarding/remote-oracle
   FINAL_GO_LIVE_STATUS_SSH_BIN=ssh
+  OPENCLAW_TOPOLOGY_MODE=local-only
   REMOTE_ORACLE_HOST=<真实第二台 Oracle 公网 IP 或域名>
   REMOTE_ORACLE_KEY_PATH=<本机只读 SSH key 绝对路径>
 
 安全边界：
   - 不写本机 push 配置。
   - 不写 Tom runtime。
-  - 不连接第二台 Oracle。
+  - local-only 模式不连接第二台 Oracle。
   - 不修改任何 OpenClaw 实例目录。
   - 不重启任何 OpenClaw 实例。
   - 不调用 managed-actions live API。
@@ -57,7 +59,7 @@ main() {
 
   case "${1:-status}" in
     status|plan)
-      MODE="status" ROOT_DIR="$ROOT_DIR" DISCOVERY_CONFIG="$DISCOVERY_CONFIG" INTAKE_SCRIPT="$INTAKE_SCRIPT" TOM_BUNDLE="$TOM_BUNDLE" SSH_BIN="$SSH_BIN" node <<'NODE'
+      MODE="status" ROOT_DIR="$ROOT_DIR" DISCOVERY_CONFIG="$DISCOVERY_CONFIG" INTAKE_SCRIPT="$INTAKE_SCRIPT" TOM_BUNDLE="$TOM_BUNDLE" SSH_BIN="$SSH_BIN" OPENCLAW_TOPOLOGY_MODE="$OPENCLAW_TOPOLOGY_MODE" node <<'NODE'
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -69,6 +71,14 @@ const discoveryConfig = process.env.DISCOVERY_CONFIG;
 const intakeScript = process.env.INTAKE_SCRIPT;
 const tomBundle = process.env.TOM_BUNDLE || "runtime/remote-onboarding/remote-oracle";
 const sshBin = process.env.SSH_BIN || "ssh";
+const topologyMode = normalizeTopologyMode(process.env.OPENCLAW_TOPOLOGY_MODE || "local-only");
+const crossServerRequired = topologyMode === "cross-server";
+
+function normalizeTopologyMode(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (text === "cross-server" || text === "multi-server") return "cross-server";
+  return "local-only";
+}
 
 function expandHome(value) {
   if (typeof value !== "string") return "";
@@ -160,6 +170,20 @@ function gitSummary() {
 }
 
 function runLocalDoctor() {
+  if (!crossServerRequired) {
+    return {
+      status: "skipped_local_only",
+      exitCode: 0,
+      report: {
+        status: "skipped_local_only",
+        mode: "doctor",
+        reason: "当前拓扑为 local-only，只管理当前 Oracle 上的实例；不需要第二台 Oracle host/key。",
+      },
+      stdoutLines: [],
+      stderrLines: [],
+      command: `${path.relative(rootDir, intakeScript)} doctor`,
+    };
+  }
   const env = {
     ...process.env,
     DISCOVERY_CONFIG: discoveryConfig,
@@ -200,7 +224,7 @@ function runTomGate(config) {
   const remoteCommand = [
     `cd ${shellQuote(deployDir)}`,
     `printf '__OPENCLAW_TOM_HEAD__%s\\n' "$(git -C repo rev-parse --short HEAD 2>/dev/null || true)"`,
-    `repo/ops/tom-readonly/go-live-gate.sh ${mode} ${shellQuote(tomBundle)}`,
+    `OPENCLAW_TOPOLOGY_MODE=${shellQuote(topologyMode)} repo/ops/tom-readonly/go-live-gate.sh ${mode} ${shellQuote(tomBundle)}`,
   ].join(" && ");
 
   const args = [
@@ -237,7 +261,7 @@ function runTomGate(config) {
     stdoutLines: parsed ? [] : compactLines(result.stdout, 60),
     stderrLines: compactLines(result.stderr, 60),
     error: result.error,
-    commandPreview: `ssh ${user}@${host} repo/ops/tom-readonly/go-live-gate.sh ${mode} ${tomBundle}`,
+    commandPreview: `ssh ${user}@${host} OPENCLAW_TOPOLOGY_MODE=${topologyMode} repo/ops/tom-readonly/go-live-gate.sh ${mode} ${tomBundle}`,
   };
 }
 
@@ -296,8 +320,9 @@ function unique(values) {
 }
 
 function decide(doctor, tomGate) {
-  if (doctor.status !== "completed") return "blocked_local_doctor";
   if (tomGate.status !== "completed") return "blocked_tom_go_live_gate";
+  if (!crossServerRequired) return tomGate.report?.status || "unknown";
+  if (doctor.status !== "completed") return "blocked_local_doctor";
 
   const doctorStatus = doctor.report?.status || "unknown";
   if (doctorStatus === "needs_remote_host") return "blocked_remote_oracle_host";
@@ -313,7 +338,9 @@ const config = readConfig(discoveryConfig);
 const localDoctor = runLocalDoctor();
 const tomGate = runTomGate(config);
 const decision = decide(localDoctor, tomGate);
-const doctorIssue = localDoctor.status === "completed" ? doctorBlocker(localDoctor.report) : "本机 remote-oracle-intake doctor 执行失败。";
+const doctorIssue = crossServerRequired
+  ? (localDoctor.status === "completed" ? doctorBlocker(localDoctor.report) : "本机 remote-oracle-intake doctor 执行失败。")
+  : undefined;
 const gateBlockers = tomGate.status === "completed" ? collectGateBlockers(tomGate.report, decision) : ["Tom go-live gate 无法执行或输出无效。"];
 const blockers = unique([
   doctorIssue,
@@ -329,6 +356,7 @@ console.log(JSON.stringify({
   schemaVersion: 1,
   status: decision,
   mode,
+  topologyMode,
   generatedAt: new Date().toISOString(),
   local: {
     git: gitSummary(),
@@ -345,6 +373,7 @@ console.log(JSON.stringify({
     writesTomRuntime: false,
     connectsTomSsh: true,
     connectsSecondOracle: false,
+    crossServerRequired,
     writesRemoteFiles: false,
     writesOpenClawInstanceDirs: false,
     restartsOpenClawInstances: false,
@@ -356,7 +385,7 @@ console.log(JSON.stringify({
 NODE
       ;;
     check)
-      MODE="check" ROOT_DIR="$ROOT_DIR" DISCOVERY_CONFIG="$DISCOVERY_CONFIG" INTAKE_SCRIPT="$INTAKE_SCRIPT" TOM_BUNDLE="$TOM_BUNDLE" SSH_BIN="$SSH_BIN" node <<'NODE'
+      MODE="check" ROOT_DIR="$ROOT_DIR" DISCOVERY_CONFIG="$DISCOVERY_CONFIG" INTAKE_SCRIPT="$INTAKE_SCRIPT" TOM_BUNDLE="$TOM_BUNDLE" SSH_BIN="$SSH_BIN" OPENCLAW_TOPOLOGY_MODE="$OPENCLAW_TOPOLOGY_MODE" node <<'NODE'
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -368,6 +397,14 @@ const discoveryConfig = process.env.DISCOVERY_CONFIG;
 const intakeScript = process.env.INTAKE_SCRIPT;
 const tomBundle = process.env.TOM_BUNDLE || "runtime/remote-onboarding/remote-oracle";
 const sshBin = process.env.SSH_BIN || "ssh";
+const topologyMode = normalizeTopologyMode(process.env.OPENCLAW_TOPOLOGY_MODE || "local-only");
+const crossServerRequired = topologyMode === "cross-server";
+
+function normalizeTopologyMode(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (text === "cross-server" || text === "multi-server") return "cross-server";
+  return "local-only";
+}
 
 function expandHome(value) {
   if (typeof value !== "string") return "";
@@ -459,6 +496,20 @@ function gitSummary() {
 }
 
 function runLocalDoctor() {
+  if (!crossServerRequired) {
+    return {
+      status: "skipped_local_only",
+      exitCode: 0,
+      report: {
+        status: "skipped_local_only",
+        mode: "doctor",
+        reason: "当前拓扑为 local-only，只管理当前 Oracle 上的实例；不需要第二台 Oracle host/key。",
+      },
+      stdoutLines: [],
+      stderrLines: [],
+      command: `${path.relative(rootDir, intakeScript)} doctor`,
+    };
+  }
   const env = {
     ...process.env,
     DISCOVERY_CONFIG: discoveryConfig,
@@ -499,7 +550,7 @@ function runTomGate(config) {
   const remoteCommand = [
     `cd ${shellQuote(deployDir)}`,
     `printf '__OPENCLAW_TOM_HEAD__%s\\n' "$(git -C repo rev-parse --short HEAD 2>/dev/null || true)"`,
-    `repo/ops/tom-readonly/go-live-gate.sh ${mode} ${shellQuote(tomBundle)}`,
+    `OPENCLAW_TOPOLOGY_MODE=${shellQuote(topologyMode)} repo/ops/tom-readonly/go-live-gate.sh ${mode} ${shellQuote(tomBundle)}`,
   ].join(" && ");
 
   const args = [
@@ -536,7 +587,7 @@ function runTomGate(config) {
     stdoutLines: parsed ? [] : compactLines(result.stdout, 60),
     stderrLines: compactLines(result.stderr, 60),
     error: result.error,
-    commandPreview: `ssh ${user}@${host} repo/ops/tom-readonly/go-live-gate.sh ${mode} ${tomBundle}`,
+    commandPreview: `ssh ${user}@${host} OPENCLAW_TOPOLOGY_MODE=${topologyMode} repo/ops/tom-readonly/go-live-gate.sh ${mode} ${tomBundle}`,
   };
 }
 
@@ -595,8 +646,9 @@ function unique(values) {
 }
 
 function decide(doctor, tomGate) {
-  if (doctor.status !== "completed") return "blocked_local_doctor";
   if (tomGate.status !== "completed") return "blocked_tom_go_live_gate";
+  if (!crossServerRequired) return tomGate.report?.status || "unknown";
+  if (doctor.status !== "completed") return "blocked_local_doctor";
 
   const doctorStatus = doctor.report?.status || "unknown";
   if (doctorStatus === "needs_remote_host") return "blocked_remote_oracle_host";
@@ -612,7 +664,9 @@ const config = readConfig(discoveryConfig);
 const localDoctor = runLocalDoctor();
 const tomGate = runTomGate(config);
 const decision = decide(localDoctor, tomGate);
-const doctorIssue = localDoctor.status === "completed" ? doctorBlocker(localDoctor.report) : "本机 remote-oracle-intake doctor 执行失败。";
+const doctorIssue = crossServerRequired
+  ? (localDoctor.status === "completed" ? doctorBlocker(localDoctor.report) : "本机 remote-oracle-intake doctor 执行失败。")
+  : undefined;
 const gateBlockers = tomGate.status === "completed" ? collectGateBlockers(tomGate.report, decision) : ["Tom go-live gate 无法执行或输出无效。"];
 const blockers = unique([
   doctorIssue,
@@ -628,6 +682,7 @@ console.log(JSON.stringify({
   schemaVersion: 1,
   status: decision,
   mode,
+  topologyMode,
   generatedAt: new Date().toISOString(),
   local: {
     git: gitSummary(),
@@ -644,6 +699,7 @@ console.log(JSON.stringify({
     writesTomRuntime: false,
     connectsTomSsh: true,
     connectsSecondOracle: false,
+    crossServerRequired,
     writesRemoteFiles: false,
     writesOpenClawInstanceDirs: false,
     restartsOpenClawInstances: false,

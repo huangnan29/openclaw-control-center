@@ -2,11 +2,11 @@
 
 ## 当前目标
 
-最终上线 OpenClaw 控制中心：先完成不影响现有 OpenClaw 实例的跨服务器只读监控上线，再以 dry-run、人工确认、审计日志和白名单方式逐步上线受控管理动作。每个步骤验证通过后直接进入下一步。
+最终上线 OpenClaw 控制中心：当前只有一台 Oracle，因此先完成 Tom 这一台 Oracle 上现有 OpenClaw 实例的只读监控与受控管理上线；实例数量可继续通过 registry/collector 扩展。跨服务器只读 collector 保留为后续显式 `OPENCLAW_TOPOLOGY_MODE=cross-server` 扩展项，不再作为当前上线阻塞。
 
 ## 本轮任务
 
-跨服务器只读接入收口：在第二台 Oracle host 暂缺的情况下，继续压缩拿到真实凭据后的手工步骤，新增本机最终上线状态汇总入口，把本机 doctor 与 Tom 总闸门合并成一个可重复执行的检查命令。
+单 Oracle 上线收口：把最终上线总闸门切到默认 `local-only` 拓扑，只管理当前 Oracle 上的实例；跨服务器远端凭据检查改为显式可选模式。
 
 ## 本轮不做
 
@@ -17,12 +17,19 @@
 
 ## 当前下一步
 
-跨服务器只读监控下一步：
+Tom 单 Oracle 上线下一步：
 
 - 每次判断最终上线距离时，先在本机运行总控状态入口：
   `ops/local/final-go-live-status.sh status`
 - 需要同时验证 Tom 现有实例只读安全边界时，运行：
   `ops/local/final-go-live-status.sh check`
+- 当前默认 `OPENCLAW_TOPOLOGY_MODE=local-only`，不要求第二台 Oracle host/key；如果未来要接第二台 Oracle，再显式运行：
+  `OPENCLAW_TOPOLOGY_MODE=cross-server ops/local/final-go-live-status.sh check`
+- 本机实例扩展仍走 `config/instances.json` / collector snapshot 路径：新增实例目录只读挂载到 control-center 容器，再把实例写入 registry 并跑 `./healthcheck.sh`。
+- 当前 managed action dry-run 证据已存在；local-only healthcheck 通过后，下一阶段是人工 approval、白名单和一次性 live healthcheck 窗口。
+
+后续跨服务器扩展预留步骤：
+
 - 为第二台 Oracle 服务器准备本地 collector exporter，让该服务器自行生成 collector JSON。
 - 先在本机只读发现候选 SSH host/key：
   `ops/local/discover-remote-oracle-credentials.sh scan ops/local/discover-remote-oracle-credentials.example.json`

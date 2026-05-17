@@ -3,7 +3,7 @@ set -euo pipefail
 set +x
 
 # 最终上线总闸门。
-# 汇总 Tom 本体只读健康、跨服务器只读 collector 接入、管理动作 dry-run 证据和 live readiness。
+# 汇总 Tom 本体只读健康、可选跨服务器只读 collector 接入、管理动作 dry-run 证据和 live readiness。
 # 本脚本不写远端文件、不修改任何 OpenClaw 实例目录、不重启实例、不调用 managed-actions live API。
 
 DEPLOY_DIR="${DEPLOY_DIR:-/srv/openclaw-control-center-readonly}"
@@ -28,6 +28,10 @@ usage() {
 说明：
   status：只读取跨服务器 rollout 状态和 live readiness 状态，不执行 healthcheck。
   check：额外执行 Tom 控制中心 healthcheck，验证现有实例仍在只读安全边界内。
+
+拓扑模式：
+  默认 OPENCLAW_TOPOLOGY_MODE=local-only，只管理当前 Oracle 上的实例，跳过跨服务器远端凭据闸门。
+  如果要接第二台 Oracle，显式设置 OPENCLAW_TOPOLOGY_MODE=cross-server。
 
 安全边界：
   - 不写远端文件。
@@ -57,6 +61,8 @@ const remoteRolloutRunnerScript = process.env.GO_LIVE_REMOTE_ROLLOUT_RUNNER_SCRI
 const managedActionDryRunGateScript = process.env.GO_LIVE_MANAGED_ACTION_DRY_RUN_GATE_SCRIPT || path.join(scriptDir, "managed-action-dry-run-gate.sh");
 const liveHealthcheckWindowScript = process.env.GO_LIVE_HEALTHCHECK_WINDOW_SCRIPT || path.join(scriptDir, "live-healthcheck-window.sh");
 const healthcheckScript = process.env.GO_LIVE_HEALTHCHECK_SCRIPT || path.join(deployDir, "healthcheck.sh");
+const topologyMode = normalizeTopologyMode(process.env.OPENCLAW_TOPOLOGY_MODE || process.env.GO_LIVE_TOPOLOGY_MODE || "local-only");
+const crossServerRequired = topologyMode === "cross-server";
 
 function runScript(command, args, extraEnv = {}) {
   const result = spawnSync(command, args, {
@@ -182,6 +188,25 @@ function firstMatch(text, pattern) {
   return match ? match[1] : undefined;
 }
 
+function normalizeTopologyMode(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (text === "cross-server" || text === "multi-server") return "cross-server";
+  return "local-only";
+}
+
+function skippedRemoteSummary() {
+  return {
+    status: "skipped_local_only",
+    stage: "local_only",
+    serverId: "tom-oracle",
+    serverName: "Tom Oracle",
+    reason: "当前拓扑为 local-only，只管理当前 Oracle 上的实例；跨服务器接入不是上线前置条件。",
+    nextCommands: [
+      "OPENCLAW_TOPOLOGY_MODE=cross-server repo/ops/tom-readonly/go-live-gate.sh status runtime/remote-onboarding/remote-oracle",
+    ],
+  };
+}
+
 function summarizeRemote(remote) {
   const stage = remote.stage || "unknown";
   const readyForHealthcheck = remote.status === "ready" && stage === "ready_for_healthcheck";
@@ -284,7 +309,7 @@ function relativeRuntimePath(file) {
 
 function decide(remoteSummary, healthcheck, dryRunSummary, live) {
   if (healthcheck.status === "failed") return "blocked_existing_instances";
-  if (remoteSummary.status !== "ready_for_healthcheck") return "blocked_cross_server_readonly";
+  if (crossServerRequired && remoteSummary.status !== "ready_for_healthcheck") return "blocked_cross_server_readonly";
   if (healthcheck.status === "skipped") return "ready_for_existing_instance_healthcheck";
   if (dryRunSummary.status !== "ready") return "blocked_managed_action_dry_run";
   if (live.status !== "ready") return "blocked_managed_actions";
@@ -295,13 +320,21 @@ function formatError(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
-const remoteRun = runScript(remoteRolloutRunnerScript, ["status", bundleDir]);
-const remote = remoteRun.exitCode === 0 ? parseJson(remoteRun.stdout, "remote rollout") : {
-  status: "script_failed",
-  stage: "unknown",
-  error: remoteRun.error || remoteRun.stderr || remoteRun.stdout,
+const remoteRun = crossServerRequired ? runScript(remoteRolloutRunnerScript, ["status", bundleDir]) : {
+  command: `${remoteRolloutRunnerScript} status ${bundleDir}`,
+  exitCode: 0,
+  stdout: "",
+  stderr: "",
+  skipped: true,
 };
-const remoteSummary = summarizeRemote(remote);
+const remote = crossServerRequired
+  ? (remoteRun.exitCode === 0 ? parseJson(remoteRun.stdout, "remote rollout") : {
+    status: "script_failed",
+    stage: "unknown",
+    error: remoteRun.error || remoteRun.stderr || remoteRun.stdout,
+  })
+  : { status: "skipped", stage: "local_only" };
+const remoteSummary = crossServerRequired ? summarizeRemote(remote) : skippedRemoteSummary();
 
 const dryRunGateRun = runScript(managedActionDryRunGateScript, ["status"]);
 const dryRunSummary = summarizeDryRunEvidence(dryRunGateRun);
@@ -327,6 +360,7 @@ console.log(JSON.stringify({
   schemaVersion: 1,
   status: decision,
   mode,
+  topologyMode,
   generatedAt: new Date().toISOString(),
   deployDir,
   bundleDir,
@@ -340,6 +374,7 @@ console.log(JSON.stringify({
   safety: {
     readsStatusOnly: mode === "status",
     checkRunsHealthcheckOnly: mode === "check",
+    crossServerRequired,
     writesRemoteFiles: false,
     writesOpenClawInstanceDirs: false,
     restartsOpenClawInstances: false,
@@ -350,6 +385,7 @@ console.log(JSON.stringify({
     remoteRolloutRunner: {
       command: remoteRun.command,
       exitCode: remoteRun.exitCode,
+      skipped: remoteRun.skipped === true,
       stderrLines: compactLines(remoteRun.stderr, 40),
       rawStatus: remote,
     },

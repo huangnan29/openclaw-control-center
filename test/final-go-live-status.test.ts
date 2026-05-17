@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
@@ -134,7 +135,11 @@ JSON
   return { binDir, intake, ssh, key, discoveryConfig, intakeCalls, sshCalls };
 }
 
-function runStatus(harness: Awaited<ReturnType<typeof writeHarness>>, mode: "status" | "check") {
+function runStatus(
+  harness: Awaited<ReturnType<typeof writeHarness>>,
+  mode: "status" | "check",
+  topologyMode = "cross-server",
+) {
   const output = execFileSync(SCRIPT, [mode], {
     cwd: ROOT,
     env: {
@@ -145,6 +150,7 @@ function runStatus(harness: Awaited<ReturnType<typeof writeHarness>>, mode: "sta
       INTAKE_CALLS: harness.intakeCalls,
       SSH_CALLS: harness.sshCalls,
       TOM_BUNDLE: "runtime/remote-onboarding/remote-oracle",
+      OPENCLAW_TOPOLOGY_MODE: topologyMode,
     },
     encoding: "utf8",
   });
@@ -175,6 +181,30 @@ test("final go-live status reports the missing remote Oracle host while preservi
     assert.equal(report.safety.callsManagedActionsLiveApi, false);
     assert.doesNotMatch(output, /fake tom key/);
     assert.doesNotMatch(output, /api\/managed-actions\/live/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("final go-live check uses local-only topology without requiring remote Oracle credentials", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-final-go-live-status-"));
+  try {
+    const harness = await writeHarness(dir, {
+      doctorStatus: "needs_remote_host",
+      gateStatus: "blocked_managed_actions",
+    });
+    const { report } = runStatus(harness, "check", "local-only");
+    const sshLog = await readFile(harness.sshCalls, "utf8");
+
+    assert.equal(report.status, "blocked_managed_actions");
+    assert.equal(report.topologyMode, "local-only");
+    assert.equal(report.local.remoteOracleDoctor.status, "skipped_local_only");
+    assert.equal(report.safety.crossServerRequired, false);
+    assert.equal(report.safety.connectsSecondOracle, false);
+    assert.equal(report.safety.writesTomRuntime, false);
+    assert.equal(existsSync(harness.intakeCalls), false);
+    assert.match(sshLog, /OPENCLAW_TOPOLOGY_MODE='?local-only'?/);
+    assert.equal(report.blockers.some((item: string) => item.includes("第二台 Oracle")), false);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

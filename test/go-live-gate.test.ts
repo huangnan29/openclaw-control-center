@@ -142,11 +142,16 @@ exit ${healthcheckExit}
   return { deployDir, bundleDir, remoteScript, dryRunScript, liveScript, healthcheckScript };
 }
 
-function runGate(harness: Awaited<ReturnType<typeof writeHarness>>, mode: "status" | "check"): any {
+function runGate(
+  harness: Awaited<ReturnType<typeof writeHarness>>,
+  mode: "status" | "check",
+  topologyMode = "cross-server",
+): any {
   const output = execFileSync(GATE, [mode, harness.bundleDir], {
     env: {
       ...process.env,
       DEPLOY_DIR: harness.deployDir,
+      OPENCLAW_TOPOLOGY_MODE: topologyMode,
       GO_LIVE_REMOTE_ROLLOUT_RUNNER_SCRIPT: harness.remoteScript,
       GO_LIVE_MANAGED_ACTION_DRY_RUN_GATE_SCRIPT: harness.dryRunScript,
       GO_LIVE_HEALTHCHECK_WINDOW_SCRIPT: harness.liveScript,
@@ -169,6 +174,26 @@ test("go-live gate reports the current cross-server credential blocker without r
     assert.equal(report.safety.callsManagedActionsLiveApi, false);
     assert.equal(report.safety.writesOpenClawInstanceDirs, false);
     assert(report.nextCommands.some((command: string) => command.includes("push-remote-collector-credentials.sh")));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("go-live gate skips cross-server blockers in local-only topology", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-go-live-gate-"));
+  try {
+    const harness = await writeHarness(dir, { remoteStage: "needs_remote_credentials" });
+    const report = runGate(harness, "check", "local-only");
+
+    assert.equal(report.topologyMode, "local-only");
+    assert.equal(report.status, "blocked_managed_actions");
+    assert.equal(report.stages.existingInstances.status, "passed");
+    assert.equal(report.stages.crossServerReadonlyMonitoring.status, "skipped_local_only");
+    assert.equal(report.stages.crossServerReadonlyMonitoring.stage, "local_only");
+    assert.equal(report.evidence.remoteRolloutRunner.skipped, true);
+    assert.equal(report.safety.crossServerRequired, false);
+    assert.equal(report.safety.writesOpenClawInstanceDirs, false);
+    assert.equal(report.safety.callsManagedActionsLiveApi, false);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

@@ -309,6 +309,9 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   const finalGoLiveStatusText = readFileSync(finalGoLiveStatus, "utf8");
   assert.match(finalGoLiveStatusText, /final-go-live-status\.sh status/);
   assert.match(finalGoLiveStatusText, /final-go-live-status\.sh check/);
+  assert.match(finalGoLiveStatusText, /OPENCLAW_TOPOLOGY_MODE/);
+  assert.match(finalGoLiveStatusText, /skipped_local_only/);
+  assert.match(finalGoLiveStatusText, /crossServerRequired/);
   assert.match(finalGoLiveStatusText, /remote-oracle-intake\.sh doctor/);
   assert.match(finalGoLiveStatusText, /go-live-gate\.sh/);
   assert.match(finalGoLiveStatusText, /writesTomRuntime: false/);
@@ -384,6 +387,9 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   const goLiveGateText = readFileSync(goLiveGate, "utf8");
   assert.match(goLiveGateText, /go-live-gate\.sh status/);
   assert.match(goLiveGateText, /go-live-gate\.sh check/);
+  assert.match(goLiveGateText, /OPENCLAW_TOPOLOGY_MODE/);
+  assert.match(goLiveGateText, /skipped_local_only/);
+  assert.match(goLiveGateText, /crossServerRequired/);
   assert.match(goLiveGateText, /managed-action-dry-run-gate\.sh/);
   assert.match(goLiveGateText, /blocked_managed_action_dry_run/);
   assert.match(goLiveGateText, /remote-collector-rollout-runner\.sh/);

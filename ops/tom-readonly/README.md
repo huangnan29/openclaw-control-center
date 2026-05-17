@@ -21,7 +21,7 @@
 - `remote-collector-node-sync.sh`：把已验证的 onboarding 接入包同步到远端 collector 节点目录，并可显式确认后执行远端 bootstrap plan/write。
 - `remote-collector-rollout.sh`：只读取 Tom 本地接入包、preflight、pull 和 registry 状态，输出跨服务器只读接入下一步。
 - `remote-collector-rollout-runner.sh`：按 rollout gate 当前阶段自动执行下一步安全脚本；缺凭据、远端 snapshot 未就绪或检查失败时停止。
-- `go-live-gate.sh`：最终上线总闸门，汇总 Tom 本体 healthcheck、跨服务器只读监控、dry-run 证据和 live 管理动作 readiness。
+- `go-live-gate.sh`：最终上线总闸门，默认 `OPENCLAW_TOPOLOGY_MODE=local-only`，汇总 Tom 本机实例 healthcheck、dry-run 证据和 live 管理动作 readiness；显式 `cross-server` 时才把远端 collector 接入作为阻塞项。
 - `remote-collector-pull.sh`：从其他 Oracle 服务器只读拉取已经生成好的 collector JSON，校验后写入本机 `runtime/collectors`。
 - `remote-collector-pull.sources.example.json`：远端 collector 拉取配置样板，默认 `enabled=false`。
 - `register-remote-collector.sh`：把已经拉取并校验过的远端 collector snapshot 注册到 Tom `config/instances.json`，默认 `plan` 不写入。
@@ -31,7 +31,7 @@
 - `../local/discover-remote-oracle-credentials.sh`：在本机只读发现第二台 Oracle 的候选 SSH host/key，`probe` 需显式确认且只执行只读 SSH 探测；拿到明确 host/key 后可用 `write-push-config` 只写本机 push 配置。
 - `../local/discover-remote-oracle-credentials.example.json`：本机候选发现配置样板，不包含真实密钥内容。
 - `../local/remote-oracle-intake.sh`：本机侧凭据接入编排器；`doctor/plan` 不写文件不联网，`apply` 显式确认后只写本机 push 配置和 Tom control-center runtime，`run` 会继续触发 Tom 端安全 rollout。
-- `../local/final-go-live-status.sh`：本机侧最终上线状态汇总入口；`status/check` 同时读取本机 `remote-oracle-intake.sh doctor` 和 Tom `go-live-gate.sh`，不写本机 push 配置、不写 Tom runtime、不连接第二台 Oracle。
+- `../local/final-go-live-status.sh`：本机侧最终上线状态汇总入口；默认 `local-only`，`status/check` 读取 Tom `go-live-gate.sh`，不写本机 push 配置、不写 Tom runtime、不连接第二台 Oracle。
 - `../local/push-remote-collector-credentials.sh`：在本机把远端只读 SSH key 和 onboarding 配置推送到 Tom control-center runtime，不连接第二台 Oracle。
 - `managed-action-healthcheck-rollout.example.json`：只读 healthcheck live 演练的 rollout 样板，不会被默认加载。
 - `managed-action-dry-run-gate.sh`：管理动作 dry-run 证据闸门，默认只读检查 readiness 与 audit，显式确认后只创建 dry-run 审计记录。
@@ -78,6 +78,7 @@ CONFIRM_REMOTE_COLLECTOR_ROLLOUT_RUNNER=I_UNDERSTAND_THIS_RUNS_SAFE_REMOTE_COLLE
 repo/ops/tom-readonly/remote-collector-rollout-runner.sh run runtime/remote-onboarding/<serverId>
 repo/ops/tom-readonly/go-live-gate.sh status runtime/remote-onboarding/<serverId>
 repo/ops/tom-readonly/go-live-gate.sh check runtime/remote-onboarding/<serverId>
+OPENCLAW_TOPOLOGY_MODE=cross-server repo/ops/tom-readonly/go-live-gate.sh check runtime/remote-onboarding/<serverId>
 repo/ops/tom-readonly/managed-action-dry-run-gate.sh status
 repo/ops/tom-readonly/remote-collector-pull.sh plan runtime/remote-collector-pull.sources.json
 CONFIRM_REMOTE_COLLECTOR_PULL=I_UNDERSTAND_THIS_ONLY_READS_REMOTE_COLLECTOR_SNAPSHOTS \
