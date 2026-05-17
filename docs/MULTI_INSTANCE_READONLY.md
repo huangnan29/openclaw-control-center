@@ -244,6 +244,13 @@ OPENCLAW_COLLECTOR_CRON_SCHEDULE="*/2 * * * *" ./install-collector-cron.sh
 为了减少真实接入时手工拼配置的风险，Tom 可以先生成一个只读 onboarding 接入包：
 
 ```bash
+# 如果远端只读 SSH key 还在本机，可以先在本机推送到 Tom control-center runtime：
+cp ops/local/push-remote-collector-credentials.example.json runtime/push-remote-collector-credentials.json
+ops/local/push-remote-collector-credentials.sh plan runtime/push-remote-collector-credentials.json
+CONFIRM_PUSH_REMOTE_COLLECTOR_CREDENTIALS=I_UNDERSTAND_THIS_ONLY_PUSHES_REMOTE_COLLECTOR_CREDENTIALS_TO_TOM_RUNTIME \
+ops/local/push-remote-collector-credentials.sh apply runtime/push-remote-collector-credentials.json
+
+# 如果远端只读 SSH key 已在 Tom 上，可以直接在 Tom 生成 onboarding 配置：
 cp repo/ops/tom-readonly/remote-collector-onboarding.example.json runtime/remote-collector-onboarding.json
 cp repo/ops/tom-readonly/remote-collector-credentials.example.json runtime/remote-collector-credentials.json
 repo/ops/tom-readonly/remote-collector-credentials.sh plan runtime/remote-collector-credentials.json
@@ -259,7 +266,7 @@ repo/ops/tom-readonly/remote-collector-preflight.sh check runtime/remote-onboard
 repo/ops/tom-readonly/remote-collector-rollout.sh status runtime/remote-onboarding/<serverId>
 ```
 
-`remote-collector-credentials.sh plan` 只校验真实远端 host/user/port 和 Tom 本地 source key 路径，不写文件、不联网；`apply` 只复制远端只读 SSH key 到 Tom control-center 的 `runtime/ssh/`，并生成 `runtime/remote-collector-onboarding.json`。`remote-collector-onboarding.sh plan` 只校验配置并输出将生成的文件；`write` 只写 `runtime/remote-onboarding/<serverId>/` 下的接入包，不会 SSH、不会修改 `config/instances.json`、不会修改任何 OpenClaw 实例目录；`verify` 只读取接入包并离线校验 serverId、safety、pull/register 配置、build-context 和 bootstrap plan；`remote-collector-preflight.sh check` 才会 SSH 到远端，但只执行只读检查命令，检查 docker、目录可读性、deploy 目录权限和 gateway 端口，并把结果写入 Tom 本地 `runtime/remote-preflight-state/<serverId>.json`。`remote-collector-rollout.sh status` 只读取 Tom 本地状态，判断当前处于 `needs_remote_credentials`、`needs_remote_preflight`、`needs_remote_collector_pull`、`needs_registry_register` 或 `ready_for_healthcheck`，并输出下一步命令；它不 SSH、不写 registry、不写远端文件、不启动容器。接入包包含：
+本机侧 `push-remote-collector-credentials.sh plan` 不联网、不写文件；`apply` 只通过 SSH 写 Tom control-center runtime 下的远端只读 SSH key 和 onboarding 配置，不连接第二台 Oracle，不写 registry，不修改任何实例目录。Tom 侧 `remote-collector-credentials.sh plan` 只校验真实远端 host/user/port 和 Tom 本地 source key 路径，不写文件、不联网；`apply` 只复制远端只读 SSH key 到 Tom control-center 的 `runtime/ssh/`，并生成 `runtime/remote-collector-onboarding.json`。`remote-collector-onboarding.sh plan` 只校验配置并输出将生成的文件；`write` 只写 `runtime/remote-onboarding/<serverId>/` 下的接入包，不会 SSH、不会修改 `config/instances.json`、不会修改任何 OpenClaw 实例目录；`verify` 只读取接入包并离线校验 serverId、safety、pull/register 配置、build-context 和 bootstrap plan；`remote-collector-preflight.sh check` 才会 SSH 到远端，但只执行只读检查命令，检查 docker、目录可读性、deploy 目录权限和 gateway 端口，并把结果写入 Tom 本地 `runtime/remote-preflight-state/<serverId>.json`。`remote-collector-rollout.sh status` 只读取 Tom 本地状态，判断当前处于 `needs_remote_credentials`、`needs_remote_preflight`、`needs_remote_collector_pull`、`needs_registry_register` 或 `ready_for_healthcheck`，并输出下一步命令；它不 SSH、不写 registry、不写远端文件、不启动容器。接入包包含：
 
 - `collector-node.json`：复制到远端 Oracle 后供 `bootstrap-collector-node.sh` 使用。
 - `bootstrap-collector-node.sh`：远端 collector-only 节点引导脚本。

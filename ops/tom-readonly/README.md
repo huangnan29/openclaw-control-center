@@ -25,6 +25,7 @@
 - `register-remote-collector.example.json`：远端 collector 注册配置样板。
 - `update.sh`：拉取 `multi-instance-readonly-control-center` 分支，重建控制中心容器，随后执行健康检查。
 - `rollback.sh`：回滚到指定提交；如果不传提交，则使用最近一次 `update.sh` 记录的 `previous-good.commit`。
+- `../local/push-remote-collector-credentials.sh`：在本机把远端只读 SSH key 和 onboarding 配置推送到 Tom control-center runtime，不连接第二台 Oracle。
 - `managed-action-healthcheck-rollout.example.json`：只读 healthcheck live 演练的 rollout 样板，不会被默认加载。
 - `live-healthcheck-approval.sh`：生成、校验或标记 live healthcheck 人工批准记录，不调用 live API。
 - `live-healthcheck-approval.example.json`：批准记录样板，默认未批准。
@@ -83,6 +84,13 @@ BRANCH=multi-instance-readonly-control-center ./update.sh
 接第二台 Oracle 前，可以先在 Tom 生成一个可审查的 onboarding 接入包：
 
 ```bash
+# 如果远端只读 SSH key 还在本机，可以先在本机执行：
+cp ops/local/push-remote-collector-credentials.example.json runtime/push-remote-collector-credentials.json
+ops/local/push-remote-collector-credentials.sh plan runtime/push-remote-collector-credentials.json
+CONFIRM_PUSH_REMOTE_COLLECTOR_CREDENTIALS=I_UNDERSTAND_THIS_ONLY_PUSHES_REMOTE_COLLECTOR_CREDENTIALS_TO_TOM_RUNTIME \
+ops/local/push-remote-collector-credentials.sh apply runtime/push-remote-collector-credentials.json
+
+# 如果远端只读 SSH key 已在 Tom 上，则在 Tom 执行：
 cp repo/ops/tom-readonly/remote-collector-onboarding.example.json runtime/remote-collector-onboarding.json
 cp repo/ops/tom-readonly/remote-collector-credentials.example.json runtime/remote-collector-credentials.json
 repo/ops/tom-readonly/remote-collector-credentials.sh plan runtime/remote-collector-credentials.json
@@ -98,7 +106,7 @@ repo/ops/tom-readonly/remote-collector-preflight.sh check runtime/remote-onboard
 repo/ops/tom-readonly/remote-collector-rollout.sh status runtime/remote-onboarding/<serverId>
 ```
 
-`remote-collector-credentials.sh apply` 只复制 Tom 本地已有的远端只读 SSH key 到 `runtime/ssh/`，并生成 `runtime/remote-collector-onboarding.json`；它不会联网，不会写远端文件，不会写 registry。接入包默认写入 `runtime/remote-onboarding/<serverId>/`，包含远端 `collector-node.json`、远端 bootstrap 脚本、Tom 拉取配置、Tom 注册配置和 `RUNBOOK.md`。如果没有配置 `collectorNode.buildContext`，脚本会默认把构建 collector image 所需的最小 `build-context/` 一并放进接入包，远端不需要预先克隆完整仓库。`verify` 只读取接入包并离线校验，不 SSH、不写 registry。`preflight check` 会 SSH 到远端执行只读检查命令，只检查 docker、目录可读性、deploy 目录权限和 gateway 端口，不写远端文件、不启动容器、不调用 live API，并把结果写入 Tom 本地 `runtime/remote-preflight-state/<serverId>.json`。`remote-collector-rollout.sh status` 不联网、不写文件，用来确认下一步是补远端凭据、preflight、pull、register 还是 healthcheck。
+本机侧 `push-remote-collector-credentials.sh apply` 只通过 SSH 写 Tom control-center runtime 下的远端只读 SSH key 和 onboarding 配置；它不会连接第二台 Oracle，不会写 registry，不会修改任何实例目录。Tom 侧 `remote-collector-credentials.sh apply` 只复制 Tom 本地已有的远端只读 SSH key 到 `runtime/ssh/`，并生成 `runtime/remote-collector-onboarding.json`；它不会联网，不会写远端文件，不会写 registry。接入包默认写入 `runtime/remote-onboarding/<serverId>/`，包含远端 `collector-node.json`、远端 bootstrap 脚本、Tom 拉取配置、Tom 注册配置和 `RUNBOOK.md`。如果没有配置 `collectorNode.buildContext`，脚本会默认把构建 collector image 所需的最小 `build-context/` 一并放进接入包，远端不需要预先克隆完整仓库。`verify` 只读取接入包并离线校验，不 SSH、不写 registry。`preflight check` 会 SSH 到远端执行只读检查命令，只检查 docker、目录可读性、deploy 目录权限和 gateway 端口，不写远端文件、不启动容器、不调用 live API，并把结果写入 Tom 本地 `runtime/remote-preflight-state/<serverId>.json`。`remote-collector-rollout.sh status` 不联网、不写文件，用来确认下一步是补远端凭据、preflight、pull、register 还是 healthcheck。
 
 远端 collector 拉取只读取远端 snapshot 文件，远端服务器必须先自行生成 collector JSON。拉取命令不会执行远端 collector、不会修改远端实例目录，也不会调用 `/api/managed-actions/live`。本地写入路径必须位于：
 
