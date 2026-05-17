@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-跨服务器只读 collector 接入增强：已新增远端 collector snapshot 只读拉取脚本，并让 collector-only 远端实例可以只用 `id/name + collectorSnapshotPath` 加入中央 registry；中央不需要填写或挂载远端 `openclawHome`。
+跨服务器只读 collector 接入增强：已新增远端 collector-only 节点 bootstrap，远端 Oracle 可以先 dry-run 生成 collector-only 部署文件，再自行产出 snapshot；Tom 只读拉取后即可接入中央视图。
 
 ## 本轮不做
 
@@ -20,6 +20,11 @@
 跨服务器只读监控下一步：
 
 - 为第二台 Oracle 服务器准备本地 collector exporter，让该服务器自行生成 collector JSON。
+- 在第二台 Oracle 上先复制 `ops/collector-node/collector-node.example.json` 并改成真实实例路径。
+- 先执行 `ops/collector-node/bootstrap-collector-node.sh plan <collector-node.json>`，确认只写文件、不启动容器、不修改实例。
+- 确认后执行：
+  `CONFIRM_COLLECTOR_NODE_WRITE=I_UNDERSTAND_THIS_ONLY_WRITES_COLLECTOR_NODE_FILES ops/collector-node/bootstrap-collector-node.sh write <collector-node.json>`
+- 然后在远端执行 `./collector-snapshot.sh` 生成 snapshot，确认 JSON 存在。
 - 在 Tom 写入 `runtime/remote-collector-pull.sources.json`，只配置远端 snapshot 路径和本地 `runtime/collectors/<serverId>/snapshot.json`。
 - 先执行 `repo/ops/tom-readonly/remote-collector-pull.sh plan runtime/remote-collector-pull.sources.json` 审查来源。
 - 只有确认远端 snapshot 文件存在后，才执行：
@@ -46,6 +51,21 @@
 ## 最近完成
 
 - 已新增长期推进计划：`implementation_plan.md`。
+- 已新增 `ops/collector-node/bootstrap-collector-node.sh`，用于远端 Oracle collector-only 节点引导。
+- 已新增 `ops/collector-node/collector-node.example.json` 样板。
+- `bootstrap-collector-node.sh plan` 只校验配置并输出将生成的文件，不写入、不启动容器。
+- `bootstrap-collector-node.sh write` 必须设置 `CONFIRM_COLLECTOR_NODE_WRITE=I_UNDERSTAND_THIS_ONLY_WRITES_COLLECTOR_NODE_FILES`，只写 `docker-compose.collector.yml`、`config/instances.json`、`collector-snapshot.sh` 和 `install-collector-cron.sh`。
+- 生成的 collector-only compose 不暴露端口、不挂载 `/var/run/docker.sock`、不启用 privileged，实例目录全部 `:ro`。
+- 已新增 `test/collector-node-bootstrap.test.ts`，覆盖 plan 不写文件、write 必须确认、生成文件只读安全边界。
+- 已验证 `bash -n ops/collector-node/bootstrap-collector-node.sh`。
+- 已验证 `ops/collector-node/bootstrap-collector-node.sh plan ops/collector-node/collector-node.example.json`。
+- 已验证 `npm test -- test/collector-node-bootstrap.test.ts test/remote-collector-pull.test.ts test/oss-readiness.test.ts`，11/11 通过。
+- 已验证 `npm test -- test/collector-node-bootstrap.test.ts test/remote-collector-pull.test.ts test/collector-exporter.test.ts test/instance-config.test.ts test/multi-instance-readonly.test.ts test/readonly-multi-instance-safety.test.ts`，26/26 通过。
+- 已验证 `npm run build`。
+- 已提交并推送 `53c9bef ops: scaffold collector-only remote nodes`。
+- 已部署到 Tom，并验证运行提交 `53c9bef`。
+- 已验证 Tom 上 bootstrap `plan` 返回 `startsContainers=false`、`mutatesOpenClawInstance=false`，没有执行 write、没有启动 collector-only 容器。
+- 已验证 Tom `healthcheck.sh` 通过，现有 5 个实例仍只读；live window status 仍为 `needs_manual_approval`、`READONLY_MODE=true`、`readiness.status=blocked`，未调用 live API。
 - 已让 `parseOpenClawInstanceConfigText` 支持 collector-only 远端实例：server 配置 `collectorSnapshotPath` 后，实例可以省略 `openclawHome/workspaceRoot`。
 - 已为 collector-only 实例生成内部占位路径 `/collector/<serverId>/<instanceId>/config`，中央仍只从 collector snapshot 读取数据。
 - 已更新 `docs/MULTI_INSTANCE_READONLY.md`，远端 collector 示例不再要求填写远端目录路径。
