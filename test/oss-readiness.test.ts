@@ -351,10 +351,15 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(finalGoLiveRunnerText, /final-go-live-runner\.sh status/);
   assert.match(finalGoLiveRunnerText, /final-go-live-runner\.sh prepare/);
   assert.match(finalGoLiveRunnerText, /final-go-live-runner\.sh run-approved/);
+  assert.match(finalGoLiveRunnerText, /final-go-live-runner\.sh approve-and-run/);
   assert.match(finalGoLiveRunnerText, /final-go-live-status\.sh check/);
   assert.match(finalGoLiveRunnerText, /live-healthcheck-rollout-runner\.sh prepare/);
+  assert.match(finalGoLiveRunnerText, /live-healthcheck-approval-review\.sh check/);
+  assert.match(finalGoLiveRunnerText, /live-healthcheck-approval\.sh approve/);
   assert.match(finalGoLiveRunnerText, /CONFIRM_FINAL_GO_LIVE_RUNNER/);
+  assert.match(finalGoLiveRunnerText, /CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN/);
   assert.match(finalGoLiveRunnerText, /I_UNDERSTAND_THIS_RUNS_APPROVED_FINAL_GO_LIVE/);
+  assert.match(finalGoLiveRunnerText, /I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK/);
   assert.match(finalGoLiveRunnerText, /approvesLiveHealthcheck: false/);
   assert.match(finalGoLiveRunnerText, /writesOpenClawInstanceDirs: false/);
   const pushRemoteCollectorCredentialsText = readFileSync(pushRemoteCollectorCredentials, "utf8");

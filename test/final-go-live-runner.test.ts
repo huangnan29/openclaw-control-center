@@ -18,6 +18,7 @@ async function writeHarness(
   options: {
     hasPrepareStep?: boolean;
     includeApprovalWithPrepare?: boolean;
+    approvalReviewStatus?: "ready_for_human_approval" | "blocked_preconditions" | "approved_ready_for_live_window";
     tomRunStatus?: "blocked_not_approved" | "completed_live_healthcheck";
   } = {},
 ) {
@@ -30,6 +31,7 @@ async function writeHarness(
   const key = join(dir, "tom.key");
   const hasPrepareStep = options.hasPrepareStep !== false;
   const includeApprovalWithPrepare = options.includeApprovalWithPrepare === true;
+  const approvalReviewStatus = options.approvalReviewStatus || "ready_for_human_approval";
   const tomRunStatus = options.tomRunStatus || "blocked_not_approved";
 
   await mkdir(binDir, { recursive: true });
@@ -196,6 +198,76 @@ JSON
 JSON
   exit 2
 fi
+if printf '%s\\n' "$*" | grep -q 'live-healthcheck-approval-review.sh check'; then
+  if [ "${approvalReviewStatus}" = "blocked_preconditions" ]; then
+    cat <<'JSON'
+{
+  "schemaVersion": 1,
+  "status": "blocked_preconditions",
+  "issues": ["dry-run inbox 仍有待处理请求：1"],
+  "nextCommands": ["ops/local/final-go-live-runner.sh prepare"],
+  "safety": {
+    "writesApprovalFile": false,
+    "opensLiveGate": false,
+    "callsManagedActionsLiveApi": false,
+    "writesOpenClawInstanceDirs": false
+  }
+}
+JSON
+    exit 2
+  fi
+  if [ "${approvalReviewStatus}" = "approved_ready_for_live_window" ]; then
+    cat <<'JSON'
+{
+  "schemaVersion": 1,
+  "status": "approved_ready_for_live_window",
+  "issues": [],
+  "nextCommands": [
+    "CONFIRM_FINAL_GO_LIVE_RUNNER=I_UNDERSTAND_THIS_RUNS_APPROVED_FINAL_GO_LIVE LOCAL_API_TOKEN=<本地令牌> ops/local/final-go-live-runner.sh run-approved"
+  ],
+  "safety": {
+    "writesApprovalFile": false,
+    "opensLiveGate": false,
+    "callsManagedActionsLiveApi": false,
+    "writesOpenClawInstanceDirs": false
+  }
+}
+JSON
+    exit 0
+  fi
+  cat <<'JSON'
+{
+  "schemaVersion": 1,
+  "status": "ready_for_human_approval",
+  "issues": [],
+  "nextCommands": [
+    "CONFIRM_APPROVAL_RECORD=I_APPROVE_LIVE_HEALTHCHECK_RECORD APPROVED_BY=Anan repo/ops/tom-readonly/live-healthcheck-approval.sh approve runtime/live-healthcheck-approval.json"
+  ],
+  "safety": {
+    "writesApprovalFile": false,
+    "opensLiveGate": false,
+    "callsManagedActionsLiveApi": false,
+    "writesOpenClawInstanceDirs": false
+  }
+}
+JSON
+  exit 0
+fi
+if printf '%s\\n' "$*" | grep -q 'live-healthcheck-approval.sh approve'; then
+  cat <<'JSON'
+{
+  "status": "approved",
+  "file": "runtime/live-healthcheck-approval.json",
+  "approvedBy": "Anan",
+  "instanceId": "tom",
+  "action": "healthcheck",
+  "operator": "Anan",
+  "risk": "low",
+  "mutatesOpenClawInstance": false
+}
+JSON
+  exit 0
+fi
 echo "unexpected ssh command" >&2
 exit 2
 `,
@@ -206,7 +278,7 @@ exit 2
 
 function runRunner(
   harness: Awaited<ReturnType<typeof writeHarness>>,
-  mode: "status" | "prepare" | "run-approved",
+  mode: "status" | "prepare" | "run-approved" | "approve-and-run",
   extraEnv: Record<string, string> = {},
 ) {
   const result = spawnSync(SCRIPT, [mode], {
@@ -356,6 +428,79 @@ test("final go-live runner run-approved 透传 Tom 阻断并返回非零", async
     assert(report.nextCommands.some((command: string) => command.includes("live-healthcheck-approval.sh approve")));
     assert.equal(report.nextCommands.some((command: string) => command.includes("live-healthcheck-rollout-runner.sh prepare")), false);
     assert.match(sshLog, /live-healthcheck-rollout-runner\.sh run-approved/);
+    assert.doesNotMatch(JSON.stringify(report), /test-token/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("final go-live runner approve-and-run 缺确认时不连接 Tom", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-final-go-live-runner-approve-confirm-"));
+  try {
+    const harness = await writeHarness(dir);
+    const { exitCode, report } = runRunner(harness, "approve-and-run", {
+      APPROVED_BY: "Anan",
+      LOCAL_API_TOKEN: "test-token",
+    });
+
+    assert.notEqual(exitCode, 0);
+    assert.equal(report.status, "blocked_approve_and_run_confirmation_required");
+    assert.equal(report.safety.connectsTomSsh, false);
+    assert.equal(report.safety.approvesLiveHealthcheck, false);
+    assert.equal(report.safety.opensLiveGate, false);
+    await assert.rejects(readFile(harness.sshCalls, "utf8"));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("final go-live runner approve-and-run 在 approval review 未 ready 时不会批准", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-final-go-live-runner-review-blocked-"));
+  try {
+    const harness = await writeHarness(dir, { approvalReviewStatus: "blocked_preconditions" });
+    const { exitCode, report } = runRunner(harness, "approve-and-run", {
+      CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN: "I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK",
+      APPROVED_BY: "Anan",
+      LOCAL_API_TOKEN: "test-token",
+    });
+    const sshLog = await readFile(harness.sshCalls, "utf8");
+
+    assert.notEqual(exitCode, 0);
+    assert.equal(report.status, "blocked_approval_review_not_ready");
+    assert.equal(report.safety.approvesLiveHealthcheck, false);
+    assert.equal(report.safety.opensLiveGate, false);
+    assert.equal(report.safety.callsManagedActionsLiveApi, false);
+    assert.match(sshLog, /live-healthcheck-approval-review\.sh check/);
+    assert.doesNotMatch(sshLog, /live-healthcheck-approval\.sh approve/);
+    assert.doesNotMatch(sshLog, /live-healthcheck-rollout-runner\.sh run-approved/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("final go-live runner approve-and-run 批准后执行一次性 live healthcheck", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-final-go-live-runner-approve-run-"));
+  try {
+    const harness = await writeHarness(dir, { tomRunStatus: "completed_live_healthcheck" });
+    const { exitCode, report } = runRunner(harness, "approve-and-run", {
+      CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN: "I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK",
+      APPROVED_BY: "Anan",
+      LOCAL_API_TOKEN: "test-token",
+    });
+    const sshLog = await readFile(harness.sshCalls, "utf8");
+    const reviewIndex = sshLog.indexOf("live-healthcheck-approval-review.sh check");
+    const approvalIndex = sshLog.indexOf("live-healthcheck-approval.sh approve");
+    const runIndex = sshLog.indexOf("live-healthcheck-rollout-runner.sh run-approved");
+
+    assert.equal(exitCode, 0);
+    assert.equal(report.status, "completed_final_live_healthcheck");
+    assert.equal(report.safety.approvesLiveHealthcheck, true);
+    assert.equal(report.safety.opensLiveGate, true);
+    assert.equal(report.safety.callsManagedActionsLiveApi, true);
+    assert.equal(report.safety.writesOpenClawInstanceDirs, false);
+    assert(reviewIndex >= 0);
+    assert(approvalIndex > reviewIndex);
+    assert(runIndex > approvalIndex);
     assert.doesNotMatch(JSON.stringify(report), /test-token/);
   } finally {
     await rm(dir, { recursive: true, force: true });

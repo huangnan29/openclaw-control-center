@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-单 Oracle 上线收口：把 OpenClaw/Discord 文本指令接到 Tom 侧受控管理动作 dry-run 链路，机器人可以通过统一桥接脚本触发 `parse/plan/dry-run`，但仍不允许真实执行、不允许修改实例、不允许打开 live gate。
+单 Oracle 上线收口：把 Tom 当前五个 OpenClaw 实例的只读监控、dry-run 管理动作、人工审批、审计和一次性 healthcheck live 演练串成安全上线主链路。当前重点是把“approval review ready 后人工批准并执行一次性演练”的本机总入口收束好，默认仍不允许真实执行、不允许修改实例、不允许打开 live gate。
 
 ## 本轮不做
 
@@ -44,10 +44,24 @@ Tom 单 Oracle 上线下一步：
   该 runner 会检查 dry-run、准备 approval 模板、生成并校验证据包、刷新 readiness，然后停在人工批准前；不会批准 approval、不会打开 live gate。
 - 人工批准命令：
   `CONFIRM_APPROVAL_RECORD=I_APPROVE_LIVE_HEALTHCHECK_RECORD APPROVED_BY=Anan repo/ops/tom-readonly/live-healthcheck-approval.sh approve runtime/live-healthcheck-approval.json`
+- 人工审查后也可以走本机单命令入口，它会先只读运行 approval review，只有 review 是 `ready_for_human_approval` 时才记录 approval，然后执行一次性演练：
+  `CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK APPROVED_BY=Anan LOCAL_API_TOKEN=<本地令牌> ops/local/final-go-live-runner.sh approve-and-run`
 - 人工 approval 已批准后，自动执行一次性演练：
   `CONFIRM_FINAL_GO_LIVE_RUNNER=I_UNDERSTAND_THIS_RUNS_APPROVED_FINAL_GO_LIVE LOCAL_API_TOKEN=<本地令牌> ops/local/final-go-live-runner.sh run-approved`
   `CONFIRM_LIVE_HEALTHCHECK_RUNNER=I_UNDERSTAND_THIS_RUNS_APPROVED_LIVE_HEALTHCHECK LOCAL_API_TOKEN=<本地令牌> repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh run-approved`
   该模式会先确认 readiness 为 `approved_ready_for_live_window`，否则不会打开 live gate，并以非 0 退出码让 openclaw 调度侧知道本次被人工批准边界挡住。
+
+## 本轮新增（approve-and-run 最终入口）
+
+- 已扩展 `ops/local/final-go-live-runner.sh`，新增 `approve-and-run` 模式。
+- 该模式必须设置 `CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK`、`APPROVED_BY` 和 `LOCAL_API_TOKEN`，缺任一项都会在连接 Tom 前阻断。
+- `approve-and-run` 会先 SSH 到 Tom 执行 `live-healthcheck-approval-review.sh check`，只有状态为 `ready_for_human_approval` 时才继续。
+- approval review 未 ready、已经是已批准待执行、inbox 有 pending、证据包异常或 readiness 异常时，均不会写 approval、不会打开 live gate。
+- review ready 后，该模式只写 `runtime/live-healthcheck-approval.json` 的 approval 记录，然后交给既有 `live-healthcheck-rollout-runner.sh run-approved` 再次校验 readiness 与本地令牌。
+- 完成路径仍只允许一次 `healthcheck` live 演练，并保持 `writesOpenClawInstanceDirs=false`、`restartsOpenClawInstances=false`。
+- 已新增测试覆盖缺确认不连接 Tom、approval review 未 ready 不批准、批准后才执行一次性 live healthcheck。
+- 已验证 `bash -n ops/local/final-go-live-runner.sh`。
+- 已验证 `npm test -- test/final-go-live-runner.test.ts`，10/10 通过。
 
 后续跨服务器扩展预留步骤：
 

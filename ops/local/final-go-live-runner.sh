@@ -4,7 +4,8 @@ set +x
 
 # 本机侧最终上线推进 runner。
 # prepare 自动推进到人工批准边界；run-approved 只在显式确认和本地令牌存在时代理 Tom runner。
-# 本脚本不批准 approval，不直接打开 live gate，不修改任何 OpenClaw 实例目录。
+# approve-and-run 先只读复核 approval review，再在显式确认后记录 approval 并执行一次性演练。
+# 本脚本默认不批准 approval；只有 approve-and-run 且强确认齐全时才会写 approval 记录。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
@@ -13,6 +14,8 @@ FINAL_GO_LIVE_STATUS_SCRIPT="${FINAL_GO_LIVE_STATUS_SCRIPT:-${SCRIPT_DIR}/final-
 SSH_BIN="${FINAL_GO_LIVE_RUNNER_SSH_BIN:-${FINAL_GO_LIVE_STATUS_SSH_BIN:-ssh}}"
 OPENCLAW_TOPOLOGY_MODE="${OPENCLAW_TOPOLOGY_MODE:-local-only}"
 CONFIRM_FINAL_GO_LIVE_RUNNER="${CONFIRM_FINAL_GO_LIVE_RUNNER:-}"
+CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN="${CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN:-}"
+APPROVED_BY="${APPROVED_BY:-}"
 LOCAL_API_TOKEN="${LOCAL_API_TOKEN:-}"
 
 fail() {
@@ -30,20 +33,28 @@ usage() {
   final-go-live-runner.sh status
   final-go-live-runner.sh prepare
   final-go-live-runner.sh run-approved
+  final-go-live-runner.sh approve-and-run
 
 说明：
   status：只运行 final-go-live-status.sh status。
   prepare：运行 final-go-live-status.sh check；如果下一步是 Tom live-healthcheck-rollout-runner.sh prepare，就自动 SSH 到 Tom 执行 prepare，再复核最终状态。
   run-approved：必须显式确认并提供 LOCAL_API_TOKEN，才会 SSH 到 Tom 执行 live-healthcheck-rollout-runner.sh run-approved。
+  approve-and-run：必须显式确认、提供 APPROVED_BY 与 LOCAL_API_TOKEN；先执行 Tom approval review，只在 ready_for_human_approval 时记录 approval 并执行一次性 run-approved。
 
 run-approved 必须设置：
   CONFIRM_FINAL_GO_LIVE_RUNNER=I_UNDERSTAND_THIS_RUNS_APPROVED_FINAL_GO_LIVE
   LOCAL_API_TOKEN=<本地令牌>
 
+approve-and-run 必须设置：
+  CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK
+  APPROVED_BY=<批准人>
+  LOCAL_API_TOKEN=<本地令牌>
+
 安全边界：
-  - 不批准 approval。
+  - status/prepare/run-approved 不批准 approval。
+  - approve-and-run 只有在 approval review ready 且强确认齐全时才记录 approval。
   - status/prepare 不打开 live gate，不调用 managed-actions live API。
-  - run-approved 只代理已批准的 Tom runner，Tom runner 会再次校验 approval/readiness。
+  - run-approved/approve-and-run 都会交给 Tom runner 再次校验 approval/readiness。
   - 不修改任何 OpenClaw 实例目录。
 TEXT
 }
@@ -57,6 +68,8 @@ run_node() {
     SSH_BIN="$SSH_BIN" \
     OPENCLAW_TOPOLOGY_MODE="$OPENCLAW_TOPOLOGY_MODE" \
     CONFIRM_FINAL_GO_LIVE_RUNNER="$CONFIRM_FINAL_GO_LIVE_RUNNER" \
+    CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN="$CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN" \
+    APPROVED_BY="$APPROVED_BY" \
     LOCAL_API_TOKEN="$LOCAL_API_TOKEN" \
     node <<'NODE'
 const fs = require("node:fs");
@@ -71,6 +84,8 @@ const finalStatusScript = process.env.FINAL_GO_LIVE_STATUS_SCRIPT;
 const sshBin = process.env.SSH_BIN || "ssh";
 const topologyMode = normalizeTopologyMode(process.env.OPENCLAW_TOPOLOGY_MODE || "local-only");
 const confirm = process.env.CONFIRM_FINAL_GO_LIVE_RUNNER || "";
+const confirmApproveAndRun = process.env.CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN || "";
+const approvedBy = String(process.env.APPROVED_BY || "").trim();
 const localApiToken = process.env.LOCAL_API_TOKEN || "";
 
 function normalizeTopologyMode(value) {
@@ -179,7 +194,24 @@ function runFinalStatus(statusMode) {
   };
 }
 
-function runTomRunner(runnerMode) {
+function tomSshArgs(tom) {
+  const args = [
+    "-p",
+    String(tom.port),
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    `ConnectTimeout=${tom.connectTimeoutSeconds}`,
+    "-o",
+    `StrictHostKeyChecking=${tom.strictHostKeyChecking}`,
+    "-o",
+    `UserKnownHostsFile=${tom.knownHostsFile}`,
+  ];
+  if (tom.sshKey) args.push("-i", tom.sshKey);
+  return args;
+}
+
+function runTomRemote(label, remoteBody) {
   const tom = tomConfig();
   if (tom.error) {
     return {
@@ -196,20 +228,23 @@ function runTomRunner(runnerMode) {
     };
   }
 
-  const args = [
-    "-p",
-    String(tom.port),
-    "-o",
-    "BatchMode=yes",
-    "-o",
-    `ConnectTimeout=${tom.connectTimeoutSeconds}`,
-    "-o",
-    `StrictHostKeyChecking=${tom.strictHostKeyChecking}`,
-    "-o",
-    `UserKnownHostsFile=${tom.knownHostsFile}`,
-  ];
-  if (tom.sshKey) args.push("-i", tom.sshKey);
+  const args = tomSshArgs(tom);
+  const remoteCommand = [
+    `cd ${shellQuote(tom.deployDir)}`,
+    remoteBody,
+  ].join(" && ");
+  args.push(`${tom.user}@${tom.host}`, remoteCommand);
 
+  const result = run(sshBin, args, { cwd: rootDir, timeout: 300_000 });
+  return {
+    exitCode: result.exitCode,
+    report: parseJson(result.stdout, label),
+    stderrLines: compactLines(result.stderr, 80),
+    commandPreview: `ssh ${tom.user}@${tom.host} <redacted> ${label}`,
+  };
+}
+
+function runTomRunner(runnerMode) {
   const remoteEnv = [
     `OPENCLAW_TOPOLOGY_MODE=${shellQuote(topologyMode)}`,
   ];
@@ -217,19 +252,29 @@ function runTomRunner(runnerMode) {
     remoteEnv.push("CONFIRM_LIVE_HEALTHCHECK_RUNNER=I_UNDERSTAND_THIS_RUNS_APPROVED_LIVE_HEALTHCHECK");
     remoteEnv.push(`LOCAL_API_TOKEN=${shellQuote(localApiToken)}`);
   }
-  const remoteCommand = [
-    `cd ${shellQuote(tom.deployDir)}`,
+  return runTomRemote(
+    `live-healthcheck-rollout-runner.sh ${runnerMode}`,
     `${remoteEnv.join(" ")} repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh ${runnerMode}`,
-  ].join(" && ");
-  args.push(`${tom.user}@${tom.host}`, remoteCommand);
+  );
+}
 
-  const result = run(sshBin, args, { cwd: rootDir, timeout: 300_000 });
-  return {
-    exitCode: result.exitCode,
-    report: parseJson(result.stdout, `Tom live healthcheck runner ${runnerMode}`),
-    stderrLines: compactLines(result.stderr, 80),
-    commandPreview: `ssh ${tom.user}@${tom.host} <redacted> live-healthcheck-rollout-runner.sh ${runnerMode}`,
-  };
+function runTomApprovalReview() {
+  return runTomRemote(
+    "live-healthcheck-approval-review.sh check",
+    `OPENCLAW_TOPOLOGY_MODE=${shellQuote(topologyMode)} repo/ops/tom-readonly/live-healthcheck-approval-review.sh check`,
+  );
+}
+
+function runTomApprove() {
+  return runTomRemote(
+    "live-healthcheck-approval.sh approve",
+    [
+      `OPENCLAW_TOPOLOGY_MODE=${shellQuote(topologyMode)}`,
+      "CONFIRM_APPROVAL_RECORD=I_APPROVE_LIVE_HEALTHCHECK_RECORD",
+      `APPROVED_BY=${shellQuote(approvedBy)}`,
+      "repo/ops/tom-readonly/live-healthcheck-approval.sh approve runtime/live-healthcheck-approval.json",
+    ].join(" "),
+  );
 }
 
 function hasCommand(report, pattern) {
@@ -482,10 +527,177 @@ function runApproved() {
   };
 }
 
+function approveAndRun() {
+  if (confirmApproveAndRun !== "I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK") {
+    return {
+      schemaVersion: 1,
+      status: "blocked_approve_and_run_confirmation_required",
+      mode,
+      topologyMode,
+      generatedAt: new Date().toISOString(),
+      issues: ["必须设置 CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK"],
+      nextCommands: [
+        "CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK APPROVED_BY=Anan LOCAL_API_TOKEN=<本地令牌> ops/local/final-go-live-runner.sh approve-and-run",
+      ],
+      safety: baseSafety({
+        connectsTomSsh: false,
+        writesTomRuntime: false,
+        writesControlCenterRuntimeOnly: false,
+        approvesLiveHealthcheck: false,
+        opensLiveGate: false,
+        callsManagedActionsLiveApi: false,
+        requiresApprovalReviewReady: true,
+        requiresExplicitHumanApproval: true,
+        blockedBeforeApproval: true,
+        blockedBeforeLive: true,
+      }),
+    };
+  }
+  if (!approvedBy) {
+    return {
+      schemaVersion: 1,
+      status: "blocked_approved_by_required",
+      mode,
+      topologyMode,
+      generatedAt: new Date().toISOString(),
+      issues: ["必须设置 APPROVED_BY=<批准人>"],
+      nextCommands: [
+        "CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK APPROVED_BY=Anan LOCAL_API_TOKEN=<本地令牌> ops/local/final-go-live-runner.sh approve-and-run",
+      ],
+      safety: baseSafety({
+        connectsTomSsh: false,
+        writesTomRuntime: false,
+        writesControlCenterRuntimeOnly: false,
+        approvesLiveHealthcheck: false,
+        opensLiveGate: false,
+        callsManagedActionsLiveApi: false,
+        requiresApprovalReviewReady: true,
+        requiresExplicitHumanApproval: true,
+        blockedBeforeApproval: true,
+        blockedBeforeLive: true,
+      }),
+    };
+  }
+  if (!localApiToken) {
+    return {
+      schemaVersion: 1,
+      status: "blocked_local_token_required",
+      mode,
+      topologyMode,
+      generatedAt: new Date().toISOString(),
+      issues: ["必须通过 LOCAL_API_TOKEN 提供本地令牌"],
+      nextCommands: [
+        "CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK APPROVED_BY=Anan LOCAL_API_TOKEN=<本地令牌> ops/local/final-go-live-runner.sh approve-and-run",
+      ],
+      safety: baseSafety({
+        connectsTomSsh: false,
+        writesTomRuntime: false,
+        writesControlCenterRuntimeOnly: false,
+        approvesLiveHealthcheck: false,
+        opensLiveGate: false,
+        callsManagedActionsLiveApi: false,
+        requiresApprovalReviewReady: true,
+        requiresExplicitHumanApproval: true,
+        blockedBeforeApproval: true,
+        blockedBeforeLive: true,
+      }),
+    };
+  }
+
+  const approvalReview = runTomApprovalReview();
+  const reviewStatus = approvalReview.report?.status || "unknown";
+  if (approvalReview.exitCode !== 0 || reviewStatus !== "ready_for_human_approval") {
+    const reviewNextCommands = Array.isArray(approvalReview.report?.nextCommands) ? approvalReview.report.nextCommands : [];
+    return {
+      schemaVersion: 1,
+      status: "blocked_approval_review_not_ready",
+      mode,
+      topologyMode,
+      generatedAt: new Date().toISOString(),
+      stages: { approvalReview },
+      issues: [`approval review 未到 ready_for_human_approval：${reviewStatus}`],
+      nextCommands: reviewNextCommands.length > 0 ? reviewNextCommands : ["ops/local/final-go-live-runner.sh prepare"],
+      safety: baseSafety({
+        connectsTomSsh: true,
+        writesTomRuntime: false,
+        writesControlCenterRuntimeOnly: false,
+        approvesLiveHealthcheck: false,
+        opensLiveGate: false,
+        callsManagedActionsLiveApi: false,
+        requiresApprovalReviewReady: true,
+        requiresExplicitHumanApproval: true,
+        blockedBeforeApproval: true,
+        blockedBeforeLive: true,
+      }),
+    };
+  }
+
+  const approval = runTomApprove();
+  const approvalStatus = approval.report?.status || "unknown";
+  if (approval.exitCode !== 0 || approvalStatus !== "approved") {
+    const approvalIssues = Array.isArray(approval.report?.issues) ? approval.report.issues : [`approval 记录未完成：${approvalStatus}`];
+    return {
+      schemaVersion: 1,
+      status: "blocked_approval_record_failed",
+      mode,
+      topologyMode,
+      generatedAt: new Date().toISOString(),
+      stages: { approvalReview, approval },
+      issues: approvalIssues,
+      nextCommands: [
+        "repo/ops/tom-readonly/live-healthcheck-approval-review.sh check",
+      ],
+      safety: baseSafety({
+        connectsTomSsh: true,
+        writesTomRuntime: false,
+        writesControlCenterRuntimeOnly: false,
+        approvesLiveHealthcheck: false,
+        opensLiveGate: false,
+        callsManagedActionsLiveApi: false,
+        requiresApprovalReviewReady: true,
+        requiresExplicitHumanApproval: true,
+        blockedBeforeLive: true,
+      }),
+    };
+  }
+
+  const tomRun = runTomRunner("run-approved");
+  const after = runFinalStatus("check");
+  const tomStatus = tomRun.report?.status || "unknown";
+  const completed = tomRun.exitCode === 0 && tomStatus === "completed_live_healthcheck";
+  const tomNextCommands = Array.isArray(tomRun.report?.nextCommands) ? tomRun.report.nextCommands : [];
+  const afterNextCommands = Array.isArray(after.report?.nextCommands) ? after.report.nextCommands : [];
+  return {
+    schemaVersion: 1,
+    status: completed ? "completed_final_live_healthcheck" : tomStatus,
+    mode,
+    topologyMode,
+    generatedAt: new Date().toISOString(),
+    stages: { approvalReview, approval, tomRun, after },
+    issues: Array.isArray(tomRun.report?.issues) ? tomRun.report.issues : [],
+    nextCommands: completed && afterNextCommands.length > 0 ? afterNextCommands : tomNextCommands,
+    safety: baseSafety({
+      connectsTomSsh: true,
+      writesTomRuntime: true,
+      writesControlCenterRuntimeOnly: true,
+      approvesLiveHealthcheck: true,
+      opensLiveGate: completed,
+      callsManagedActionsLiveApi: completed,
+      requiresApprovalReviewReady: true,
+      requiresExplicitHumanApproval: true,
+      requiresApprovedBy: true,
+      requiresLocalApiToken: true,
+      requiresTomApprovedReadiness: true,
+      blockedBeforeLive: !completed,
+    }),
+  };
+}
+
 function emit(report) {
   console.log(JSON.stringify(report, null, 2));
   if (mode === "prepare" && String(report.status || "").startsWith("blocked_")) process.exit(2);
   if (mode === "run-approved" && report.status !== "completed_final_live_healthcheck") process.exit(2);
+  if (mode === "approve-and-run" && report.status !== "completed_final_live_healthcheck") process.exit(2);
 }
 
 if (mode === "status") {
@@ -494,6 +706,8 @@ if (mode === "status") {
   emit(prepare());
 } else if (mode === "run-approved") {
   emit(runApproved());
+} else if (mode === "approve-and-run") {
+  emit(approveAndRun());
 } else {
   console.error(`[失败] 未知模式：${mode}`);
   process.exit(2);
@@ -515,6 +729,9 @@ main() {
       ;;
     run-approved)
       run_node "run-approved"
+      ;;
+    approve-and-run)
+      run_node "approve-and-run"
       ;;
     -h|--help|help)
       usage
