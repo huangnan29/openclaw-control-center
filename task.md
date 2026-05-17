@@ -94,6 +94,11 @@
 - 已新增 `remote-collector-onboarding.sh verify <bundle-dir>`，只读取已生成接入包并离线校验，不 SSH、不写文件、不改 registry。
 - `verify` 会校验必需文件、serverId 一致性、safety 布尔边界、pull/register 路径、build-context manifest，并调用接入包内 `bootstrap-collector-node.sh plan` 确认不启动容器、不修改实例。
 - 已新增测试覆盖 `verify` 成功路径和篡改 `safety.connectsSsh=true` 后失败。
+- 已提交并推送 `f1b4960 ops: verify remote collector onboarding bundles`。
+- 已部署到 Tom，并验证运行提交 `f1b4960`。
+- 已在 Tom 用样板配置执行 onboarding `write`，只写入 `runtime/remote-onboarding/remote-oracle/`，未 SSH、未写 active registry、未修改任何 OpenClaw 实例。
+- 已在 Tom 对样板接入包执行 `verify`，返回 `status=verified`、`bundlesBuildContext=true`、`buildContextFiles=88`、`bootstrapStartsContainers=false`、`writesActiveRegistry=false`、`connectsSsh=false`、`mutatesOpenClawInstance=false`、`callsLiveApi=false`。
+- 已验证 Tom `healthcheck.sh` 通过，现有 5 个实例仍只读；live window status 仍为 `needs_manual_approval`、`READONLY_MODE=true`、`readiness.status=blocked`，未调用 live API。
 - 已新增 `ops/tom-readonly/register-remote-collector.sh`，用于把已拉取的远端 collector snapshot 注册到 Tom `config/instances.json`。
 - 已新增 `ops/tom-readonly/register-remote-collector.example.json` 样板。
 - `register-remote-collector.sh plan` 只读取配置、Tom registry 和本机 snapshot，不写文件。
