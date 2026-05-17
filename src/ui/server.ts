@@ -38,6 +38,7 @@ import { buildHealthzPayload } from "../runtime/healthz";
 import { loadOpenClawInstanceConfigs } from "../runtime/instance-config";
 import { applyImportMutation, readImportMutationGuardState } from "../runtime/import-live";
 import { validateExportBundleDryRun, validateExportFileDryRun } from "../runtime/import-dry-run";
+import { readManagedActionDryRunAudits, type ManagedActionAuditRecord } from "../runtime/managed-action-audit";
 import {
   buildManagedActionDryRun,
   isManagedActionName,
@@ -1167,6 +1168,7 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
               language,
               warningParts.join("; ") || undefined,
               scopedSnapshot ? requestedServerId : undefined,
+              await readManagedActionDryRunAudits({ limit: 8 }),
             );
             return writeText(res, 200, html, "text/html; charset=utf-8");
           }
@@ -1325,6 +1327,21 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
         });
       }
 
+      if (method === "GET" && path === "/api/managed-actions/audit") {
+        assertAllowedQueryParams(url.searchParams, ["limit", "instanceId", "operator", "action"], true);
+        const action = normalizeQueryString(url.searchParams.get("action"), "action", 80, true);
+        if (action !== undefined && !isManagedActionName(action)) {
+          throw new RequestValidationError("action must be one of: healthcheck, collector_refresh, skill_run.", 400);
+        }
+        const audit = await readManagedActionDryRunAudits({
+          limit: readPositiveIntQuery(url.searchParams.get("limit"), "limit", 20, true, 100),
+          instanceId: normalizeQueryString(url.searchParams.get("instanceId"), "instanceId", 120, true),
+          operator: normalizeQueryString(url.searchParams.get("operator"), "operator", 120, true),
+          action,
+        });
+        return writeJson(res, 200, audit);
+      }
+
       if (method === "POST" && path === "/api/managed-actions/dry-run") {
         assertAllowedQueryParams(url.searchParams, [], true);
         assertJsonContentType(req);
@@ -1378,6 +1395,7 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
           detail: `previewed ${result.action} for ${result.target.instanceId}`,
           metadata: {
             target: result.target,
+            managedAction: result.action,
             commandPreview: result.commandPreview,
             operationRequestId: result.review.operationRequestId,
             operator: result.review.operator,
@@ -6852,6 +6870,7 @@ function renderMultiInstanceOverview(
   language: UiLanguage = "zh",
   warning?: string,
   selectedServerId?: string,
+  managedActionAudit?: Awaited<ReturnType<typeof readManagedActionDryRunAudits>>,
 ): string {
   const t = (en: string, zh: string): string => pickUiText(language, en, zh);
   const totalChips = [
@@ -6962,6 +6981,7 @@ function renderMultiInstanceOverview(
     ${renderServerHealthPanel(snapshot, language, selectedServerId)}
     ${renderCollectorSnapshotPanel(snapshot.instances, language, snapshot.generatedAt)}
     ${renderManagedActionDryRunPanel(snapshot.instances, language, snapshot.selectedInstanceId)}
+    ${renderManagedActionAuditPanel(managedActionAudit?.records ?? [], language)}
     <section class="overview-layout">
       <div>
         ${renderMultiInstanceHealthPanel(snapshot.instances, language)}
@@ -7053,6 +7073,38 @@ function managedActionUiLabel(action: ManagedActionName, language: UiLanguage): 
   if (action === "healthcheck") return pickUiText(language, "Healthcheck", "健康检查");
   if (action === "collector_refresh") return pickUiText(language, "Collector refresh", "刷新 collector");
   return pickUiText(language, "Skill invocation", "调用 skill");
+}
+
+function renderManagedActionAuditPanel(records: ManagedActionAuditRecord[], language: UiLanguage): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const rows = records
+    .map((record) => {
+      const actionLabel = record.action ? managedActionUiLabel(record.action, language) : "-";
+      const commandPreview = record.commandPreview.length > 0 ? record.commandPreview.join(" | ") : "-";
+      return `<tr>
+        <td>${escapeHtml(formatUiTimestamp(record.timestamp, language))}<div class="meta"><code>${escapeHtml(record.operationRequestId ?? record.requestId ?? "-")}</code></div></td>
+        <td>${escapeHtml(record.targetInstanceName ?? record.targetInstanceId ?? "-")}<div class="meta"><code>${escapeHtml(record.targetInstanceId ?? "-")}</code></div></td>
+        <td>${escapeHtml(actionLabel)}</td>
+        <td>${escapeHtml(record.operator ?? "-")}<div class="meta">${escapeHtml(safeTruncate(record.reason ?? "-", 72))}</div></td>
+        <td>${badge(record.ok ? "connected" : "error", record.ok ? t("OK", "通过") : t("Failed", "失败"))}<div class="meta">${escapeHtml(t("Confirmed", "确认"))}: ${escapeHtml(String(record.confirmationTextMatched === true))}</div></td>
+        <td>${escapeHtml(safeTruncate(commandPreview, 96))}</td>
+      </tr>`;
+    })
+    .join("");
+  return `<section class="panel" id="managed-actions-audit">
+    <div class="panel-head">
+      <div>
+        <h2>${escapeHtml(t("Managed action audit", "管理动作审计"))}</h2>
+        <div class="meta">${escapeHtml(t("Recent dry-run requests. These records are readonly and do not execute OpenClaw commands.", "最近的 dry-run 申请记录。这里只读展示，不执行 OpenClaw 命令。"))}</div>
+      </div>
+      ${badge("connected", t("readonly", "只读"))}
+    </div>
+    ${
+      rows
+        ? `<div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Time / request", "时间 / 申请"))}</th><th>${escapeHtml(t("Target", "目标"))}</th><th>${escapeHtml(t("Action", "动作"))}</th><th>${escapeHtml(t("Operator / reason", "操作者 / 原因"))}</th><th>${escapeHtml(t("Review", "复核"))}</th><th>${escapeHtml(t("Preview", "预览"))}</th></tr></thead><tbody>${rows}</tbody></table></div>`
+        : `<div class="empty-state">${escapeHtml(t("No managed action dry-run audit records yet.", "暂无管理动作 dry-run 审计记录。"))}</div>`
+    }
+  </section>`;
 }
 
 function renderManagedActionDryRunScript(language: UiLanguage): string {

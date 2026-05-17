@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-受控管理动作 dry-run UI：在多实例总览页提供管理动作预览入口，允许选择实例、动作、原因与本地令牌，只调用 dry-run API 并展示预览结果。
+受控管理动作审计检索视图：在总览页展示最近的 dry-run 操作申请与审计结果，并提供只读审计 API。
 
 ## 本轮不做
 
@@ -17,13 +17,13 @@
 
 ## 当前下一步
 
-把 dry-run 管理动作部署到 Tom 并验证：
+下一步进入真实执行前的最后安全层设计：
 
-- `GET /api/managed-actions` 可以列出当前白名单动作。
-- `POST /api/managed-actions/dry-run` 只返回预览结果并写入 `operation-audit.log`。
+- 设计真实执行白名单，但默认关闭。
+- 每个真实动作必须先经过 dry-run 申请。
+- 每个真实动作必须二次确认，并写入审计。
+- 不增加真实执行按钮。
 - Tom `healthcheck.sh` 继续通过。
-- 页面和现有 5 个 OpenClaw 实例不受影响。
-- 下一步：增强人工确认与审计字段，把 dry-run 预览升级为可复核的操作申请记录；仍不开放真实执行。
 
 ## 最近完成
 
@@ -91,7 +91,24 @@
 - 已验证页面包含 `管理动作预览`，浏览器页面树可见该入口。
 - 已验证 `npm test -- test/ui-render-smoke.test.ts test/managed-actions-dry-run.test.ts test/readonly-multi-instance-safety.test.ts test/multi-instance-readonly.test.ts`。
 - 已验证 `npm run build`。
+- 已让 dry-run API 要求 `operator`、`reason`、`confirmedText=DRY-RUN-ONLY`。
+- 已让 dry-run 结果返回 `review.operationRequestId`、`review.operator`、`review.reason`、`review.confirmationTextMatched` 和 `review.targetConfigSnapshot`。
+- 已让 dry-run 审计日志记录操作申请 ID、操作者、原因、确认结果和目标配置快照。
+- 已让总览页 `管理动作预览` UI 增加操作者与确认短语输入。
+- 已验证错误确认短语在带本地令牌时返回 400。
+- 已验证 Tom 授权 dry-run 返回 `confirmationTextMatched=true`、`targetConfigSnapshot=tom`、`mutatesOpenClawInstance=false`。
+- 已验证 Tom 审计日志包含 `operationRequestId`、`operator`、`confirmationTextMatched` 和 `targetConfigSnapshot`。
+- 已提交并推送 `d86bfdd feat: require review metadata for managed action previews`。
+- 已部署到 Tom，并验证运行提交 `d86bfdd`。
+- 已验证 `npm test -- test/managed-actions-dry-run.test.ts test/ui-render-smoke.test.ts test/phase9-routes-commands.test.ts test/readonly-multi-instance-safety.test.ts test/multi-instance-readonly.test.ts`。
+- 已验证 `npm run build`。
+- 已新增只读审计读取层：`src/runtime/managed-action-audit.ts`。
+- 已新增 `GET /api/managed-actions/audit`，支持 `limit`、`instanceId`、`operator`、`action` 过滤。
+- 已在多实例总览页新增 `管理动作审计` 面板，展示最近 dry-run 申请。
+- 已让审计记录包含动作名、目标实例、操作者、原因、确认结果、命令预览和申请 ID。
+- 已验证 `npm test -- test/managed-actions-dry-run.test.ts test/ui-render-smoke.test.ts test/phase9-routes-commands.test.ts test/readonly-multi-instance-safety.test.ts test/multi-instance-readonly.test.ts`。
+- 已验证 `npm run build`。
 
 ## 阶段完成后的下一步
 
-人工确认与审计增强：把 dry-run 预览结果扩展为操作申请记录，增加确认短语、操作者标识、原因必填、目标实例快照摘要和审计检索；仍然只允许预览，不开放真实执行。
+真实执行白名单设计：先只设计配置、闸门和测试，不在 Tom 开启真实执行；继续保证不影响当前所有 OpenClaw 实例。

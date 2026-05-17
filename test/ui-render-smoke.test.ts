@@ -297,6 +297,8 @@ test("multi-instance overview renders status metrics detail links and selected s
   assert(html.includes("操作者"));
   assert(html.includes("确认短语"));
   assert(html.includes("DRY-RUN-ONLY"));
+  assert(html.includes("管理动作审计"));
+  assert(html.includes("暂无管理动作 dry-run 审计记录"));
   assert(!html.includes("LOCAL_API_TOKEN"));
   assert(html.includes("Tom Oracle"));
   assert(html.includes("Jerry Oracle"));

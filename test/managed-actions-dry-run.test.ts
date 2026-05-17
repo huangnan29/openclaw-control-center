@@ -82,6 +82,29 @@ test("managed action dry-run previews whitelisted actions without executing in r
     assert.equal(body.review.reason, "上线前只读演练");
     assert.equal(body.review.confirmationTextMatched, true);
 
+    const auditResponse = await fetch(`${baseUrl}/api/managed-actions/audit?limit=5&instanceId=tom&operator=Anan`);
+    assert.equal(auditResponse.status, 200);
+    const audit = await auditResponse.json() as {
+      ok: boolean;
+      count: number;
+      records: Array<{
+        action?: string;
+        targetInstanceId?: string;
+        operator?: string;
+        reason?: string;
+        confirmationTextMatched?: boolean;
+        mutatesOpenClawInstance?: boolean;
+      }>;
+    };
+    assert.equal(audit.ok, true);
+    assert(audit.count >= 1);
+    assert.equal(audit.records[0]?.action, "healthcheck");
+    assert.equal(audit.records[0]?.targetInstanceId, "tom");
+    assert.equal(audit.records[0]?.operator, "Anan");
+    assert.equal(audit.records[0]?.reason, "上线前只读演练");
+    assert.equal(audit.records[0]?.confirmationTextMatched, true);
+    assert.equal(audit.records[0]?.mutatesOpenClawInstance, false);
+
     const blockedResponse = await fetch(`${baseUrl}/api/managed-actions/dry-run`, {
       method: "POST",
       headers: { "content-type": "application/json" },

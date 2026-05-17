@@ -693,6 +693,23 @@ export function buildApiDocs(): ApiDocsPayload {
         },
       },
       {
+        method: "GET",
+        path: "/api/managed-actions/audit",
+        summary: "Read recent managed action dry-run audit records",
+        query: {
+          limit: "optional 1..100 (default 20)",
+          instanceId: "optional configured instance id",
+          operator: "optional operator",
+          action: "optional healthcheck|collector_refresh|skill_run",
+        },
+        response: {
+          ok: "boolean",
+          path: "runtime/operation-audit.log",
+          count: "number",
+          records: "ManagedActionAuditRecord[] newest-first",
+        },
+      },
+      {
         method: "POST",
         path: "/api/managed-actions/dry-run",
         summary:
