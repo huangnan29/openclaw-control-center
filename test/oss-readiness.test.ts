@@ -133,19 +133,26 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   const doc = readFileSync(path.join(ROOT, "docs", "MULTI_INSTANCE_READONLY.md"), "utf8");
   const compose = readFileSync(path.join(ROOT, "docker-compose.example.yml"), "utf8");
   const env = readFileSync(path.join(ROOT, ".env.example"), "utf8");
+  const healthcheck = readFileSync(path.join(ROOT, "ops", "tom-readonly", "healthcheck.sh"), "utf8");
+  const cron = path.join(ROOT, "ops", "tom-readonly", "install-collector-cron.sh");
 
   assert(doc.includes("OPENCLAW_INSTANCES_FILE"));
   assert(doc.includes("\"servers\""));
   assert(doc.includes("serverId"));
   assert(doc.includes("collectorSnapshotPath"));
   assert(doc.includes("collector:snapshot"));
+  assert(doc.includes("install-collector-cron.sh"));
   assert(doc.includes("服务器健康"));
   assert(doc.includes("/srv/openclaw-work"));
   assert(doc.includes(":ro"));
   assert(doc.includes("不挂载 /var/run/docker.sock"));
   assert(existsSync(path.join(ROOT, "ops", "tom-readonly", "collector-snapshot.sh")));
+  assert(existsSync(cron));
+  assert.match(readFileSync(cron, "utf8"), /OPENCLAW_COLLECTOR_CRON_BEGIN/);
+  assert(healthcheck.includes("COLLECTOR_SNAPSHOT_MAX_AGE_SECONDS"));
   assert(compose.includes("OPENCLAW_INSTANCES_FILE"));
   assert(env.includes("OPENCLAW_INSTANCES_JSON"));
   assert(env.includes("servers"));
   assert(env.includes("collectorSnapshotPath"));
+  assert(env.includes("OPENCLAW_COLLECTOR_CRON_SCHEDULE"));
 });

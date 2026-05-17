@@ -204,12 +204,26 @@ cd /srv/openclaw-control-center-readonly
 ./collector-snapshot.sh
 ```
 
-当前脚本只负责生成快照，不会自动把中央 UI 切换到 `collectorSnapshotPath`。切换读取路径和定时执行应作为下一步单独验证，避免把“导出能力”和“生产切流”混在一起。
+Tom 进入 collector 灰度切流后，可以安装定时任务持续刷新快照：
+
+```bash
+cd /srv/openclaw-control-center-readonly
+./install-collector-cron.sh
+OPENCLAW_COLLECTOR_CRON_SCHEDULE="*/2 * * * *" ./install-collector-cron.sh
+```
+
+`install-collector-cron.sh` 只更新当前用户 crontab 中 `OPENCLAW_COLLECTOR_CRON_BEGIN` 到 `OPENCLAW_COLLECTOR_CRON_END` 之间的受控标记块，重复执行会覆盖旧的 OpenClaw collector 定时任务，不会改动标记块之外的其他 cron。
+
+`healthcheck.sh` 会读取 server registry 中的 `collectorSnapshotPath`，并用 `COLLECTOR_SNAPSHOT_MAX_AGE_SECONDS` 检查快照是否存在、可解析、包含实例且未过期。默认最大年龄是 300 秒。
 
 ## 推荐环境变量
 
 ```env
 OPENCLAW_INSTANCES_FILE=/app/config/instances.json
+OPENCLAW_COLLECTOR_SERVER_ID=tom-oracle
+OPENCLAW_COLLECTOR_OUTPUT=/app/runtime/collectors/tom-oracle/snapshot.json
+OPENCLAW_COLLECTOR_CRON_SCHEDULE="*/2 * * * *"
+COLLECTOR_SNAPSHOT_MAX_AGE_SECONDS=300
 READONLY_MODE=true
 APPROVAL_ACTIONS_ENABLED=false
 APPROVAL_ACTIONS_DRY_RUN=true
@@ -240,7 +254,8 @@ LOCAL_TOKEN_AUTH_REQUIRED=true
 
 Tom 的长期灰度部署可以使用 `ops/tom-readonly/` 下的脚本：
 
-- `healthcheck.sh`：检查 gateway、只读页面、写接口 403、容器端口、`privileged`、`docker.sock` 和实例只读挂载。
+- `healthcheck.sh`：检查 gateway、只读页面、写接口 403、容器端口、`privileged`、`docker.sock`、实例只读挂载和 collector 快照新鲜度。
+- `install-collector-cron.sh`：安装 Tom collector 快照定时任务。
 - `update.sh`：拉取 `multi-instance-readonly-control-center` 分支，重建控制中心容器，并自动运行健康检查。
 - `rollback.sh`：回滚到指定提交；不传提交时使用最近一次更新前记录的 `previous-good.commit`。
 
@@ -249,5 +264,6 @@ Tom 的长期灰度部署可以使用 `ops/tom-readonly/` 下的脚本：
 ```bash
 cd /srv/openclaw-control-center-readonly
 ./healthcheck.sh
+./install-collector-cron.sh
 ./update.sh
 ```

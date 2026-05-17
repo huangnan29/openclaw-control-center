@@ -10,8 +10,9 @@
 
 ## 脚本
 
-- `healthcheck.sh`：检查 gateway 健康、总览页、实例详情页、写接口 403、容器只读安全边界。
+- `healthcheck.sh`：检查 gateway 健康、总览页、实例详情页、写接口 403、容器只读安全边界，以及 collector 快照新鲜度。
 - `collector-snapshot.sh`：在 Tom 本地生成 collector JSON 快照，只写控制中心 runtime，不修改任何 OpenClaw 实例目录。
+- `install-collector-cron.sh`：幂等安装 Tom collector 快照定时任务，只更新 crontab 中的 OpenClaw 标记块。
 - `update.sh`：拉取 `multi-instance-readonly-control-center` 分支，重建控制中心容器，随后执行健康检查。
 - `rollback.sh`：回滚到指定提交；如果不传提交，则使用最近一次 `update.sh` 记录的 `previous-good.commit`。
 
@@ -21,6 +22,7 @@
 cd /srv/openclaw-control-center-readonly
 ./healthcheck.sh
 ./collector-snapshot.sh
+./install-collector-cron.sh
 ./update.sh
 ./rollback.sh <commit>
 ```
@@ -30,6 +32,8 @@ cd /srv/openclaw-control-center-readonly
 ```bash
 BASE_URL=http://127.0.0.1:4311 INSTANCE_IDS="main tom third deepseek spark" ./healthcheck.sh
 SERVER_ID=tom-oracle OUTPUT_PATH=/app/runtime/collectors/tom-oracle/snapshot.json ./collector-snapshot.sh
+OPENCLAW_COLLECTOR_CRON_SCHEDULE="*/2 * * * *" ./install-collector-cron.sh
+COLLECTOR_SNAPSHOT_MAX_AGE_SECONDS=300 ./healthcheck.sh
 BRANCH=multi-instance-readonly-control-center ./update.sh
 ```
 
@@ -43,3 +47,4 @@ BRANCH=multi-instance-readonly-control-center ./update.sh
 - 容器未挂载 `/var/run/docker.sock`。
 - 所有实例目录挂载均为只读。
 - `PATCH /api/ui/preferences` 返回 403。
+- 如果 registry 配置了 `collectorSnapshotPath`，快照必须存在、可解析、包含实例且未超过 `COLLECTOR_SNAPSHOT_MAX_AGE_SECONDS`。

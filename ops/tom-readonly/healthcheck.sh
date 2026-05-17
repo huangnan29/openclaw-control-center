@@ -9,6 +9,7 @@ BASE_URL="${BASE_URL:-http://127.0.0.1:4311}"
 INSTANCE_IDS="${INSTANCE_IDS:-main tom third deepseek spark}"
 GATEWAY_PORTS="${GATEWAY_PORTS:-18789 18791 18793 18795 18797}"
 INSTANCE_MOUNTS="${INSTANCE_MOUNTS:-/instances/main/config /instances/main/workspace /instances/tom/config /instances/tom/workspace /instances/third/config /instances/third/workspace /instances/deepseek/config /instances/deepseek/workspace /instances/spark/config /instances/spark/workspace}"
+COLLECTOR_SNAPSHOT_MAX_AGE_SECONDS="${COLLECTOR_SNAPSHOT_MAX_AGE_SECONDS:-300}"
 HTTP_RETRY_COUNT="${HTTP_RETRY_COUNT:-20}"
 HTTP_RETRY_DELAY_SECONDS="${HTTP_RETRY_DELAY_SECONDS:-1}"
 TMP_DIR=""
@@ -147,6 +148,76 @@ check_container_security() {
   printf '%s\n' "$instances_line" | grep -Fq "|false" || fail "instances.json 挂载不是只读"
 }
 
+check_collector_snapshot_freshness() {
+  log "检查 collector 快照新鲜度"
+  docker exec -i \
+    -e COLLECTOR_SNAPSHOT_MAX_AGE_SECONDS="$COLLECTOR_SNAPSHOT_MAX_AGE_SECONDS" \
+    "$CONTAINER_NAME" \
+    node <<'NODE' || fail "collector 快照新鲜度检查失败"
+const fs = require("fs");
+
+const configPath = "/app/config/instances.json";
+const maxAgeSeconds = Number(process.env.COLLECTOR_SNAPSHOT_MAX_AGE_SECONDS || "300");
+if (!Number.isFinite(maxAgeSeconds) || maxAgeSeconds <= 0) {
+  console.error(`COLLECTOR_SNAPSHOT_MAX_AGE_SECONDS 非法：${process.env.COLLECTOR_SNAPSHOT_MAX_AGE_SECONDS}`);
+  process.exit(2);
+}
+
+let config;
+try {
+  config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+} catch (error) {
+  console.error(`无法读取 instances registry：${configPath}`);
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(2);
+}
+
+const servers = Array.isArray(config.servers) ? config.servers : [];
+const targets = servers.filter((server) => {
+  return server && typeof server.collectorSnapshotPath === "string" && server.collectorSnapshotPath.trim() !== "";
+});
+
+if (targets.length === 0) {
+  console.log("未配置 collectorSnapshotPath，跳过 collector 快照新鲜度检查。");
+  process.exit(0);
+}
+
+let failed = false;
+const now = Date.now();
+for (const server of targets) {
+  const serverId = typeof server.id === "string" && server.id.trim() ? server.id.trim() : "unknown-server";
+  const snapshotPath = server.collectorSnapshotPath.trim();
+
+  try {
+    const snapshot = JSON.parse(fs.readFileSync(snapshotPath, "utf8"));
+    const generatedAtMs = Date.parse(String(snapshot.generatedAt || ""));
+    const instances = Array.isArray(snapshot.instances) ? snapshot.instances : [];
+    if (!Number.isFinite(generatedAtMs)) {
+      throw new Error(`generatedAt 非法：${snapshot.generatedAt}`);
+    }
+    if (instances.length === 0) {
+      throw new Error("instances 为空");
+    }
+
+    const ageSeconds = Math.max(0, Math.round((now - generatedAtMs) / 1000));
+    if (ageSeconds > maxAgeSeconds) {
+      throw new Error(`快照已过期：age=${ageSeconds}s max=${maxAgeSeconds}s`);
+    }
+
+    console.log(`collector 快照正常：server=${serverId} age=${ageSeconds}s instances=${instances.length}`);
+  } catch (error) {
+    failed = true;
+    console.error(`collector 快照异常：server=${serverId} path=${snapshotPath}`);
+    console.error(error instanceof Error ? error.message : String(error));
+  }
+}
+
+if (failed) {
+  process.exit(2);
+}
+NODE
+}
+
 main() {
   trap cleanup EXIT
   TMP_DIR="$(mktemp -d)"
@@ -159,6 +230,7 @@ main() {
   check_gateway_health
   check_http_pages
   check_container_security
+  check_collector_snapshot_freshness
 
   log "健康检查通过：Tom 多实例只读控制中心可继续作为灰度监控入口。"
 }

@@ -6,19 +6,18 @@
 
 ## 本轮任务
 
-Tom collector 灰度切流已完成：Tom registry 已指向本机 `collectorSnapshotPath`，中央 UI 当前从 collector JSON 快照读取实例状态。
+Tom collector 定时化：配置定时生成 collector 快照，并增加快照新鲜度检查，确保中央 UI 不会长期读取过期快照。
 
 ## 本轮不做
 
 - 不做任何写操作或管理动作。
 - 不做 HTTP collector 服务。
-- 不做自动定时任务。
 - 不接入 Tom 之外的其他 Oracle 服务器。
 - 不让中央控制中心直接挂载远端实例目录。
 
 ## 当前下一步
 
-为 Tom 配置定时生成 collector 快照，并增加快照新鲜度检查，确保中央 UI 不会长期读取过期快照。
+将 collector 快照时间、来源和过期状态更明确地显示到 UI 中，方便从页面上判断数据是否仍然可信。
 
 ## 最近完成
 
@@ -52,7 +51,10 @@ Tom collector 灰度切流已完成：Tom registry 已指向本机 `collectorSna
 - 已在 Tom 生成最新 collector 快照：`/app/runtime/collectors/tom-oracle/snapshot.json`。
 - 已把 Tom `config/instances.json` 的 `tom-oracle` 指向 `collectorSnapshotPath`。
 - 已验证总览页和实例详情页出现 `collector ok`，Tom `healthcheck.sh` 通过。
+- 已新增 Tom collector 定时化计划：`docs/superpowers/plans/2026-05-17-collector-snapshot-scheduling.md`。
+- 已新增 `ops/tom-readonly/install-collector-cron.sh`，通过 `OPENCLAW_COLLECTOR_CRON_BEGIN` 标记块幂等安装快照 cron。
+- 已让 `ops/tom-readonly/healthcheck.sh` 检查 `collectorSnapshotPath` 快照新鲜度，默认 `COLLECTOR_SNAPSHOT_MAX_AGE_SECONDS=300`。
 
 ## 阶段完成后的下一步
 
-Tom collector 定时化：配置定时生成快照、快照新鲜度检查和失败回滚说明。
+UI collector 可见性增强：在总览和详情页展示 collector 快照生成时间、最大允许年龄和来源状态。
