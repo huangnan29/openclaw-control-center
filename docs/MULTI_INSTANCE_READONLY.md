@@ -400,6 +400,23 @@ repo/ops/tom-readonly/managed-action-dry-run-gate.sh run
 
 该脚本不会调用 `/api/managed-actions/live`，不会修改 OpenClaw 实例目录，只会读取 readiness/audit 或创建 `managed_action_dry_run` 审计记录。
 
+### 批准前证据包
+
+人工批准 live healthcheck 前，先生成一份批准前证据包：
+
+```bash
+repo/ops/tom-readonly/live-healthcheck-approval.sh prepare runtime/live-healthcheck-approval.json
+repo/ops/tom-readonly/live-healthcheck-approval-packet.sh generate
+```
+
+证据包会写入：
+
+```bash
+/srv/openclaw-control-center-readonly/runtime/live-healthcheck-approval-packets/
+```
+
+证据包包含总闸门 `check`、dry-run 证据 `status`、approval `status`、live window `status`、当前 commit、下一步命令和一份 `pre-live-approval-packet` 影响快照。它只写 control-center runtime 证据文件，不批准 live healthcheck，不打开 live gate，不调用 managed action live API，不修改任何 OpenClaw 实例目录。
+
 ## 推荐环境变量
 
 ```env

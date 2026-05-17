@@ -138,6 +138,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   const instanceImpactSnapshot = path.join(ROOT, "ops", "tom-readonly", "instance-impact-snapshot.sh");
   const liveHealthcheckApproval = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-approval.sh");
   const liveHealthcheckApprovalExample = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-approval.example.json");
+  const liveHealthcheckApprovalPacket = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-approval-packet.sh");
   const liveHealthcheckPreflight = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-preflight.sh");
   const liveHealthcheckReport = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-report.sh");
   const liveHealthcheckSmoke = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-smoke.sh");
@@ -203,6 +204,8 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(doc.includes("I_UNDERSTAND_THIS_ONLY_UPDATES_CONTROL_CENTER_LOCAL_REGISTRY"));
   assert(doc.includes("register-remote-collector.sh"));
   assert(doc.includes("I_UNDERSTAND_THIS_ONLY_UPDATES_CONTROL_CENTER_REGISTRY"));
+  assert(doc.includes("live-healthcheck-approval-packet.sh"));
+  assert(doc.includes("live-healthcheck-approval-packets"));
   assert(doc.includes("install-collector-cron.sh"));
   assert(doc.includes("服务器健康"));
   assert(doc.includes("/srv/openclaw-work"));
@@ -213,6 +216,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(existsSync(instanceImpactSnapshot));
   assert(existsSync(liveHealthcheckApproval));
   assert(existsSync(liveHealthcheckApprovalExample));
+  assert(existsSync(liveHealthcheckApprovalPacket));
   assert(existsSync(liveHealthcheckPreflight));
   assert(existsSync(liveHealthcheckReport));
   assert(existsSync(liveHealthcheckSmoke));
@@ -456,6 +460,16 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.equal(approvalExample.consumed, false);
   assert.equal(approvalExample.action, "healthcheck");
   assert.equal(approvalExample.scope.mutatesOpenClawInstance, false);
+  const approvalPacketText = readFileSync(liveHealthcheckApprovalPacket, "utf8");
+  assert.match(approvalPacketText, /live-healthcheck-approval-packet\.sh generate/);
+  assert.match(approvalPacketText, /go-live-gate\.sh/);
+  assert.match(approvalPacketText, /managed-action-dry-run-gate\.sh/);
+  assert.match(approvalPacketText, /live-healthcheck-approval\.sh/);
+  assert.match(approvalPacketText, /live-healthcheck-window\.sh/);
+  assert.match(approvalPacketText, /instance-impact-snapshot\.sh/);
+  assert.match(approvalPacketText, /callsManagedActionsLiveApi: false/);
+  assert.match(approvalPacketText, /writesOpenClawInstanceDirs: false/);
+  assert.doesNotMatch(approvalPacketText, /api\/managed-actions\/live/);
   const preflightText = readFileSync(liveHealthcheckPreflight, "utf8");
   assert.match(preflightText, /api\/managed-actions\/readiness/);
   assert.doesNotMatch(preflightText, /api\/managed-actions\/live/);

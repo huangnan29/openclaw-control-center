@@ -39,6 +39,7 @@
 - `managed-action-dry-run-gate.sh`：管理动作 dry-run 证据闸门，默认只读检查 readiness 与 audit，显式确认后只创建 dry-run 审计记录。
 - `live-healthcheck-approval.sh`：生成、校验或标记 live healthcheck 人工批准记录，不调用 live API。
 - `live-healthcheck-approval.example.json`：批准记录样板，默认未批准。
+- `live-healthcheck-approval-packet.sh`：生成 live healthcheck 批准前证据包，汇总总闸门、dry-run、approval、live window 状态和影响快照。
 - `live-healthcheck-preflight.sh`：只读检查 healthcheck live 演练条件，不调用 live API。
 - `live-healthcheck-smoke.sh`：手动 live healthcheck 演练脚本；只有显式提供本地令牌和确认环境变量才会调用 live API。
 - `live-healthcheck-report.sh`：演练报告脚本；读取 approval、impact snapshots 和 operation audit，生成 JSON 与 Markdown 报告。
@@ -99,6 +100,7 @@ repo/ops/tom-readonly/live-healthcheck-approval.sh prepare runtime/live-healthch
 repo/ops/tom-readonly/live-healthcheck-approval.sh status runtime/live-healthcheck-approval.json
 repo/ops/tom-readonly/live-healthcheck-approval.sh check runtime/live-healthcheck-approval.json
 repo/ops/tom-readonly/live-healthcheck-approval.sh consume runtime/live-healthcheck-approval.json
+repo/ops/tom-readonly/live-healthcheck-approval-packet.sh generate
 repo/ops/tom-readonly/live-healthcheck-window.sh status
 repo/ops/tom-readonly/instance-impact-snapshot.sh snapshot readonly-baseline
 ```
@@ -233,6 +235,7 @@ OPERATOR=Anan \
 
 ```bash
 repo/ops/tom-readonly/live-healthcheck-approval.sh prepare runtime/live-healthcheck-approval.json
+repo/ops/tom-readonly/live-healthcheck-approval-packet.sh generate
 CONFIRM_APPROVAL_RECORD=I_APPROVE_LIVE_HEALTHCHECK_RECORD \
 APPROVED_BY=Anan \
 repo/ops/tom-readonly/live-healthcheck-approval.sh approve runtime/live-healthcheck-approval.json
@@ -246,6 +249,14 @@ INSTANCE_ID=tom \
 OPERATOR=Anan \
 repo/ops/tom-readonly/live-healthcheck-window.sh run
 ```
+
+`live-healthcheck-approval-packet.sh generate` 会写入：
+
+```bash
+/srv/openclaw-control-center-readonly/runtime/live-healthcheck-approval-packets/
+```
+
+它会运行总闸门 `check`、dry-run 证据 `status`、approval `status`、live window `status`，并生成一份 `pre-live-approval-packet` 影响快照。该脚本不会批准 live healthcheck，不会打开 live gate，不会调用 managed action live API。
 
 `run` 模式会在 live healthcheck 调用成功后把 approval 标记为已使用，后续必须重新 `approve` 才能再次演练；它也会自动生成 before/after 实例影响快照，位置默认为：
 
