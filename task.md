@@ -816,7 +816,17 @@ Tom 单 Oracle 上线下一步：
 - 已验证 `npm test -- test/managed-action-inbox-runner.test.ts test/managed-action-text-bridge.test.ts test/managed-action-command-runner.test.ts test/oss-readiness.test.ts`，23/23 通过。
 - 已验证 `npm test -- test/managed-action-inbox-runner.test.ts test/managed-action-text-bridge.test.ts test/managed-action-command-runner.test.ts test/managed-actions-dry-run.test.ts test/managed-action-live-readiness.test.ts test/managed-action-live-gate.test.ts test/oss-readiness.test.ts test/readonly-multi-instance-safety.test.ts`，33/33 通过。
 - 已验证 `npm run build`。
+- 已提交并推送 `61b4615 ops: add managed action inbox runner`。
+- 已部署到 Tom，并验证运行提交 `61b4615`。
+- 已验证 Tom `update.sh` 通过，5 个 OpenClaw gateway 健康端口、只读写接口拦截、容器安全边界和 collector 快照均通过。
+- 已在 Tom 的 OpenClaw workspace 创建专用 smoke inbox：`/home/node/.openclaw/workspace/control-center-commands/smoke-20260517T162355Z/inbox/001.txt`，内容为“对 tom 运行 zhihu-human-ops-writing dry-run”。
+- 已验证 control-center 通过只读挂载 `/instances/tom/workspace/control-center-commands/smoke-20260517T162355Z/inbox` 读取该请求，`status` 返回 `inbox_status_ready`、`pendingCount=1`，不调用桥接层、不创建审计。
+- 已验证 `plan-next` 返回 `inbox_plan_completed`、`bridgeStatus=bridge_plan_completed`、`runnerStatus=planned`，目标为 `tom / skill_run / zhihu-human-ops-writing`，安全字段为 `callsManagedActionsDryRunApi=false`、`callsManagedActionsLiveApi=false`、`writesOpenClawInstanceDirs=false`。
+- 已验证 `run-next` 使用 `CONFIRM_MANAGED_ACTION_INBOX_RUNNER=I_UNDERSTAND_THIS_READS_OPENCLAW_INBOX_AND_RUNS_DRY_RUN_TEXT` 与 `MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container` 成功，返回 `inbox_dry_run_completed`、`bridgeStatus=bridge_dry_run_completed`、`runnerStatus=dry_run_completed`，生成 dry-run 审计 `operationRequestId=fae5dec5-3f1f-424f-92a6-a1bd05233565`。
+- 已验证 `run-next` 的 `commandPreview` 为 `openclaw skill dry-run for instance tom: zhihu-human-ops-writing`，结果写入 `/srv/openclaw-control-center-readonly/runtime/managed-action-inbox-runner/results/2026-05-17T16-24-55-798Z-001.txt.json`。
+- 已验证重复 `status` 对同一路径同一内容返回 `inbox_empty`、`pendingCount=0`，且 OpenClaw workspace 中原请求文件仍存在，没有被移动、删除或修改。
+- 本轮仍未执行 approval `approve`、未打开 live gate、未调用 managed action live API、未修改 OpenClaw 配置、未重启任何 OpenClaw 实例。
 
 ## 阶段完成后的下一步
 
-下一步部署 inbox runner 到 Tom，并做真实 smoke：先在 Tom workspace 写入一条 `control-center-commands/inbox/*.txt` 测试请求，再由 control-center 侧 `status/plan-next/run-next` 读取并触发 dry-run，确认结果写入 control-center runtime 且不修改 OpenClaw workspace 请求文件。通过后，再把 Tom 的 `AGENTS.md` 增加一小段调用规范，让 Discord 消息可以稳定落 inbox；仍不得执行 approval `approve`、不得打开 live gate、不得触发真实 skill。
+下一步把 Tom 的 `AGENTS.md` 增加一小段调用规范，让 Discord 消息可以稳定落到 `control-center-commands/inbox/*.txt`；建议先做可审查的 snippet/installer，并以显式确认方式写入 workspace，避免误改现有 OpenClaw 行为。通过 Discord 真实消息 smoke 后，再进入人工 approval 和一次只读 healthcheck live 演练；仍不得执行 approval `approve`、不得打开 live gate、不得触发真实 skill。
