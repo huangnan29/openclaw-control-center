@@ -157,6 +157,14 @@ Tom 单 Oracle 上线下一步：
 - approval review 不生成新证据包、不批准 approval、不打开 live gate、不调用 managed action live API、不修改 OpenClaw 实例目录、不重启实例。
 - 已新增 `test/live-healthcheck-approval-review.test.ts`，覆盖等待人工批准、已批准可演练、inbox 有 pending 时阻塞三种路径。
 - 已验证 `npm test -- test/live-healthcheck-approval-review.test.ts`，3/3 通过。
+- 已验证管理动作 approval review、readiness、rollout runner、live gate、dry-run、inbox cron 和只读安全回归集，39/39 通过。
+- 已验证 `npm run build`。
+- 已推送提交 `026a92e21cfc86d4d5fe8b25e322b9df59f6ac5c` 并同步到 Tom。
+- Tom `update.sh` 已完成，只读 healthcheck 通过：5 个实例快照正常，写接口继续被只读闸门拦截。
+- 已执行 `ops/local/final-go-live-runner.sh prepare`，为 Tom 当前 commit 重新生成 approval packet，并停在人工批准前。
+- Tom `live-healthcheck-approval-review.sh status` 返回 `ready_for_human_approval`，`readiness=waiting_human_approval`，`approvalPacket=ready`，`approval=needs_manual_approval`，`inboxCron=inbox_cron_installed`，`inboxPendingCount=0`。
+- Tom `live-healthcheck-approval-review.sh check` 返回 `ready_for_human_approval`，且 `checkRunsHealthcheckOnly=true`；该模式只运行只读 healthcheck，不生成 packet、不写 approval、不打开 live gate。
+- Tom 最新 approval packet `live-healthcheck-approval-packet-20260517T173439+0000.json` 已校验 `ready`，`issues=[]`。
 - 已新增并部署 `ops/tom-readonly/install-managed-action-inbox-cron.sh`，作为 Tom 上自动消费 OpenClaw workspace inbox 的 dry-run cron 安装器。
 - 本地已验证 `bash -n ops/tom-readonly/install-managed-action-inbox-cron.sh`。
 - 本地已验证 `npm test -- test/managed-action-inbox-cron.test.ts test/managed-action-inbox-runner.test.ts test/managed-action-text-bridge.test.ts test/managed-action-command-runner.test.ts test/managed-actions-dry-run.test.ts test/managed-action-live-readiness.test.ts test/managed-action-live-gate.test.ts test/oss-readiness.test.ts test/readonly-multi-instance-safety.test.ts`，39/39 通过。
