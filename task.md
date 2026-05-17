@@ -17,12 +17,11 @@
 
 ## 当前下一步
 
-部署 mock executor 接口代码到 Tom：
+下一步设计真实执行审计结果类型：
 
-- 确认 Tom 仍返回 `blocked_disabled`。
-- 确认页面仍无真实执行入口。
-- 不在 Tom 开启真实执行。
-- 不调用任何 OpenClaw 实例命令。
+- 只定义类型和测试，不接真实执行器。
+- 明确真实执行成功、失败、回滚、跳过的审计结构。
+- Tom 继续保持 `MANAGED_ACTIONS_LIVE_ENABLED=false`。
 
 ## 最近完成
 
@@ -127,7 +126,11 @@
 - 已验证未注册动作返回 `executor_missing` 且 `liveExecution=false`。
 - 已验证 `npm test -- test/managed-action-executor.test.ts test/managed-actions-dry-run.test.ts test/phase9-routes-commands.test.ts test/readonly-multi-instance-safety.test.ts test/multi-instance-readonly.test.ts test/ui-render-smoke.test.ts`。
 - 已验证 `npm run build`。
+- 已提交并推送 `9b2e52e feat: add managed action executor test seam`。
+- 已部署到 Tom，并验证运行提交 `9b2e52e`。
+- 已验证 Tom `/api/managed-actions/live` 仍返回 `blocked_disabled`、`liveExecution=false`、`enabled=false`、`readonlyMode=true`。
+- 已验证 Tom 页面仍无真实执行入口。
 
 ## 阶段完成后的下一步
 
-部署 Tom 验证 mock executor 接口代码不改变运行行为；通过后，下一步设计真实执行审计结果类型，但仍不启用执行。
+真实执行审计结果类型：只定义和测试审计结构，不在 Tom 开启真实执行。
