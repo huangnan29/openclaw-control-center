@@ -146,6 +146,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   const liveHealthcheckSmoke = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-smoke.sh");
   const liveHealthcheckWindow = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-window.sh");
   const liveHealthcheckRollout = path.join(ROOT, "ops", "tom-readonly", "managed-action-healthcheck-rollout.example.json");
+  const managedActionCommandRunner = path.join(ROOT, "ops", "tom-readonly", "managed-action-command-runner.sh");
   const managedActionDryRunGate = path.join(ROOT, "ops", "tom-readonly", "managed-action-dry-run-gate.sh");
   const discoverRemoteOracleCredentials = path.join(ROOT, "ops", "local", "discover-remote-oracle-credentials.sh");
   const discoverRemoteOracleCredentialsExample = path.join(ROOT, "ops", "local", "discover-remote-oracle-credentials.example.json");
@@ -552,6 +553,16 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(liveWindowText, /compare "\$IMPACT_BEFORE" "\$impact_after"/);
   assert.match(readFileSync(liveHealthcheckRollout, "utf8"), /"action": "healthcheck"/);
   assert.match(readFileSync(liveHealthcheckRollout, "utf8"), /"risk": "low"/);
+  const commandRunnerText = readFileSync(managedActionCommandRunner, "utf8");
+  assert.match(commandRunnerText, /managed-action-command-runner\.sh status/);
+  assert.match(commandRunnerText, /managed-action-command-runner\.sh plan/);
+  assert.match(commandRunnerText, /managed-action-command-runner\.sh dry-run/);
+  assert.match(commandRunnerText, /CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN/);
+  assert.match(commandRunnerText, /I_UNDERSTAND_THIS_ONLY_CALLS_MANAGED_ACTION_DRY_RUN_API/);
+  assert.match(commandRunnerText, /api\/managed-actions\/dry-run/);
+  assert.match(commandRunnerText, /callsManagedActionsLiveApi: false/);
+  assert.match(commandRunnerText, /writesOpenClawInstanceDirs: false/);
+  assert.doesNotMatch(commandRunnerText, /api\/managed-actions\/live/);
   const dryRunGateText = readFileSync(managedActionDryRunGate, "utf8");
   assert.match(dryRunGateText, /managed-action-dry-run-gate\.sh status/);
   assert.match(dryRunGateText, /CONFIRM_MANAGED_ACTION_DRY_RUN/);
