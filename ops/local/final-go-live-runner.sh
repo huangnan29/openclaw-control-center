@@ -308,6 +308,8 @@ function prepare() {
   const afterStatus = after.report?.status || "unknown";
   const prepared = tomPrepare.exitCode === 0
     && (tomStatus === "prepared_waiting_human_approval" || tomStatus === "prepared_approved_ready_for_live_window");
+  const tomNextCommands = Array.isArray(tomPrepare.report?.nextCommands) ? tomPrepare.report.nextCommands : [];
+  const afterNextCommands = Array.isArray(after.report?.nextCommands) ? after.report.nextCommands : [];
   return {
     schemaVersion: 1,
     status: prepared ? tomStatus : `blocked_${tomStatus}`,
@@ -316,11 +318,7 @@ function prepare() {
     generatedAt: new Date().toISOString(),
     stages: { before, tomPrepare, after },
     issues: prepared ? [] : [`Tom runner prepare 未完成：${tomStatus}`],
-    nextCommands: Array.isArray(after.report?.nextCommands) && after.report.nextCommands.length > 0
-      ? after.report.nextCommands
-      : Array.isArray(tomPrepare.report?.nextCommands)
-        ? tomPrepare.report.nextCommands
-        : [],
+    nextCommands: prepared && tomNextCommands.length > 0 ? tomNextCommands : afterNextCommands,
     safety: baseSafety({
       connectsTomSsh: true,
       writesTomRuntime: true,

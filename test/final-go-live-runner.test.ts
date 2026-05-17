@@ -210,6 +210,7 @@ test("final go-live runner prepare 自动推进到人工批准前", async () => 
     assert.equal(report.safety.opensLiveGate, false);
     assert.equal(report.safety.callsManagedActionsLiveApi, false);
     assert(report.nextCommands.some((command: string) => command.includes("live-healthcheck-approval.sh approve")));
+    assert.equal(report.nextCommands.some((command: string) => command.includes("live-healthcheck-rollout-runner.sh prepare")), false);
     assert.match(sshLog, /live-healthcheck-rollout-runner\.sh prepare/);
     assert.doesNotMatch(sshLog, /run-approved/);
   } finally {
