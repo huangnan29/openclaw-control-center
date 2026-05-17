@@ -241,6 +241,23 @@ OPENCLAW_COLLECTOR_CRON_SCHEDULE="*/2 * * * *" ./install-collector-cron.sh
 
 中央节点可以用 Tom 运维脚本拉取其他 Oracle 服务器已经生成好的 collector snapshot。这个步骤只通过 SSH 读取远端 JSON 文件，再写入中央节点自己的 `runtime/collectors` 目录；它不会运行远端 collector，不会修改远端 OpenClaw 实例目录，也不会调用 managed action live API。
 
+为了减少真实接入时手工拼配置的风险，Tom 可以先生成一个只读 onboarding 接入包：
+
+```bash
+cp repo/ops/tom-readonly/remote-collector-onboarding.example.json runtime/remote-collector-onboarding.json
+repo/ops/tom-readonly/remote-collector-onboarding.sh plan runtime/remote-collector-onboarding.json
+CONFIRM_REMOTE_COLLECTOR_ONBOARDING=I_UNDERSTAND_THIS_ONLY_WRITES_REMOTE_ONBOARDING_BUNDLE \
+repo/ops/tom-readonly/remote-collector-onboarding.sh write runtime/remote-collector-onboarding.json
+```
+
+`plan` 只校验配置并输出将生成的文件；`write` 只写 `runtime/remote-onboarding/<serverId>/` 下的接入包，不会 SSH、不会修改 `config/instances.json`、不会修改任何 OpenClaw 实例目录。接入包包含：
+
+- `collector-node.json`：复制到远端 Oracle 后供 `bootstrap-collector-node.sh` 使用。
+- `bootstrap-collector-node.sh`：远端 collector-only 节点引导脚本。
+- `remote-collector-pull.sources.json`：Tom 只读拉取配置。
+- `register-remote-collector.json`：Tom registry 注册配置。
+- `RUNBOOK.md`：从复制接入包到远端、生成 snapshot、Tom 拉取、Tom 注册、健康检查的顺序命令。
+
 配置样板：
 
 ```bash

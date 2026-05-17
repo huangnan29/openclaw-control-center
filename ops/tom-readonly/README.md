@@ -13,6 +13,8 @@
 - `healthcheck.sh`：检查 gateway 健康、总览页、实例详情页、写接口 403、容器只读安全边界，以及 collector 快照新鲜度。
 - `collector-snapshot.sh`：在 Tom 本地生成 collector JSON 快照，只写控制中心 runtime，不修改任何 OpenClaw 实例目录。
 - `install-collector-cron.sh`：幂等安装 Tom collector 快照定时任务，只更新 crontab 中的 OpenClaw 标记块。
+- `remote-collector-onboarding.sh`：为第二台 Oracle 生成只读 collector 接入包，默认 `plan` 不写入，`write` 只写 control-center runtime 下的 onboarding 文件。
+- `remote-collector-onboarding.example.json`：远端 collector 接入包配置样板。
 - `remote-collector-pull.sh`：从其他 Oracle 服务器只读拉取已经生成好的 collector JSON，校验后写入本机 `runtime/collectors`。
 - `remote-collector-pull.sources.example.json`：远端 collector 拉取配置样板，默认 `enabled=false`。
 - `register-remote-collector.sh`：把已经拉取并校验过的远端 collector snapshot 注册到 Tom `config/instances.json`，默认 `plan` 不写入。
@@ -35,6 +37,9 @@ cd /srv/openclaw-control-center-readonly
 ./healthcheck.sh
 ./collector-snapshot.sh
 ./install-collector-cron.sh
+repo/ops/tom-readonly/remote-collector-onboarding.sh plan runtime/remote-collector-onboarding.json
+CONFIRM_REMOTE_COLLECTOR_ONBOARDING=I_UNDERSTAND_THIS_ONLY_WRITES_REMOTE_ONBOARDING_BUNDLE \
+repo/ops/tom-readonly/remote-collector-onboarding.sh write runtime/remote-collector-onboarding.json
 repo/ops/tom-readonly/remote-collector-pull.sh plan runtime/remote-collector-pull.sources.json
 CONFIRM_REMOTE_COLLECTOR_PULL=I_UNDERSTAND_THIS_ONLY_READS_REMOTE_COLLECTOR_SNAPSHOTS \
 repo/ops/tom-readonly/remote-collector-pull.sh pull runtime/remote-collector-pull.sources.json
@@ -61,6 +66,17 @@ OPENCLAW_COLLECTOR_CRON_SCHEDULE="*/2 * * * *" ./install-collector-cron.sh
 COLLECTOR_SNAPSHOT_MAX_AGE_SECONDS=300 ./healthcheck.sh
 BRANCH=multi-instance-readonly-control-center ./update.sh
 ```
+
+接第二台 Oracle 前，可以先在 Tom 生成一个可审查的 onboarding 接入包：
+
+```bash
+cp repo/ops/tom-readonly/remote-collector-onboarding.example.json runtime/remote-collector-onboarding.json
+repo/ops/tom-readonly/remote-collector-onboarding.sh plan runtime/remote-collector-onboarding.json
+CONFIRM_REMOTE_COLLECTOR_ONBOARDING=I_UNDERSTAND_THIS_ONLY_WRITES_REMOTE_ONBOARDING_BUNDLE \
+repo/ops/tom-readonly/remote-collector-onboarding.sh write runtime/remote-collector-onboarding.json
+```
+
+接入包默认写入 `runtime/remote-onboarding/<serverId>/`，包含远端 `collector-node.json`、远端 bootstrap 脚本、Tom 拉取配置、Tom 注册配置和 `RUNBOOK.md`。该步骤不会 SSH、不会修改活跃 registry、不会修改任何 OpenClaw 实例目录。
 
 远端 collector 拉取只读取远端 snapshot 文件，远端服务器必须先自行生成 collector JSON。拉取命令不会执行远端 collector、不会修改远端实例目录，也不会调用 `/api/managed-actions/live`。本地写入路径必须位于：
 

@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "server": {
+    "id": "remote-oracle",
+    "name": "Remote Oracle",
+    "host": "10.0.0.12",
+    "region": "oracle-us",
+    "description": "第二台 Oracle 只读 collector 节点"
+  },
+  "remote": {
+    "host": "10.0.0.12",
+    "user": "ubuntu",
+    "port": 22,
+    "sshKey": "/srv/openclaw-control-center-readonly/runtime/ssh/remote-oracle-readonly.key",
+    "knownHostsFile": "/srv/openclaw-control-center-readonly/runtime/ssh/known_hosts",
+    "strictHostKeyChecking": "accept-new",
+    "connectTimeoutSeconds": 10,
+    "deployDir": "/srv/openclaw-collector-node"
+  },
+  "collectorNode": {
+    "image": "openclaw-control-center:collector-node",
+    "collectorContainerName": "openclaw-collector-remote-oracle",
+    "cronSchedule": "*/2 * * * *"
+  },
+  "instances": [
+    {
+      "id": "remote-main",
+      "name": "Remote Main",
+      "gatewayUrl": "ws://host.docker.internal:18789",
+      "configDir": "/srv/openclaw/config",
+      "workspaceDir": "/srv/openclaw/workspace"
+    }
+  ]
+}

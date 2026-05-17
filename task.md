@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-跨服务器只读 collector 接入增强：已新增 Tom registry 注册脚本，远端 snapshot 拉取成功后可以先 `plan` 审查将新增的 server，再显式确认 `apply`，脚本自动备份并只更新 control-center registry。
+跨服务器只读 collector 接入增强：已新增 Tom 远端 collector onboarding 接入包生成器，第二台 Oracle 信息确定后可以先生成可审查接入包，再按 RUNBOOK 走远端 bootstrap、Tom pull、Tom register 和 healthcheck。
 
 ## 本轮不做
 
@@ -20,19 +20,24 @@
 跨服务器只读监控下一步：
 
 - 为第二台 Oracle 服务器准备本地 collector exporter，让该服务器自行生成 collector JSON。
-- 在第二台 Oracle 上先复制 `ops/collector-node/collector-node.example.json` 并改成真实实例路径。
-- 先执行 `ops/collector-node/bootstrap-collector-node.sh plan <collector-node.json>`，确认只写文件、不启动容器、不修改实例。
+- 在 Tom 先复制 `repo/ops/tom-readonly/remote-collector-onboarding.example.json` 到 `runtime/remote-collector-onboarding.json`，填入第二台 Oracle 的 SSH 信息和实例路径。
+- 先执行 `repo/ops/tom-readonly/remote-collector-onboarding.sh plan runtime/remote-collector-onboarding.json`，确认只生成接入包计划、不写文件。
 - 确认后执行：
-  `CONFIRM_COLLECTOR_NODE_WRITE=I_UNDERSTAND_THIS_ONLY_WRITES_COLLECTOR_NODE_FILES ops/collector-node/bootstrap-collector-node.sh write <collector-node.json>`
+  `CONFIRM_REMOTE_COLLECTOR_ONBOARDING=I_UNDERSTAND_THIS_ONLY_WRITES_REMOTE_ONBOARDING_BUNDLE repo/ops/tom-readonly/remote-collector-onboarding.sh write runtime/remote-collector-onboarding.json`
+- 审查 `runtime/remote-onboarding/<serverId>/RUNBOOK.md`、`collector-node.json`、`remote-collector-pull.sources.json` 和 `register-remote-collector.json`。
+- 将接入包里的 `collector-node.json` 和 `bootstrap-collector-node.sh` 复制到第二台 Oracle。
+- 在第二台 Oracle 上先执行 `./bootstrap-collector-node.sh plan collector-node.json`，确认只写文件、不启动容器、不修改实例。
+- 确认后执行：
+  `CONFIRM_COLLECTOR_NODE_WRITE=I_UNDERSTAND_THIS_ONLY_WRITES_COLLECTOR_NODE_FILES ./bootstrap-collector-node.sh write collector-node.json`
 - 然后在远端执行 `./collector-snapshot.sh` 生成 snapshot，确认 JSON 存在。
-- 在 Tom 写入 `runtime/remote-collector-pull.sources.json`，只配置远端 snapshot 路径和本地 `runtime/collectors/<serverId>/snapshot.json`。
-- 先执行 `repo/ops/tom-readonly/remote-collector-pull.sh plan runtime/remote-collector-pull.sources.json` 审查来源。
+- 使用接入包里的 `remote-collector-pull.sources.json`，只配置远端 snapshot 路径和本地 `runtime/collectors/<serverId>/snapshot.json`。
+- 先执行 `repo/ops/tom-readonly/remote-collector-pull.sh plan runtime/remote-onboarding/<serverId>/remote-collector-pull.sources.json` 审查来源。
 - 只有确认远端 snapshot 文件存在后，才执行：
-  `CONFIRM_REMOTE_COLLECTOR_PULL=I_UNDERSTAND_THIS_ONLY_READS_REMOTE_COLLECTOR_SNAPSHOTS repo/ops/tom-readonly/remote-collector-pull.sh pull runtime/remote-collector-pull.sources.json`
-- 拉取成功后，准备 `runtime/register-remote-collector.json`，先执行：
-  `repo/ops/tom-readonly/register-remote-collector.sh plan runtime/register-remote-collector.json`
+  `CONFIRM_REMOTE_COLLECTOR_PULL=I_UNDERSTAND_THIS_ONLY_READS_REMOTE_COLLECTOR_SNAPSHOTS repo/ops/tom-readonly/remote-collector-pull.sh pull runtime/remote-onboarding/<serverId>/remote-collector-pull.sources.json`
+- 拉取成功后，使用接入包里的 `register-remote-collector.json`，先执行：
+  `repo/ops/tom-readonly/register-remote-collector.sh plan runtime/remote-onboarding/<serverId>/register-remote-collector.json`
 - 确认 registry diff 后再执行：
-  `CONFIRM_REMOTE_COLLECTOR_REGISTER=I_UNDERSTAND_THIS_ONLY_UPDATES_CONTROL_CENTER_REGISTRY repo/ops/tom-readonly/register-remote-collector.sh apply runtime/register-remote-collector.json`
+  `CONFIRM_REMOTE_COLLECTOR_REGISTER=I_UNDERSTAND_THIS_ONLY_UPDATES_CONTROL_CENTER_REGISTRY repo/ops/tom-readonly/register-remote-collector.sh apply runtime/remote-onboarding/<serverId>/register-remote-collector.json`
 - 最后运行 `./healthcheck.sh` 验收新增 server、collector snapshot 新鲜度和页面只读状态。
 - 远端 server 的实例配置可以只写 `id` 和 `name`；只要 server 配置了 `collectorSnapshotPath`，中央会生成内部 `/collector/<serverId>/<instanceId>/config` 占位路径。
 
@@ -55,6 +60,18 @@
 ## 最近完成
 
 - 已新增长期推进计划：`implementation_plan.md`。
+- 已新增 `ops/tom-readonly/remote-collector-onboarding.sh`，用于在 Tom 生成第二台 Oracle 的只读 collector 接入包。
+- 已新增 `ops/tom-readonly/remote-collector-onboarding.example.json` 样板。
+- `remote-collector-onboarding.sh plan` 只校验配置并输出将生成的文件，不写文件、不 SSH。
+- `remote-collector-onboarding.sh write` 必须设置 `CONFIRM_REMOTE_COLLECTOR_ONBOARDING=I_UNDERSTAND_THIS_ONLY_WRITES_REMOTE_ONBOARDING_BUNDLE`，只写 `runtime/remote-onboarding/<serverId>/` 下的接入包。
+- 接入包包含 `collector-node.json`、`bootstrap-collector-node.sh`、`remote-collector-pull.sources.json`、`register-remote-collector.json`、`RUNBOOK.md` 和 `safety.json`。
+- 已新增 `test/remote-collector-onboarding.test.ts`，覆盖 plan 不写文件、write 必须确认、只写 onboarding 目录、拒绝越界 outputDir、生成接入包可跑远端 bootstrap plan。
+- 已验证 `bash -n ops/tom-readonly/remote-collector-onboarding.sh`。
+- 已验证 `npm test -- test/remote-collector-onboarding.test.ts test/oss-readiness.test.ts`，10/10 通过。
+- 已验证 `ops/tom-readonly/remote-collector-onboarding.sh plan ops/tom-readonly/remote-collector-onboarding.example.json`，输出 `writesActiveRegistry=false`、`connectsSsh=false`、`mutatesOpenClawInstance=false`、`callsLiveApi=false`。
+- 已验证 `npm test -- test/remote-collector-onboarding.test.ts test/register-remote-collector.test.ts test/remote-collector-pull.test.ts test/collector-node-bootstrap.test.ts test/oss-readiness.test.ts`，16/16 通过。
+- 已验证 `npm test -- test/multi-instance-readonly.test.ts test/readonly-multi-instance-safety.test.ts test/ui-render-smoke.test.ts`，39/39 通过。
+- 已验证 `npm run build`。
 - 已新增 `ops/tom-readonly/register-remote-collector.sh`，用于把已拉取的远端 collector snapshot 注册到 Tom `config/instances.json`。
 - 已新增 `ops/tom-readonly/register-remote-collector.example.json` 样板。
 - `register-remote-collector.sh plan` 只读取配置、Tom registry 和本机 snapshot，不写文件。
