@@ -6,7 +6,7 @@
 
 ## 本轮任务
 
-只读 healthcheck live 演练报告收口：新增演练报告脚本，并让一次性演练窗口在成功完成后自动生成 JSON 与 Markdown 报告。
+只读 healthcheck live approval 准备收口：新增 approval `prepare/status` 模式，并让窗口 `status` 直接显示 approval 状态，方便人工进入最终演练前确认缺口。
 
 ## 本轮不做
 
@@ -23,6 +23,7 @@
 - 必须显式提供 `CONFIRM_LIVE_HEALTHCHECK_WINDOW`、`CONFIRM_LIVE_HEALTHCHECK` 和 `LOCAL_API_TOKEN`。
 - 演练窗口会临时启用 control-center live healthcheck 配置，动作仍限制为 `healthcheck`。
 - 必须先生成并人工填写 `runtime/live-healthcheck-approval.json`，通过 `live-healthcheck-approval.sh check` 后才允许打开窗口。
+- 当前 Tom 已生成 approval 草稿，状态为 `needs_manual_approval`。
 - 脚本退出前必须恢复只读状态，并重新通过 `healthcheck.sh`。
 - 脚本会自动生成 before/after 实例影响快照并比较。
 - 脚本成功后会自动生成 live healthcheck 演练报告，汇总 approval、dry-run 审计、live result 审计和影响快照。
@@ -301,6 +302,22 @@
 - 已在 Tom 生成候选 approval 模板，并验证未批准模板不会通过校验。
 - 已验证 Tom `live-healthcheck-window.sh status` 仍显示未检测到临时 override，`READONLY_MODE=true`，live gate 与 executor 未启用，readiness 仍为 `blocked`。
 - 本轮未执行 `enable` 或 `run`，未调用 `/api/managed-actions/live`。
+- 已为 `ops/tom-readonly/live-healthcheck-approval.sh` 新增 `prepare` 模式：文件不存在时生成模板，已存在时不覆盖，并输出 JSON 状态。
+- 已为 `ops/tom-readonly/live-healthcheck-approval.sh` 新增 `status` 模式：只读取批准文件状态，不会失败，不调用 live API。
+- 已让 `live-healthcheck-window.sh status` 显示 approval 状态。
+- 已更新 `ops/tom-readonly/README.md`，将常用流程改为 `prepare -> status -> check -> run`。
+- 已增强 `test/oss-readiness.test.ts` 覆盖 `prepare/status` 与窗口状态接入。
+- 已验证 `bash -n ops/tom-readonly/live-healthcheck-approval.sh && bash -n ops/tom-readonly/live-healthcheck-window.sh`。
+- 已验证 approval `status` 在文件缺失时返回 `missing`。
+- 已验证 approval `prepare` 会生成模板并返回 `needs_manual_approval`，再次执行不会覆盖已有文件。
+- 已验证 `npm test -- test/oss-readiness.test.ts test/managed-actions-dry-run.test.ts test/managed-action-live-gate.test.ts`。
+- 已验证 `npm run build`。
+- 已提交并推送 `3d23811 ops: prepare live healthcheck approval safely`。
+- 已部署到 Tom，并验证运行提交 `3d23811`。
+- 已在 Tom 生成 `/srv/openclaw-control-center-readonly/runtime/live-healthcheck-approval.json` 草稿。
+- 已验证 Tom approval 状态为 `needs_manual_approval`，缺口包括 `approved=false`、`approvedBy` 为空、`approvedAt` 未填写、checklist 未确认。
+- 已验证 Tom `live-healthcheck-window.sh status` 会显示 approval 状态，并继续显示未检测到临时 override、`READONLY_MODE=true`、live gate 与 executor 未启用、readiness 仍为 `blocked`。
+- 本轮未执行 `enable` 或 `run`，未调用 `/api/managed-actions/live`。
 - 已新增演练报告脚本：`ops/tom-readonly/live-healthcheck-report.sh`。
 - 报告脚本只读取 approval、before/after impact snapshots 和 `runtime/operation-audit.log`，不调用 live API。
 - 报告通过条件包括：approval 已批准、dry-run 审计存在、live result 审计为 `executed`、`liveExecution=true`、`mutatesOpenClawInstance=false`，以及 after 快照恢复只读。
@@ -320,4 +337,4 @@
 
 ## 阶段完成后的下一步
 
-人工填写并校验 `runtime/live-healthcheck-approval.json` 后，执行一次只读 healthcheck live 演练；演练前后都必须确认现有 OpenClaw 实例未被重启、未被写入、未被触发任务。若演练通过，再进入单动作灰度策略收口；若失败，保持只读并先修复失败点。
+人工填写并校验 `/srv/openclaw-control-center-readonly/runtime/live-healthcheck-approval.json` 后，执行一次只读 healthcheck live 演练；演练前后都必须确认现有 OpenClaw 实例未被重启、未被写入、未被触发任务。若演练通过，再进入单动作灰度策略收口；若失败，保持只读并先修复失败点。
