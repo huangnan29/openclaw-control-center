@@ -20,6 +20,7 @@
 - `live-healthcheck-approval.example.json`：批准记录样板，默认未批准。
 - `live-healthcheck-preflight.sh`：只读检查 healthcheck live 演练条件，不调用 live API。
 - `live-healthcheck-smoke.sh`：手动 live healthcheck 演练脚本；只有显式提供本地令牌和确认环境变量才会调用 live API。
+- `live-healthcheck-report.sh`：演练报告脚本；读取 approval、impact snapshots 和 operation audit，生成 JSON 与 Markdown 报告。
 - `live-healthcheck-window.sh`：一次性演练窗口脚本；临时启用 control-center 的 healthcheck live 配置，失败或结束后恢复只读状态。
 - `instance-impact-snapshot.sh`：演练前后实例影响留证脚本；只读取 gateway、监听端口、容器挂载和 readiness。
 
@@ -90,6 +91,14 @@ repo/ops/tom-readonly/live-healthcheck-window.sh run
 ```
 
 快照比较要求演练后恢复为只读状态、gateway 健康保持正常、监听端口保持稳定、实例挂载仍是只读、live gate 和 executor 均关闭。
+
+`run` 成功后还会生成演练报告，位置默认为：
+
+```bash
+/srv/openclaw-control-center-readonly/runtime/live-healthcheck-reports/
+```
+
+报告通过条件包括：approval 已批准、dry-run 审计存在、live result 审计为 `executed`、`mutatesOpenClawInstance=false`，以及 after 快照恢复只读。
 
 如果只需要手动打开或关闭演练窗口：
 

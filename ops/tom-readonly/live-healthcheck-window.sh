@@ -17,6 +17,7 @@ APPROVAL_FILE="${APPROVAL_FILE:-${DEPLOY_DIR}/runtime/live-healthcheck-approval.
 APPROVAL_SCRIPT="${APPROVAL_SCRIPT:-${DEPLOY_DIR}/repo/ops/tom-readonly/live-healthcheck-approval.sh}"
 PREFLIGHT_SCRIPT="${PREFLIGHT_SCRIPT:-${DEPLOY_DIR}/repo/ops/tom-readonly/live-healthcheck-preflight.sh}"
 SMOKE_SCRIPT="${SMOKE_SCRIPT:-${DEPLOY_DIR}/repo/ops/tom-readonly/live-healthcheck-smoke.sh}"
+REPORT_SCRIPT="${REPORT_SCRIPT:-${DEPLOY_DIR}/repo/ops/tom-readonly/live-healthcheck-report.sh}"
 HEALTHCHECK_SCRIPT="${HEALTHCHECK_SCRIPT:-${DEPLOY_DIR}/healthcheck.sh}"
 IMPACT_SCRIPT="${IMPACT_SCRIPT:-${DEPLOY_DIR}/repo/ops/tom-readonly/instance-impact-snapshot.sh}"
 CONFIRM_LIVE_HEALTHCHECK_WINDOW="${CONFIRM_LIVE_HEALTHCHECK_WINDOW:-}"
@@ -66,6 +67,7 @@ require_live_paths() {
   [ -x "$APPROVAL_SCRIPT" ] || fail "批准校验脚本不存在或不可执行：${APPROVAL_SCRIPT}"
   [ -x "$PREFLIGHT_SCRIPT" ] || fail "preflight 脚本不存在或不可执行：${PREFLIGHT_SCRIPT}"
   [ -x "$SMOKE_SCRIPT" ] || fail "smoke 脚本不存在或不可执行：${SMOKE_SCRIPT}"
+  [ -x "$REPORT_SCRIPT" ] || fail "报告脚本不存在或不可执行：${REPORT_SCRIPT}"
 }
 
 check_approval_file() {
@@ -195,6 +197,7 @@ run_once() {
   local impact_after
   impact_after="$("$IMPACT_SCRIPT" snapshot "after-live-healthcheck")"
   "$IMPACT_SCRIPT" compare "$IMPACT_BEFORE" "$impact_after"
+  "$REPORT_SCRIPT" report "$IMPACT_BEFORE" "$impact_after" "$APPROVAL_FILE"
   trap - EXIT
 }
 
@@ -218,6 +221,7 @@ usage() {
     /srv/openclaw-control-center-readonly/runtime/live-healthcheck-approval.json
 
   run 会自动生成 before/after 实例影响快照并比较。
+  run 成功后会生成 live healthcheck 演练报告。
 TEXT
 }
 

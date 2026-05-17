@@ -139,6 +139,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   const liveHealthcheckApproval = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-approval.sh");
   const liveHealthcheckApprovalExample = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-approval.example.json");
   const liveHealthcheckPreflight = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-preflight.sh");
+  const liveHealthcheckReport = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-report.sh");
   const liveHealthcheckSmoke = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-smoke.sh");
   const liveHealthcheckWindow = path.join(ROOT, "ops", "tom-readonly", "live-healthcheck-window.sh");
   const liveHealthcheckRollout = path.join(ROOT, "ops", "tom-readonly", "managed-action-healthcheck-rollout.example.json");
@@ -159,6 +160,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(existsSync(liveHealthcheckApproval));
   assert(existsSync(liveHealthcheckApprovalExample));
   assert(existsSync(liveHealthcheckPreflight));
+  assert(existsSync(liveHealthcheckReport));
   assert(existsSync(liveHealthcheckSmoke));
   assert(existsSync(liveHealthcheckWindow));
   assert(existsSync(liveHealthcheckRollout));
@@ -186,6 +188,12 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(preflightText, /check_rollout_file\(\)[\s\S]*-e INSTANCE_ID=/);
   assert.match(preflightText, /check_rollout_file\(\)[\s\S]*-e OPERATOR=/);
   assert.match(preflightText, /managed-action-healthcheck-rollout\.example\.json/);
+  const reportText = readFileSync(liveHealthcheckReport, "utf8");
+  assert.match(reportText, /operation-audit\.log/);
+  assert.match(reportText, /managed_action_live_result/);
+  assert.match(reportText, /managed_action_dry_run/);
+  assert.match(reportText, /mutatesOpenClawInstance/);
+  assert.match(reportText, /markdownReport/);
   assert.match(readFileSync(liveHealthcheckSmoke, "utf8"), /CONFIRM_LIVE_HEALTHCHECK/);
   assert.match(readFileSync(liveHealthcheckSmoke, "utf8"), /LIVE-ACTION-APPROVED/);
   assert.match(readFileSync(liveHealthcheckSmoke, "utf8"), /DRY-RUN-ONLY/);
@@ -198,6 +206,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(liveWindowText, /stop_live_window/);
   assert.match(liveWindowText, /live-healthcheck-approval\.sh/);
   assert.match(liveWindowText, /check_approval_file/);
+  assert.match(liveWindowText, /live-healthcheck-report\.sh/);
   assert.match(liveWindowText, /instance-impact-snapshot\.sh/);
   assert.match(liveWindowText, /compare "\$IMPACT_BEFORE" "\$impact_after"/);
   assert.match(readFileSync(liveHealthcheckRollout, "utf8"), /"action": "healthcheck"/);
