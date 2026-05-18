@@ -46,6 +46,8 @@ Tom 单 Oracle 上线下一步：
   `CONFIRM_APPROVAL_RECORD=I_APPROVE_LIVE_HEALTHCHECK_RECORD APPROVED_BY=Anan repo/ops/tom-readonly/live-healthcheck-approval.sh approve runtime/live-healthcheck-approval.json`
 - 人工审查后也可以走本机单命令入口，它会先只读运行 approval review，只有 review 是 `ready_for_human_approval` 时才记录 approval，然后执行一次性演练：
   `CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK APPROVED_BY=Anan LOCAL_API_TOKEN=<本地令牌> ops/local/final-go-live-runner.sh approve-and-run`
+- 如果不想手工导出 `LOCAL_API_TOKEN`，可用本机包装器从 Tom control-center 容器环境读取令牌到子进程，不打印、不落盘，然后委托既有 `approve-and-run`：
+  `CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK APPROVED_BY=Anan FINAL_GO_LIVE_OUTPUT=summary ops/local/final-go-live-approve-and-run-from-tom-token.sh`
 - 人工 approval 已批准后，自动执行一次性演练：
   `CONFIRM_FINAL_GO_LIVE_RUNNER=I_UNDERSTAND_THIS_RUNS_APPROVED_FINAL_GO_LIVE LOCAL_API_TOKEN=<本地令牌> ops/local/final-go-live-runner.sh run-approved`
   `CONFIRM_LIVE_HEALTHCHECK_RUNNER=I_UNDERSTAND_THIS_RUNS_APPROVED_LIVE_HEALTHCHECK LOCAL_API_TOKEN=<本地令牌> repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh run-approved`
@@ -55,6 +57,15 @@ Tom 单 Oracle 上线下一步：
   `repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh verify-completed`
   该模式只读确认 readiness 为 `approval_consumed`、最新报告 `passed`、approval 已消费、impact 检查通过且未修改 OpenClaw 实例。
 - Tom 当前部署没有 `/srv/openclaw-control-center-readonly/.env`，`LOCAL_API_TOKEN` 来自 `openclaw-control-center-readonly` 容器环境；本机执行 live 演练前用 `docker inspect ... | sed -n "s/^LOCAL_API_TOKEN=//p"` 通过 SSH 读入当前 shell，且不要打印真实 token。
+
+## 本轮新增（最终 approval token 包装器）
+
+- 已新增 `ops/local/final-go-live-approve-and-run-from-tom-token.sh`。
+- 该包装器用于最终人工批准时减少手工读取 `LOCAL_API_TOKEN` 的出错概率。
+- 缺少 `CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK` 或 `APPROVED_BY` 时，脚本在连接 Tom 前阻断。
+- 确认齐全后，它只读 SSH 到 Tom，通过 `docker inspect openclaw-control-center-readonly` 从容器环境读取 `LOCAL_API_TOKEN`，不打印、不落盘，然后作为子进程环境传给 `ops/local/final-go-live-runner.sh approve-and-run`。
+- 最终是否写 approval、打开一次性 live healthcheck 窗口、调用 live API，仍完全由既有 runner 的 review/readiness/approval 闸门决定。
+- 已新增 `test/final-go-live-approve-and-run-from-tom-token.test.ts`，覆盖缺确认不连接 Tom、成功委托时不打印 token、token 为空时不委托 runner。
 
 ## 本轮新增（approve-and-run 最终入口）
 

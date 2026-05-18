@@ -1,5 +1,27 @@
 # Progress
 
+## Phase 163 (Final approval token wrapper) — Completed
+- Scope:
+  - Reduce the chance of manual token handling mistakes during the final approved live healthcheck.
+  - Keep the existing human approval boundary intact.
+- Changed files:
+  - `ops/local/final-go-live-approve-and-run-from-tom-token.sh`
+  - `test/final-go-live-approve-and-run-from-tom-token.test.ts`
+  - `ops/tom-readonly/README.md`
+  - `docs/MULTI_INSTANCE_READONLY.md`
+  - `implementation_plan.md`
+  - `task.md`
+- Implementation:
+  - Added a local wrapper that requires `CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN` and `APPROVED_BY` before any SSH connection.
+  - After confirmation, it reads `LOCAL_API_TOKEN` from the Tom control-center container environment, keeps it only in the child process environment, and delegates to `final-go-live-runner.sh approve-and-run`.
+  - It does not print the token, write the token to disk, modify OpenClaw instance directories, clear heartbeat files, or restart instances.
+  - The actual approval write and one-time live healthcheck remain guarded by the existing final runner review/readiness gates.
+- Verification:
+  - `bash -n ops/local/final-go-live-approve-and-run-from-tom-token.sh`
+  - `npm test -- test/final-go-live-approve-and-run-from-tom-token.test.ts`
+- Remaining gap:
+  - The final live healthcheck still requires Anan to explicitly run the confirmed approval command or this wrapper.
+
 ## Phase 162 (Completion audit warning classification) — Completed
 - Scope:
   - Keep the final go-live audit focused on true blockers.
