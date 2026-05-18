@@ -136,6 +136,8 @@ test("final go-live completion audit 标出人工 approval 为唯一硬阻塞", 
 
     assert.equal(result.exitCode, 0);
     assert.equal(result.report.status, "blocked_human_approval_required");
+    assert.equal(result.report.progress.warnings, 1);
+    assert(result.report.requirements.some((item: { id: string; status: string }) => item.id === "usage_alerts_review" && item.status === "warning"));
     assert(result.report.requirements.some((item: { id: string; status: string }) => item.id === "final_live_healthcheck" && item.status === "pending"));
     assert(result.report.hardBlockers.some((item: string) => item.includes("最终 live healthcheck")));
     assert.equal(result.report.safety.opensLiveGate, false);

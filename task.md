@@ -1139,10 +1139,19 @@ cron 安装器已完成部署、受控 crontab 已安装，且 Tom workspace inb
 
 当前 Tom 已到人工批准前短摘要就绪状态。下一步仍是人工分支：Anan 审查摘要和证据包后显式运行 `approve-and-run`，或先人工处理 heartbeat/token 告警中的可疑实例。
 
+## 本轮新增（completion audit 告警分类收口）
+
+- 已调整 `ops/local/final-go-live-completion-audit.sh`：`usage_alerts_review` 在存在 heartbeat/token 告警时显示为 `warning`，不再和最终 live healthcheck 的人工批准 pending 混在一起。
+- 已新增未来完成态 `completed_with_warnings`：如果最终 live healthcheck 已完成但仍有用量告警，审计会明确显示“完成但有 warning”，不会误报为无风险完成。
+- summary 输出现在为 `pass / warning / pending / fail`。
+- 已通过真实 Tom 只读审计确认当前状态为 `blocked_human_approval_required`：5/7 pass，1 warning，1 pending，0 failed。
+- 当前唯一硬阻塞仍是 `final_live_healthcheck` 需要 Anan 显式 `approve-and-run`；`deepseek` 与 `spark` 的 heartbeat/token 告警是人工复核 warning。
+- 本次没有执行 approval、没有打开 live gate、没有调用 managed action live API、没有修改 OpenClaw 实例目录、没有清空 `HEARTBEAT.md`、没有重启任何 OpenClaw 实例。
+
 ## 本轮新增（最终上线完成度审计）
 
 - 已新增 `ops/local/final-go-live-completion-audit.sh`，用于只读审计当前目标完成度，避免把“人工批准前”误判为“已完成”。
-- 该脚本会运行 `final-go-live-review.sh status`，并让 Tom 执行 `./healthcheck.sh`，然后把目标拆成 `pass / pending / fail`。
+- 该脚本会运行 `final-go-live-review.sh status`，并让 Tom 执行 `./healthcheck.sh`，然后把目标拆成 `pass / warning / pending / fail`。
 - 审计条目包括 Tom 单 Oracle 多实例只读健康、dry-run 管理链路、监控告警、approval packet、运维文档、heartbeat/token 告警人工复核、最终 live healthcheck 一次性验收。
 - 当技术前置项就绪但最终 live healthcheck 尚未人工批准执行时，脚本返回 `blocked_human_approval_required`。
 - 当 Tom healthcheck 或 cron/readiness 前置条件失败时，脚本返回 `blocked_preconditions`。
@@ -1155,9 +1164,9 @@ cron 安装器已完成部署、受控 crontab 已安装，且 Tom workspace inb
 - 已提交并推送 `f14aa9d ops: add final go-live completion audit`。
 - 已部署到 Tom，`update.sh` 通过，5 个 OpenClaw gateway 健康端口、总览页、实例详情页、只读写接口拦截、容器安全边界和 collector 快照均通过。
 - 部署后第一次并行 audit smoke 正确发现 approval packet commit mismatch 并阻断；随后执行 `final-go-live-runner.sh prepare` 刷新证据包到当前 Tom commit。
-- 刷新后真实只读 completion audit smoke 返回 `blocked_human_approval_required`：5/7 pass，2 pending，0 failed。
-- 已通过 completion audit 确认：Tom 只读健康、dry-run 管理链路、监控告警、approval packet、运维文档均为 pass；`usage_alerts_review` 与 `final_live_healthcheck` 为 pending。
-- 当前唯一硬阻塞是 `最终 live healthcheck 一次性验收: 需要 Anan 显式 approve-and-run`；heartbeat/token 告警仍作为 warning/pending 人工复核项存在。
+- 刷新后真实只读 completion audit smoke 返回 `blocked_human_approval_required`：5/7 pass，1 warning，1 pending，0 failed。
+- 已通过 completion audit 确认：Tom 只读健康、dry-run 管理链路、监控告警、approval packet、运维文档均为 pass；`usage_alerts_review` 为 warning；`final_live_healthcheck` 为 pending。
+- 当前唯一硬阻塞是 `最终 live healthcheck 一次性验收: 需要 Anan 显式 approve-and-run`；heartbeat/token 告警仍作为 warning 人工复核项存在。
 - audit smoke 安全字段确认 `writesTomRuntime=false`、`writesApprovalFile=false`、`writesOpenClawInstanceDirs=false`、`clearsHeartbeatFiles=false`、`opensLiveGate=false`、`callsManagedActionsLiveApi=false`、`callsModelApis=false`。
 
 ## 阶段完成后的下一步

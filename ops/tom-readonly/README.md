@@ -202,7 +202,7 @@ BRANCH=multi-instance-readonly-control-center ./update.sh
 
 `ops/local/final-go-live-review.sh status` 是人工批准前的短摘要入口。它只读 SSH 到 Tom，聚合 Tom commit、live healthcheck readiness、approval packet、approval、dry-run inbox cron、heartbeat burn alert cron 和最新 heartbeat 告警。它不会写 Tom runtime、不会批准 approval、不会打开 live gate、不会调用 live API、不会修改 OpenClaw 实例目录。`FINAL_GO_LIVE_OUTPUT=summary` 可输出更短的审批摘要；如果只剩 heartbeat/token 用量告警，它会返回 `ready_for_human_approval_with_usage_alerts`，把告警作为 warning 而不是自动阻断 live healthcheck 审查。
 
-`ops/local/final-go-live-completion-audit.sh status` 是最终目标完成度审计入口。它只读运行 review，并让 Tom 执行 `./healthcheck.sh`，把目标拆成 Tom 只读健康、dry-run 管理链路、监控告警、approval packet、运维文档、heartbeat 告警人工复核、最终 live healthcheck 验收等条目。当前如果只剩人工批准，它会返回 `blocked_human_approval_required`，明确指出最终 live healthcheck 仍是 pending，而不是误报完成。
+`ops/local/final-go-live-completion-audit.sh status` 是最终目标完成度审计入口。它只读运行 review，并让 Tom 执行 `./healthcheck.sh`，把目标拆成 Tom 只读健康、dry-run 管理链路、监控告警、approval packet、运维文档、heartbeat 告警人工复核、最终 live healthcheck 验收等条目。heartbeat/token 告警会作为 `warning` 展示，避免和真正阻塞上线的人工 approval 混在一起；当前如果只剩最终 live healthcheck 人工批准，它会返回 `blocked_human_approval_required`，明确指出最终 live healthcheck 仍是 pending，而不是误报完成。
 
 `LOCAL_API_TOKEN` 是 control-center 本地 API 令牌。Tom 当前部署将它注入到 `openclaw-control-center-readonly` 容器环境中，而不是放在部署目录 `.env`。本机执行最终 live healthcheck 前，可从容器环境读取到当前 shell，命令本身不会打印真实 token：
 

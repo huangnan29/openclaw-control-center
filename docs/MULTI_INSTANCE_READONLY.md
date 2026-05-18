@@ -491,7 +491,7 @@ OPENCLAW_TOPOLOGY_MODE=local-only \
 ops/local/final-go-live-completion-audit.sh status
 ```
 
-`final-go-live-completion-audit.sh` 会只读运行 review，并让 Tom 执行 `./healthcheck.sh`，按需求列出 `pass / pending / fail`。当前如果只剩最终 live healthcheck 人工批准，它会返回 `blocked_human_approval_required`；如果 Tom healthcheck 或 cron 前置条件失败，则返回 `blocked_preconditions`。
+`final-go-live-completion-audit.sh` 会只读运行 review，并让 Tom 执行 `./healthcheck.sh`，按需求列出 `pass / warning / pending / fail`。heartbeat/token 告警属于 `warning`，用于提示人工决定是否处理相关实例的 `HEARTBEAT.md`；当前如果只剩最终 live healthcheck 人工批准，它会返回 `blocked_human_approval_required`；如果 Tom healthcheck 或 cron 前置条件失败，则返回 `blocked_preconditions`。
 
 为了让 Tom 在 Discord 中稳定使用 inbox，可以安装一段受控 `AGENTS.md` 规范：
 

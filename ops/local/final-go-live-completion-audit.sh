@@ -293,7 +293,7 @@ function buildAudit() {
     req(
       "usage_alerts_review",
       "heartbeat/token 告警人工复核",
-      usageWarnings.length > 0 || heartbeatBurnAlert.latest?.suspiciousRows > 0 ? "pending" : "pass",
+      usageWarnings.length > 0 || heartbeatBurnAlert.latest?.suspiciousRows > 0 ? "warning" : "pass",
       "heartbeat-burn-alert latest",
       usageWarnings.join("；") || "no active usage warning",
     ),
@@ -308,6 +308,7 @@ function buildAudit() {
 
   const failed = requirements.filter((item) => item.status === "fail");
   const pending = requirements.filter((item) => item.status === "pending");
+  const warnings = requirements.filter((item) => item.status === "warning");
   const passed = requirements.filter((item) => item.status === "pass");
   const hardBlockers = [
     ...failed.map((item) => `${item.label}: ${item.detail}`),
@@ -320,7 +321,9 @@ function buildAudit() {
     ? "blocked_preconditions"
     : pending.length > 0
       ? "blocked_human_approval_required"
-      : "completed";
+      : warnings.length > 0
+        ? "completed_with_warnings"
+        : "completed";
 
   return {
     schemaVersion: 1,
@@ -336,6 +339,7 @@ function buildAudit() {
     progress: {
       total: requirements.length,
       passed: passed.length,
+      warnings: warnings.length,
       pending: pending.length,
       failed: failed.length,
       percentExcludingHumanPending: Math.round((passed.length / requirements.length) * 100),
@@ -348,6 +352,11 @@ function buildAudit() {
     ],
     nextCommands: status === "completed"
       ? ["ops/local/final-go-live-runner.sh verify-completed"]
+      : status === "completed_with_warnings"
+        ? [
+            "FINAL_GO_LIVE_OUTPUT=summary OPENCLAW_TOPOLOGY_MODE=local-only ops/local/final-go-live-review.sh status",
+            "repo/ops/tom-readonly/heartbeat-burn-alert-runner.sh status",
+          ]
       : [
           "FINAL_GO_LIVE_OUTPUT=summary OPENCLAW_TOPOLOGY_MODE=local-only ops/local/final-go-live-review.sh status",
           "CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK APPROVED_BY=Anan LOCAL_API_TOKEN=<本地令牌> ops/local/final-go-live-runner.sh approve-and-run",
@@ -377,7 +386,7 @@ function emit(report, code = 0) {
   if (outputMode === "summary") {
     console.log(`status: ${report.status}`);
     console.log(`tomHead: ${report.tom.head}`);
-    console.log(`progress: ${report.progress.passed}/${report.progress.total} pass, ${report.progress.pending} pending, ${report.progress.failed} failed`);
+    console.log(`progress: ${report.progress.passed}/${report.progress.total} pass, ${report.progress.warnings} warning, ${report.progress.pending} pending, ${report.progress.failed} failed`);
     for (const item of report.requirements) {
       console.log(`- ${item.status}: ${item.id} — ${item.detail}`);
     }

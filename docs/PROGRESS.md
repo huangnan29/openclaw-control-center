@@ -1,5 +1,30 @@
 # Progress
 
+## Phase 162 (Completion audit warning classification) — Completed
+- Scope:
+  - Keep the final go-live audit focused on true blockers.
+  - Show active heartbeat/token findings as warnings, while leaving final live healthcheck as the only pending hard approval step.
+- Changed files:
+  - `ops/local/final-go-live-completion-audit.sh`
+  - `test/final-go-live-completion-audit.test.ts`
+  - `ops/tom-readonly/README.md`
+  - `docs/MULTI_INSTANCE_READONLY.md`
+  - `implementation_plan.md`
+  - `task.md`
+  - `docs/PROGRESS.md`
+- Implementation:
+  - Changed `usage_alerts_review` from `pending` to `warning` when active heartbeat/token findings exist.
+  - Added `completed_with_warnings` for the future state where all required actions pass but non-blocking warnings remain.
+  - Updated summary output to show `pass / warning / pending / fail`.
+- Verification:
+  - `bash -n ops/local/final-go-live-completion-audit.sh`
+  - `npm test -- test/final-go-live-completion-audit.test.ts`
+  - `npm test -- test/final-go-live-completion-audit.test.ts test/final-go-live-review.test.ts test/final-go-live-runner.test.ts test/oss-readiness.test.ts`
+  - `npm run build`
+  - Real Tom audit smoke returned `blocked_human_approval_required`: 5/7 pass, 1 warning, 1 pending, 0 failed.
+- Remaining gap:
+  - Final live healthcheck remains intentionally paused until Anan explicitly approves it. The heartbeat/token warning still points to `deepseek` and `spark` for manual review.
+
 ## Phase 161 (Final go-live completion audit) — Completed
 - Scope:
   - Add a read-only completion audit that proves the current goal is not complete until the approved live healthcheck has run.
@@ -14,7 +39,7 @@
   - `docs/PROGRESS.md`
 - Implementation:
   - Added `final-go-live-completion-audit.sh status`.
-  - The audit runs the read-only final review and Tom `./healthcheck.sh`, then reports requirements as `pass`, `pending`, or `fail`.
+  - The audit runs the read-only final review and Tom `./healthcheck.sh`, then reports requirements as `pass`, `warning`, `pending`, or `fail`.
   - It returns `blocked_human_approval_required` when technical prerequisites are ready but final live healthcheck remains pending on Anan approval.
   - It returns `blocked_preconditions` when Tom healthcheck or cron/readiness prerequisites fail.
   - Safety fields explicitly state that it does not write Tom runtime, write approval files, modify OpenClaw instance directories, clear heartbeat files, restart instances, open live gate, or call live managed actions.
@@ -25,8 +50,8 @@
   - `npm run build`
   - Deployed commit `f14aa9d` to Tom with `repo/ops/tom-readonly/update.sh`; readonly healthcheck passed for all five local OpenClaw gateways and collector snapshot.
   - Re-ran final go-live `prepare` after deployment to refresh the approval packet for commit `f14aa9d`.
-  - Real completion audit smoke returned `blocked_human_approval_required`: 5/7 requirements passed, 2 pending, 0 failed.
-  - The only hard blocker is the final live healthcheck one-time verification, which still requires Anan to run `approve-and-run`.
+  - Real completion audit smoke returned `blocked_human_approval_required`: 5/7 requirements passed, 1 warning, 1 pending, 0 failed.
+  - The only hard blocker is the final live healthcheck one-time verification, which still requires Anan to run `approve-and-run`; active heartbeat/token alerts are surfaced as warnings.
 - Remaining gap:
   - Final live healthcheck remains intentionally paused until Anan explicitly approves it. Heartbeat/token alert review also remains manual.
 
