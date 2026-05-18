@@ -6872,34 +6872,40 @@ function buildUsageAnomalyRows(
     const latest = points[points.length - 1];
     if (!first || !latest) continue;
 
-    const deltas: Array<{ tokens: number; intervalMinutes: number }> = [];
+    const growthEvents: Array<{ tokens: number; timestampMs: number }> = [];
     for (let index = 1; index < points.length; index += 1) {
       const previous = points[index - 1];
       const current = points[index];
       if (!previous || !current) continue;
       const tokens = current.totalTokens - previous.totalTokens;
       if (tokens <= 0) continue;
-      const intervalMinutes = (current.timestampMs - previous.timestampMs) / 60_000;
-      if (!Number.isFinite(intervalMinutes) || intervalMinutes <= 0) continue;
-      deltas.push({ tokens, intervalMinutes });
+      growthEvents.push({ tokens, timestampMs: current.timestampMs });
     }
-    if (deltas.length === 0) continue;
+    if (growthEvents.length === 0) continue;
 
     const totalDelta = latest.totalTokens - first.totalTokens;
-    const medianDelta = medianNumber(deltas.map((item) => item.tokens));
-    const medianIntervalMinutes = medianNumber(deltas.map((item) => item.intervalMinutes));
+    const growthIntervals = growthEvents
+      .slice(1)
+      .map((item, index) => {
+        const previous = growthEvents[index];
+        return previous ? (item.timestampMs - previous.timestampMs) / 60_000 : 0;
+      })
+      .filter((value) => Number.isFinite(value) && value > 0);
+    const medianDelta = medianNumber(growthEvents.map((item) => item.tokens));
+    const medianIntervalMinutes = medianNumber(growthIntervals);
     const rhythmScore = medianDelta > 0
-      ? deltas.filter((item) => Math.abs(item.tokens - medianDelta) / medianDelta <= 0.45).length / deltas.length
+      ? growthEvents.filter((item) => Math.abs(item.tokens - medianDelta) / medianDelta <= 0.45).length / growthEvents.length
       : 0;
-    const recentDelta = deltas[deltas.length - 1]?.tokens ?? 0;
+    const recentDelta = growthEvents[growthEvents.length - 1]?.tokens ?? 0;
     const periodicSmallGrowth =
-      deltas.length >= 4 &&
+      growthEvents.length >= 4 &&
+      growthIntervals.length >= 3 &&
       medianDelta > 0 &&
       medianDelta <= 2_000 &&
       medianIntervalMinutes >= 10 &&
       medianIntervalMinutes <= 90 &&
       rhythmScore >= 0.55;
-    const recentSpike = recentDelta >= Math.max(20_000, medianDelta * 5);
+    const recentSpike = recentDelta >= Math.max(5_000, medianDelta * 5);
 
     if (!periodicSmallGrowth && !recentSpike) continue;
 
@@ -6908,7 +6914,7 @@ function buildUsageAnomalyRows(
       instanceName,
       signal: recentSpike ? "recent_spike" : "periodic_small_growth",
       totalDelta,
-      nonZeroDeltas: deltas.length,
+      nonZeroDeltas: growthEvents.length,
       recentDelta,
       medianDelta,
       medianIntervalMinutes,

@@ -367,10 +367,12 @@ test("multi-instance usage page flags periodic token growth from collector histo
   const { renderMultiInstanceOverviewForSmoke } = await import("../src/ui/server");
   const snapshot = routeSmokeMultiSnapshot([smokeInstance("deepseek", "DeepSeek")], "deepseek");
   const baseMs = Date.parse("2026-05-18T08:00:00.000Z");
-  const samples = [0, 1, 2, 3, 4, 5].map((index) => {
-    const totalTokens = 84_000 + index * 280;
+  const samples = Array.from({ length: 76 }, (_, index) => {
+    const minutes = index * 2;
+    const heartbeatRuns = Math.floor(minutes / 30);
+    const totalTokens = 84_000 + heartbeatRuns * 280;
     return {
-      generatedAt: new Date(baseMs + index * 30 * 60 * 1000).toISOString(),
+      generatedAt: new Date(baseMs + minutes * 60 * 1000).toISOString(),
       serverId: "tom-oracle",
       serverName: "Tom Oracle",
       totals: {
