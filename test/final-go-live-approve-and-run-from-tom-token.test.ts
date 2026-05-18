@@ -18,6 +18,7 @@ async function writeHarness(dir: string, options: { token?: string } = {}) {
   const binDir = join(dir, "bin");
   const ssh = join(binDir, "ssh");
   const runner = join(binDir, "final-go-live-runner.sh");
+  const review = join(binDir, "final-go-live-review.sh");
   const sshCalls = join(dir, "ssh-calls.txt");
   const runnerCalls = join(dir, "runner-calls.txt");
   const runnerToken = join(dir, "runner-token.txt");
@@ -50,7 +51,44 @@ async function writeHarness(dir: string, options: { token?: string } = {}) {
     `#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\\n' "$*" >> "${sshCalls}"
+if printf '%s\\n' "$*" | grep -q 'awk.*length'; then
+  printf '%s\\n' "${token.length}"
+  exit 0
+fi
 printf '%s\\n' "${token}"
+`,
+  );
+  await writeExecutable(
+    review,
+    `#!/usr/bin/env bash
+set -euo pipefail
+cat <<'JSON'
+{
+  "status": "ready_for_human_approval_with_usage_alerts",
+  "tom": { "head": "ce2d89d" },
+  "summary": {
+    "readiness": {
+      "status": "waiting_human_approval",
+      "approvalPacket": "ready",
+      "approval": "needs_manual_approval"
+    },
+    "dryRunInboxCron": {
+      "status": "inbox_cron_installed",
+      "needsUpdate": false
+    },
+    "heartbeatBurnAlertCron": {
+      "status": "heartbeat_burn_alert_cron_installed",
+      "needsUpdate": false
+    },
+    "heartbeatBurnAlert": {
+      "latest": {
+        "status": "heartbeat_burn_alert_triggered"
+      }
+    }
+  },
+  "warnings": ["heartbeat/token 告警当前存在 2 个可疑实例"]
+}
+JSON
 `,
   );
   await writeExecutable(
@@ -67,11 +105,11 @@ cat <<'JSON'
 JSON
 `,
   );
-  return { ssh, runner, sshCalls, runnerCalls, runnerToken, discoveryConfig, token };
+  return { ssh, runner, review, sshCalls, runnerCalls, runnerToken, discoveryConfig, token };
 }
 
-function runWrapper(env: Record<string, string>) {
-  const result = spawnSync(SCRIPT, [], {
+function runWrapper(env: Record<string, string>, args: string[] = []) {
+  const result = spawnSync(SCRIPT, args, {
     cwd: ROOT,
     env: {
       ...process.env,
@@ -86,6 +124,32 @@ function runWrapper(env: Record<string, string>) {
   };
 }
 
+test("approve wrapper status 只读检查 token 长度和 approval review，不要求确认", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-final-approve-token-wrapper-status-"));
+  try {
+    const harness = await writeHarness(dir);
+    const result = runWrapper({
+      DISCOVERY_CONFIG: harness.discoveryConfig,
+      FINAL_GO_LIVE_APPROVE_TOKEN_SSH_BIN: harness.ssh,
+      FINAL_GO_LIVE_RUNNER_SCRIPT: harness.runner,
+      FINAL_GO_LIVE_REVIEW_SCRIPT: harness.review,
+    }, ["status"]);
+
+    assert.equal(result.exitCode, 0);
+    assert.doesNotMatch(result.stdout, /secret-token/);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.status, "preflight_ready_for_human_approval");
+    assert.equal(report.token.available, true);
+    assert.equal(report.token.length, "secret-token".length);
+    assert.equal(report.review.status, "ready_for_human_approval_with_usage_alerts");
+    assert.equal(report.safety.readsTomContainerTokenLengthOnly, true);
+    assert.equal(report.safety.delegatesToFinalRunner, false);
+    assert.equal(existsSync(harness.runnerCalls), false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("approve wrapper 缺确认短语时不连接 Tom", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openclaw-final-approve-token-wrapper-missing-confirm-"));
   try {
@@ -94,6 +158,7 @@ test("approve wrapper 缺确认短语时不连接 Tom", async () => {
       DISCOVERY_CONFIG: harness.discoveryConfig,
       FINAL_GO_LIVE_APPROVE_TOKEN_SSH_BIN: harness.ssh,
       FINAL_GO_LIVE_RUNNER_SCRIPT: harness.runner,
+      FINAL_GO_LIVE_REVIEW_SCRIPT: harness.review,
       APPROVED_BY: "Anan",
     });
 
@@ -116,10 +181,11 @@ test("approve wrapper 从 Tom 容器取令牌后委托既有 runner 且不打印
       DISCOVERY_CONFIG: harness.discoveryConfig,
       FINAL_GO_LIVE_APPROVE_TOKEN_SSH_BIN: harness.ssh,
       FINAL_GO_LIVE_RUNNER_SCRIPT: harness.runner,
+      FINAL_GO_LIVE_REVIEW_SCRIPT: harness.review,
       CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN: "I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK",
       APPROVED_BY: "Anan",
       FINAL_GO_LIVE_OUTPUT: "summary",
-    });
+    }, ["approve-and-run"]);
 
     assert.equal(result.exitCode, 0);
     assert.doesNotMatch(result.stdout, /secret-token/);
@@ -143,9 +209,10 @@ test("approve wrapper 在 Tom 容器令牌为空时不委托 runner", async () =
       DISCOVERY_CONFIG: harness.discoveryConfig,
       FINAL_GO_LIVE_APPROVE_TOKEN_SSH_BIN: harness.ssh,
       FINAL_GO_LIVE_RUNNER_SCRIPT: harness.runner,
+      FINAL_GO_LIVE_REVIEW_SCRIPT: harness.review,
       CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN: "I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK",
       APPROVED_BY: "Anan",
-    });
+    }, ["approve-and-run"]);
 
     assert.equal(result.exitCode, 2);
     const report = JSON.parse(result.stdout);

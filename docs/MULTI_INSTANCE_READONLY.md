@@ -567,11 +567,15 @@ PY
 也可以使用本机包装器减少手工复制 token 的风险。它仍需要显式确认和批准人；缺确认时不会连接 Tom。包装器只把 Tom 容器里的 `LOCAL_API_TOKEN` 放入子进程环境，不打印、不落盘，然后调用既有 `approve-and-run`：
 
 ```bash
+ops/local/final-go-live-approve-and-run-from-tom-token.sh status
+
 CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK \
 APPROVED_BY=Anan \
 FINAL_GO_LIVE_OUTPUT=summary \
-ops/local/final-go-live-approve-and-run-from-tom-token.sh
+ops/local/final-go-live-approve-and-run-from-tom-token.sh approve-and-run
 ```
+
+`status` 只读检查 Tom 容器 token 长度和 approval review 状态；它不打印 token、不写 approval、不打开 live gate。当前 ready 时会返回 `preflight_ready_for_human_approval`。
 
 人工 approval 已批准后，`live-healthcheck-rollout-runner.sh run-approved` 会先确认 readiness 为 `approved_ready_for_live_window`，再要求 `CONFIRM_LIVE_HEALTHCHECK_RUNNER` 与 `LOCAL_API_TOKEN`，最后调用一次性演练窗口；如果前置条件或人工批准未满足，runner 会返回非 0 退出码并保持 live gate 关闭，避免 openclaw 调度侧把阻断误判成成功。窗口脚本仍负责自动恢复只读状态、消费 approval、生成前后影响快照和演练报告。随后 `live-healthcheck-rollout-runner.sh verify-completed` 只读确认 readiness 已变为 `approval_consumed`、最新报告 `passed`、approval 已消费、impact 检查通过且 `mutatesOpenClawInstance=false`，作为 live 演练完成的验收证据。
 

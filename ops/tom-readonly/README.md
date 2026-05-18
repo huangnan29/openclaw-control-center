@@ -35,7 +35,7 @@
 - `../local/remote-oracle-intake.sh`：本机侧凭据接入编排器；`doctor/plan` 不写文件不联网，`apply` 显式确认后只写本机 push 配置和 Tom control-center runtime，`run` 会继续触发 Tom 端安全 rollout。
 - `../local/final-go-live-status.sh`：本机侧最终上线状态汇总入口；默认 `local-only`，`status/check` 读取 Tom `go-live-gate.sh`，不写本机 push 配置、不写 Tom runtime、不连接第二台 Oracle。
 - `../local/final-go-live-runner.sh`：本机侧最终上线推进 runner；`prepare` 可自动推进到 Tom 人工批准前，`run-approved` 必须显式确认和本地令牌，并继续交给 Tom runner 校验 approval/readiness；`approve-and-run` 先执行只读 approval review，只有 review 已到 `ready_for_human_approval` 且强确认、批准人、本地令牌齐全时，才记录 approval 并执行一次性演练；`verify-completed` 只读复核演练报告、approval 消费和只读恢复状态。
-- `../local/final-go-live-approve-and-run-from-tom-token.sh`：本机侧最终批准包装器；必须显式设置 `CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN` 和 `APPROVED_BY`，然后从 Tom control-center 容器环境读取 `LOCAL_API_TOKEN` 到子进程，不打印、不落盘，并交给既有 `final-go-live-runner.sh approve-and-run`。
+- `../local/final-go-live-approve-and-run-from-tom-token.sh`：本机侧最终批准包装器；`status` 只读检查 Tom 容器 token 长度和 approval review 状态，不打印 token、不执行 approval；`approve-and-run` 必须显式设置 `CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN` 和 `APPROVED_BY`，然后从 Tom control-center 容器环境读取 `LOCAL_API_TOKEN` 到子进程，不打印、不落盘，并交给既有 `final-go-live-runner.sh approve-and-run`。
 - `../local/push-remote-collector-credentials.sh`：在本机把远端只读 SSH key 和 onboarding 配置推送到 Tom control-center runtime，不连接第二台 Oracle。
 - `managed-action-healthcheck-rollout.example.json`：只读 healthcheck live 演练的 rollout 样板，不会被默认加载。
 - `managed-action-dry-run-gate.sh`：管理动作 dry-run 证据闸门，默认只读检查 readiness 与 audit，显式确认后只创建 dry-run 审计记录。
@@ -204,10 +204,12 @@ BRANCH=multi-instance-readonly-control-center ./update.sh
 如果不想手工导出 `LOCAL_API_TOKEN`，可以在本机使用包装器。它仍然要求人工确认短语和批准人；缺少确认时不会连接 Tom。它只从 Tom 容器环境读取令牌到子进程，不打印、不写文件：
 
 ```bash
+ops/local/final-go-live-approve-and-run-from-tom-token.sh status
+
 CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK \
 APPROVED_BY=Anan \
 FINAL_GO_LIVE_OUTPUT=summary \
-ops/local/final-go-live-approve-and-run-from-tom-token.sh
+ops/local/final-go-live-approve-and-run-from-tom-token.sh approve-and-run
 ```
 
 `ops/local/final-go-live-review.sh status` 是人工批准前的短摘要入口。它只读 SSH 到 Tom，聚合 Tom commit、live healthcheck readiness、approval packet、approval、dry-run inbox cron、heartbeat burn alert cron 和最新 heartbeat 告警。它不会写 Tom runtime、不会批准 approval、不会打开 live gate、不会调用 live API、不会修改 OpenClaw 实例目录。`FINAL_GO_LIVE_OUTPUT=summary` 可输出更短的审批摘要；如果只剩 heartbeat/token 用量告警，它会返回 `ready_for_human_approval_with_usage_alerts`，把告警作为 warning 而不是自动阻断 live healthcheck 审查。

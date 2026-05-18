@@ -1,5 +1,26 @@
 # Progress
 
+## Phase 164 (Final approval wrapper preflight) — Completed
+- Scope:
+  - Add a no-approval preflight for the final token wrapper so Anan can verify readiness before running the approved live healthcheck.
+- Changed files:
+  - `ops/local/final-go-live-approve-and-run-from-tom-token.sh`
+  - `test/final-go-live-approve-and-run-from-tom-token.test.ts`
+  - `ops/tom-readonly/README.md`
+  - `docs/MULTI_INSTANCE_READONLY.md`
+  - `task.md`
+- Implementation:
+  - Added `status` / `check` mode to the wrapper.
+  - The preflight reads only the Tom container token length, not the token value.
+  - It runs the read-only final approval review and returns `preflight_ready_for_human_approval` only when the token exists and approval review is ready.
+  - It does not print the token, write approval, open live gate, delegate to the final runner, modify instance directories, clear heartbeat files, or restart instances.
+- Verification:
+  - `bash -n ops/local/final-go-live-approve-and-run-from-tom-token.sh`
+  - `npm test -- test/final-go-live-approve-and-run-from-tom-token.test.ts`
+  - Real Tom preflight returned `preflight_ready_for_human_approval`, token length `28`, review `ready_for_human_approval_with_usage_alerts`, and `delegatesToFinalRunner=false`.
+- Remaining gap:
+  - Final live healthcheck still requires Anan to explicitly run `approve-and-run`.
+
 ## Phase 163 (Final approval token wrapper) — Completed
 - Scope:
   - Reduce the chance of manual token handling mistakes during the final approved live healthcheck.
