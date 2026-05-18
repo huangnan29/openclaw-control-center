@@ -1,5 +1,29 @@
 # Progress
 
+## Phase 161 (Final go-live completion audit) — Completed
+- Scope:
+  - Add a read-only completion audit that proves the current goal is not complete until the approved live healthcheck has run.
+  - Avoid relying on memory or long logs when deciding whether the final objective has actually been achieved.
+- Changed files:
+  - `ops/local/final-go-live-completion-audit.sh`
+  - `test/final-go-live-completion-audit.test.ts`
+  - `ops/tom-readonly/README.md`
+  - `docs/MULTI_INSTANCE_READONLY.md`
+  - `docs/FAQ.md`
+  - `implementation_plan.md`
+  - `docs/PROGRESS.md`
+- Implementation:
+  - Added `final-go-live-completion-audit.sh status`.
+  - The audit runs the read-only final review and Tom `./healthcheck.sh`, then reports requirements as `pass`, `pending`, or `fail`.
+  - It returns `blocked_human_approval_required` when technical prerequisites are ready but final live healthcheck remains pending on Anan approval.
+  - It returns `blocked_preconditions` when Tom healthcheck or cron/readiness prerequisites fail.
+  - Safety fields explicitly state that it does not write Tom runtime, write approval files, modify OpenClaw instance directories, clear heartbeat files, restart instances, open live gate, or call live managed actions.
+- Verification:
+  - `bash -n ops/local/final-go-live-completion-audit.sh`
+  - `npm test -- test/final-go-live-completion-audit.test.ts`
+- Remaining gap:
+  - Tom deployment and live read-only smoke are still pending for this phase.
+
 ## Phase 160 (Final go-live human review summary) — Completed
 - Scope:
   - Add a concise read-only pre-approval review entrypoint so Anan does not need to inspect long raw readiness logs before deciding.

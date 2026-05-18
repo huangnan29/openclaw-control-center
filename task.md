@@ -1138,3 +1138,19 @@ cron 安装器已完成部署、受控 crontab 已安装，且 Tom workspace inb
 ## 阶段完成后的下一步
 
 当前 Tom 已到人工批准前短摘要就绪状态。下一步仍是人工分支：Anan 审查摘要和证据包后显式运行 `approve-and-run`，或先人工处理 heartbeat/token 告警中的可疑实例。
+
+## 本轮新增（最终上线完成度审计）
+
+- 已新增 `ops/local/final-go-live-completion-audit.sh`，用于只读审计当前目标完成度，避免把“人工批准前”误判为“已完成”。
+- 该脚本会运行 `final-go-live-review.sh status`，并让 Tom 执行 `./healthcheck.sh`，然后把目标拆成 `pass / pending / fail`。
+- 审计条目包括 Tom 单 Oracle 多实例只读健康、dry-run 管理链路、监控告警、approval packet、运维文档、heartbeat/token 告警人工复核、最终 live healthcheck 一次性验收。
+- 当技术前置项就绪但最终 live healthcheck 尚未人工批准执行时，脚本返回 `blocked_human_approval_required`。
+- 当 Tom healthcheck 或 cron/readiness 前置条件失败时，脚本返回 `blocked_preconditions`。
+- 该脚本不写 Tom runtime、不写 approval 文件、不修改 OpenClaw 实例目录、不清空 `HEARTBEAT.md`、不重启实例、不打开 live gate、不调用 managed action live API。
+- 已新增 `test/final-go-live-completion-audit.test.ts`，覆盖人工 approval 为唯一硬阻塞、Tom healthcheck 失败时阻断两条路径，并断言不调用 approval 或 live API。
+- 已验证 `bash -n ops/local/final-go-live-completion-audit.sh`。
+- 已验证 `npm test -- test/final-go-live-completion-audit.test.ts`，2/2 通过。
+
+## 阶段完成后的下一步
+
+下一步运行相关回归与 build，部署该审计脚本到 Tom 同步目录后执行真实只读 smoke：`FINAL_GO_LIVE_OUTPUT=summary OPENCLAW_TOPOLOGY_MODE=local-only ops/local/final-go-live-completion-audit.sh status`。

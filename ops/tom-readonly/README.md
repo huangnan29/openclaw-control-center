@@ -174,6 +174,7 @@ repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh run-approved
 ops/local/final-go-live-runner.sh status
 ops/local/final-go-live-runner.sh prepare
 ops/local/final-go-live-review.sh status
+ops/local/final-go-live-completion-audit.sh status
 CONFIRM_FINAL_GO_LIVE_RUNNER=I_UNDERSTAND_THIS_RUNS_APPROVED_FINAL_GO_LIVE \
 LOCAL_API_TOKEN=<本地令牌> \
 ops/local/final-go-live-runner.sh run-approved
@@ -200,6 +201,8 @@ BRANCH=multi-instance-readonly-control-center ./update.sh
 `ops/local/final-go-live-runner.sh prepare` 是给 openclaw 调用的本机侧总 runner：它先执行 `final-go-live-status.sh check`，只有当总闸门下一步是 Tom `live-healthcheck-rollout-runner.sh prepare` 时，才 SSH 到 Tom 准备 approval 模板和批准前证据包，然后重新检查最终状态并停在人工批准前。如果总闸门仍提示 `prepare`，本机 runner 会先只读询问 Tom runner 当前 readiness；已经处在人工批准边界或已批准待执行边界时，重复执行 `prepare` 会幂等返回当前边界，不会再次写 Tom runtime。到达人工批准边界后，`prepare` 还会只读执行 Tom `live-healthcheck-approval-review.sh check`，并把 `approve-and-run` 单命令作为下一步；如果 review 不 ready，则在批准前阻断。它不会批准 approval、不会打开 live gate、不会调用 managed action live API。`run-approved` 还必须显式设置 `CONFIRM_FINAL_GO_LIVE_RUNNER` 和 `LOCAL_API_TOKEN`，并会继续交给 Tom runner 再校验 approval/readiness。`approve-and-run` 是人工批准后的单命令入口：先运行 Tom `live-healthcheck-approval-review.sh check`，只在 `ready_for_human_approval` 时用 `APPROVED_BY` 写入 approval，再调用原 `run-approved` 链路；未确认、未提供批准人/令牌、review 未 ready 时都会在批准前阻断。`run-approved` 和 `approve-and-run` 成功后会自动调用 Tom `verify-completed`，要求最新报告通过、approval 已消费、只读状态已恢复；也可以单独运行本机 `verify-completed` 做演练后复核。
 
 `ops/local/final-go-live-review.sh status` 是人工批准前的短摘要入口。它只读 SSH 到 Tom，聚合 Tom commit、live healthcheck readiness、approval packet、approval、dry-run inbox cron、heartbeat burn alert cron 和最新 heartbeat 告警。它不会写 Tom runtime、不会批准 approval、不会打开 live gate、不会调用 live API、不会修改 OpenClaw 实例目录。`FINAL_GO_LIVE_OUTPUT=summary` 可输出更短的审批摘要；如果只剩 heartbeat/token 用量告警，它会返回 `ready_for_human_approval_with_usage_alerts`，把告警作为 warning 而不是自动阻断 live healthcheck 审查。
+
+`ops/local/final-go-live-completion-audit.sh status` 是最终目标完成度审计入口。它只读运行 review，并让 Tom 执行 `./healthcheck.sh`，把目标拆成 Tom 只读健康、dry-run 管理链路、监控告警、approval packet、运维文档、heartbeat 告警人工复核、最终 live healthcheck 验收等条目。当前如果只剩人工批准，它会返回 `blocked_human_approval_required`，明确指出最终 live healthcheck 仍是 pending，而不是误报完成。
 
 `LOCAL_API_TOKEN` 是 control-center 本地 API 令牌。Tom 当前部署将它注入到 `openclaw-control-center-readonly` 容器环境中，而不是放在部署目录 `.env`。本机执行最终 live healthcheck 前，可从容器环境读取到当前 shell，命令本身不会打印真实 token：
 

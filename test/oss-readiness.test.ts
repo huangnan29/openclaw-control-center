@@ -161,6 +161,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   const finalGoLiveStatus = path.join(ROOT, "ops", "local", "final-go-live-status.sh");
   const finalGoLiveRunner = path.join(ROOT, "ops", "local", "final-go-live-runner.sh");
   const finalGoLiveReview = path.join(ROOT, "ops", "local", "final-go-live-review.sh");
+  const finalGoLiveCompletionAudit = path.join(ROOT, "ops", "local", "final-go-live-completion-audit.sh");
   const remoteCollectorOnboarding = path.join(ROOT, "ops", "tom-readonly", "remote-collector-onboarding.sh");
   const remoteCollectorOnboardingExample = path.join(ROOT, "ops", "tom-readonly", "remote-collector-onboarding.example.json");
   const remoteCollectorCredentials = path.join(ROOT, "ops", "tom-readonly", "remote-collector-credentials.sh");
@@ -194,6 +195,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(doc.includes("remote-oracle-intake.sh"));
   assert(doc.includes("final-go-live-status.sh"));
   assert(doc.includes("final-go-live-review.sh"));
+  assert(doc.includes("final-go-live-completion-audit.sh"));
   assert(doc.includes("render-push-config"));
   assert(doc.includes("I_UNDERSTAND_THIS_WRITES_LOCAL_PUSH_CONFIG_AND_TOM_RUNTIME_ONLY"));
   assert(doc.includes("I_UNDERSTAND_THIS_PUSHES_CREDENTIALS_AND_RUNS_TOM_SAFE_ROLLOUT"));
@@ -253,6 +255,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert(existsSync(remoteOracleIntake));
   assert(existsSync(finalGoLiveStatus));
   assert(existsSync(finalGoLiveReview));
+  assert(existsSync(finalGoLiveCompletionAudit));
   assert(existsSync(remoteCollectorOnboarding));
   assert(existsSync(remoteCollectorOnboardingExample));
   assert(existsSync(remoteCollectorCredentials));
@@ -385,6 +388,19 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(finalGoLiveReviewText, /callsManagedActionsLiveApi: false/);
   assert.match(finalGoLiveReviewText, /writesOpenClawInstanceDirs: false/);
   assert.doesNotMatch(finalGoLiveReviewText, /api\/managed-actions\/live/);
+  const finalGoLiveCompletionAuditText = readFileSync(finalGoLiveCompletionAudit, "utf8");
+  assert.match(finalGoLiveCompletionAuditText, /final-go-live-completion-audit\.sh status/);
+  assert.match(finalGoLiveCompletionAuditText, /final-go-live-review\.sh/);
+  assert.match(finalGoLiveCompletionAuditText, /\.\/healthcheck\.sh/);
+  assert.match(finalGoLiveCompletionAuditText, /blocked_human_approval_required/);
+  assert.match(finalGoLiveCompletionAuditText, /final_live_healthcheck/);
+  assert.match(finalGoLiveCompletionAuditText, /writesTomRuntime: false/);
+  assert.match(finalGoLiveCompletionAuditText, /writesApprovalFile: false/);
+  assert.match(finalGoLiveCompletionAuditText, /writesOpenClawInstanceDirs: false/);
+  assert.match(finalGoLiveCompletionAuditText, /clearsHeartbeatFiles: false/);
+  assert.match(finalGoLiveCompletionAuditText, /opensLiveGate: false/);
+  assert.match(finalGoLiveCompletionAuditText, /callsManagedActionsLiveApi: false/);
+  assert.doesNotMatch(finalGoLiveCompletionAuditText, /api\/managed-actions\/live/);
   const pushRemoteCollectorCredentialsText = readFileSync(pushRemoteCollectorCredentials, "utf8");
   assert.match(pushRemoteCollectorCredentialsText, /CONFIRM_PUSH_REMOTE_COLLECTOR_CREDENTIALS/);
   assert.match(pushRemoteCollectorCredentialsText, /I_UNDERSTAND_THIS_ONLY_PUSHES_REMOTE_COLLECTOR_CREDENTIALS_TO_TOM_RUNTIME/);

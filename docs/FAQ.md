@@ -241,6 +241,16 @@ ops/local/final-go-live-review.sh status
 
 如果输出 `ready_for_human_approval_with_usage_alerts`，含义是最终 live healthcheck 的 approval packet、approval 状态和 cron 前置条件都已就绪，但当前仍有 heartbeat/token 用量告警。用量告警不会自动清空实例文件，也不会替你批准 live healthcheck。
 
+如果想看“整个目标到底还剩什么”，运行：
+
+```bash
+FINAL_GO_LIVE_OUTPUT=summary \
+OPENCLAW_TOPOLOGY_MODE=local-only \
+ops/local/final-go-live-completion-audit.sh status
+```
+
+它会把 Tom 健康、dry-run 链路、告警、文档、approval packet 和最终 live healthcheck 分项列出。看到 `blocked_human_approval_required` 就表示技术前置项已可审查，仍需人工批准或 heartbeat 人工处理。
+
 ---
 
 ### 3. 会话停滞检测 — 怎么判定的？
