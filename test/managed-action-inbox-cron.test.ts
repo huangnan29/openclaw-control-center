@@ -148,6 +148,22 @@ test("managed action inbox cron apply 安装受控块且 remove 可移除", asyn
     assert.equal(status.report.installed, true);
     assert.equal(status.report.needsUpdate, false);
 
+    await writeFile(
+      tab,
+      `${afterApply}# OPENCLAW_HEARTBEAT_BURN_ALERT_CRON_BEGIN
+*/15 * * * * cd '${deployDir}' && repo/ops/tom-readonly/heartbeat-burn-alert-runner.sh run
+# OPENCLAW_HEARTBEAT_BURN_ALERT_CRON_END
+`,
+      "utf8",
+    );
+    const statusWithOtherManagedBlock = runInstaller("status", {
+      CRONTAB_BIN: bin,
+      DEPLOY_DIR: deployDir,
+      MANAGED_ACTION_INBOX_MAX_PER_RUN: "7",
+    });
+    assert.equal(statusWithOtherManagedBlock.report.status, "inbox_cron_installed");
+    assert.equal(statusWithOtherManagedBlock.report.needsUpdate, false);
+
     const removed = runInstaller("remove", {
       CRONTAB_BIN: bin,
       DEPLOY_DIR: deployDir,
@@ -160,6 +176,7 @@ test("managed action inbox cron apply 安装受控块且 remove 可移除", asyn
     const afterRemove = await readFile(tab, "utf8");
     assert.match(afterRemove, /SHELL=\/bin\/bash/);
     assert.doesNotMatch(afterRemove, /OPENCLAW_MANAGED_ACTION_INBOX_CRON_BEGIN/);
+    assert.match(afterRemove, /OPENCLAW_HEARTBEAT_BURN_ALERT_CRON_BEGIN/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

@@ -163,6 +163,18 @@ function removeBlock(existing) {
   return out.join("\n").replace(/\s+$/, "");
 }
 
+function currentBlock(existing) {
+  const lines = existing.split(/\r?\n/);
+  const out = [];
+  let capture = false;
+  for (const line of lines) {
+    if (line === markerBegin) capture = true;
+    if (capture) out.push(line);
+    if (line === markerEnd) break;
+  }
+  return out.join("\n");
+}
+
 function cronCommand() {
   return [
     `cd ${shellQuote(deployDir)} &&`,
@@ -193,15 +205,15 @@ function installed(existing) {
 
 function reportStatus() {
   const existing = readCrontab();
-  const next = buildNext(existing);
   const isInstalled = installed(existing);
+  const needsUpdate = !isInstalled || currentBlock(existing) !== renderBlock();
   emit({
     schemaVersion: 1,
-    status: isInstalled ? (existing === next ? "heartbeat_burn_alert_cron_installed" : "heartbeat_burn_alert_cron_needs_update") : "heartbeat_burn_alert_cron_not_installed",
+    status: isInstalled ? (needsUpdate ? "heartbeat_burn_alert_cron_needs_update" : "heartbeat_burn_alert_cron_installed") : "heartbeat_burn_alert_cron_not_installed",
     mode,
     generatedAt: new Date().toISOString(),
     installed: isInstalled,
-    needsUpdate: existing !== next,
+    needsUpdate,
     schedule,
     logPath,
     instanceIds,
@@ -211,19 +223,20 @@ function reportStatus() {
 
 function reportPlan() {
   const existing = readCrontab();
-  const next = buildNext(existing);
+  const isInstalled = installed(existing);
+  const needsUpdate = !isInstalled || currentBlock(existing) !== renderBlock();
   emit({
     schemaVersion: 1,
     status: "heartbeat_burn_alert_cron_plan_ready",
     mode,
     generatedAt: new Date().toISOString(),
-    installed: installed(existing),
-    needsUpdate: existing !== next,
+    installed: isInstalled,
+    needsUpdate,
     schedule,
     logPath,
     instanceIds,
     block: renderBlock(),
-    nextCommands: existing !== next
+    nextCommands: needsUpdate
       ? [`CONFIRM_HEARTBEAT_BURN_ALERT_CRON=${confirmation} repo/ops/tom-readonly/install-heartbeat-burn-alert-cron.sh apply`]
       : [],
     safety: safety(),

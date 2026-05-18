@@ -1101,7 +1101,11 @@ cron 安装器已完成部署、受控 crontab 已安装，且 Tom workspace inb
 - 本次告警 smoke 写入 `/srv/openclaw-control-center-readonly/runtime/heartbeat-burn-alerts/latest.json` 并追加 `events.ndjson`。
 - 本次告警 smoke 发现 2 个可疑实例：`deepseek` 为 `periodic_small_growth`，`spark` 为 `recent_spike`；两者 `HEARTBEAT.md` 均为非空，大小均为 `226` bytes。
 - Tom 告警 smoke 安全字段确认 `writesOpenClawInstanceDirs=false`、`clearsHeartbeatFiles=false`、`callsModelApis=false`、`restartsOpenClawInstances=false`、`callsManagedActionsLiveApi=false`、`opensLiveGate=false`。
+- 安装 heartbeat 告警 cron 后，发现旧的 dry-run inbox cron 状态误报 `inbox_cron_needs_update`；根因是 installer 用“整个 crontab 文本完全相等”判断更新，新增第二个受控块后会因块顺序变化误判。
+- 已修复 `install-managed-action-inbox-cron.sh` 与 `install-heartbeat-burn-alert-cron.sh`：`status/plan` 现在只比较各自的受控块内容，不会因为另一个受控 cron 块存在而互相误报。
+- 已补回归测试，覆盖 managed-action inbox cron 与 heartbeat burn alert cron 共存时各自 `needsUpdate=false`，且 remove 只移除自己的受控块。
+- 已验证 `npm test -- test/managed-action-inbox-cron.test.ts test/heartbeat-burn-alert-cron.test.ts test/oss-readiness.test.ts`，15/15 通过。
 
 ## 阶段完成后的下一步
 
-下一步重新执行 `ops/local/final-go-live-runner.sh prepare`，让 approval packet 与最新 Tom commit `0286f21` 对齐，并继续停在人工批准前。另一个人工分支是处理 `deepseek` 与 `spark` 的非空 `HEARTBEAT.md`；在 Anan 明确批准前，仍不得清空这些文件。
+下一步部署 cron 共存修复到 Tom，然后重新执行 `ops/local/final-go-live-runner.sh prepare`，让 approval packet 与最新 Tom commit 对齐，并继续停在人工批准前。另一个人工分支是处理 `deepseek` 与 `spark` 的非空 `HEARTBEAT.md`；在 Anan 明确批准前，仍不得清空这些文件。

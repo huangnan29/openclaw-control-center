@@ -245,6 +245,15 @@ test("heartbeat burn alert cron apply 需要确认，确认后安装受控块且
     assert.match(afterApply, /heartbeat-burn-alert-runner\.sh run/);
     assert.doesNotMatch(afterApply, /api\/managed-actions\/live/);
 
+    await writeFile(
+      tab,
+      `${afterApply}# OPENCLAW_MANAGED_ACTION_INBOX_CRON_BEGIN
+* * * * * cd '${deployDir}' && repo/ops/tom-readonly/managed-action-inbox-runner.sh run-pending
+# OPENCLAW_MANAGED_ACTION_INBOX_CRON_END
+`,
+      "utf8",
+    );
+
     const status = runJson(INSTALLER, ["status"], {
       CRONTAB_BIN: bin,
       DEPLOY_DIR: deployDir,
@@ -264,6 +273,7 @@ test("heartbeat burn alert cron apply 需要确认，确认后安装受控块且
     const afterRemove = await readFile(tab, "utf8");
     assert.match(afterRemove, /SHELL=\/bin\/bash/);
     assert.doesNotMatch(afterRemove, /OPENCLAW_HEARTBEAT_BURN_ALERT_CRON_BEGIN/);
+    assert.match(afterRemove, /OPENCLAW_MANAGED_ACTION_INBOX_CRON_BEGIN/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

@@ -28,6 +28,8 @@
   - Installed Tom `OPENCLAW_HEARTBEAT_BURN_ALERT_CRON` with schedule `*/15 * * * *`; installer status returned `heartbeat_burn_alert_cron_installed` and `needsUpdate=false`.
   - Manual Tom alert smoke returned exit code `2` by design because suspicious rows were found: `deepseek` as `periodic_small_growth` and `spark` as `recent_spike`.
   - The alert smoke wrote `/srv/openclaw-control-center-readonly/runtime/heartbeat-burn-alerts/latest.json` and appended `events.ndjson`; safety fields confirmed no OpenClaw instance writes, no heartbeat clearing, no model API calls, no restarts, and no live managed action calls.
+  - Fixed the cron installers so multiple OpenClaw managed crontab blocks can coexist without each installer reporting `needsUpdate=true` just because another block exists.
+  - Added regression coverage that each installer compares only its own marker block and removes only its own marker block.
 - Remaining gap:
   - The cleanup action remains manual by design. Both `deepseek` and `spark` should be reviewed before Anan decides whether to clear or disable their `HEARTBEAT.md` files.
 

@@ -166,6 +166,18 @@ function removeBlock(existing) {
   return out.join("\n").replace(/\s+$/, "");
 }
 
+function currentBlock(existing) {
+  const lines = existing.split(/\r?\n/);
+  const out = [];
+  let capture = false;
+  for (const line of lines) {
+    if (line === markerBegin) capture = true;
+    if (capture) out.push(line);
+    if (line === markerEnd) break;
+  }
+  return out.join("\n");
+}
+
 function cronCommand() {
   return [
     `cd ${shellQuote(deployDir)} &&`,
@@ -200,15 +212,15 @@ function installed(existing) {
 
 function reportStatus() {
   const existing = readCrontab();
-  const next = buildNext(existing);
   const isInstalled = installed(existing);
+  const needsUpdate = !isInstalled || currentBlock(existing) !== renderBlock();
   emit({
     schemaVersion: 1,
-    status: isInstalled ? (existing === next ? "inbox_cron_installed" : "inbox_cron_needs_update") : "inbox_cron_not_installed",
+    status: isInstalled ? (needsUpdate ? "inbox_cron_needs_update" : "inbox_cron_installed") : "inbox_cron_not_installed",
     mode,
     generatedAt: new Date().toISOString(),
     installed: isInstalled,
-    needsUpdate: existing !== next,
+    needsUpdate,
     schedule,
     logPath,
     inboxDir,
@@ -219,20 +231,21 @@ function reportStatus() {
 
 function reportPlan() {
   const existing = readCrontab();
-  const next = buildNext(existing);
+  const isInstalled = installed(existing);
+  const needsUpdate = !isInstalled || currentBlock(existing) !== renderBlock();
   emit({
     schemaVersion: 1,
     status: "inbox_cron_plan_ready",
     mode,
     generatedAt: new Date().toISOString(),
-    installed: installed(existing),
-    needsUpdate: existing !== next,
+    installed: isInstalled,
+    needsUpdate,
     schedule,
     logPath,
     inboxDir,
     maxPerRun,
     block: renderBlock(),
-    nextCommands: existing !== next
+    nextCommands: needsUpdate
       ? [`CONFIRM_MANAGED_ACTION_INBOX_CRON=${confirmation} repo/ops/tom-readonly/install-managed-action-inbox-cron.sh apply`]
       : [],
     safety: safety(),
