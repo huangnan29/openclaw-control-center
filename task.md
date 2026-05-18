@@ -1092,7 +1092,16 @@ cron 安装器已完成部署、受控 crontab 已安装，且 Tom workspace inb
 - 已新增 `test/heartbeat-burn-alert-cron.test.ts`，覆盖 runner 写告警报告、无异常 clear 状态、cron plan 不写 crontab、apply 确认与 remove。
 - 已验证 `bash -n ops/tom-readonly/heartbeat-burn-alert-runner.sh ops/tom-readonly/install-heartbeat-burn-alert-cron.sh`。
 - 已验证 `npm test -- test/heartbeat-burn-alert-cron.test.ts`，4/4 通过。
+- 已验证 `npm test -- test/heartbeat-burn-alert-cron.test.ts test/heartbeat-burn-inspector.test.ts test/oss-readiness.test.ts`，14/14 通过。
+- 已验证 `npm run build`。
+- 已提交并推送 `0286f21 ops: add heartbeat burn alert cron`。
+- 已部署到 Tom，`update.sh` 通过，5 个 OpenClaw gateway 健康端口、总览页、实例详情页、只读写接口拦截、容器安全边界和 collector 快照均通过。
+- Tom 告警 cron 已安装，`install-heartbeat-burn-alert-cron.sh status` 返回 `heartbeat_burn_alert_cron_installed`、`needsUpdate=false`，计划为每 15 分钟检查全部实例。
+- 已在 Tom 手动执行 `heartbeat-burn-alert-runner.sh run` 做 smoke；返回码为 `2`，这是“发现异常”的预期告警语义。
+- 本次告警 smoke 写入 `/srv/openclaw-control-center-readonly/runtime/heartbeat-burn-alerts/latest.json` 并追加 `events.ndjson`。
+- 本次告警 smoke 发现 2 个可疑实例：`deepseek` 为 `periodic_small_growth`，`spark` 为 `recent_spike`；两者 `HEARTBEAT.md` 均为非空，大小均为 `226` bytes。
+- Tom 告警 smoke 安全字段确认 `writesOpenClawInstanceDirs=false`、`clearsHeartbeatFiles=false`、`callsModelApis=false`、`restartsOpenClawInstances=false`、`callsManagedActionsLiveApi=false`、`opensLiveGate=false`。
 
 ## 阶段完成后的下一步
 
-下一步部署该告警 cron 到 Tom，并安装 `OPENCLAW_HEARTBEAT_BURN_ALERT_CRON` 受控块；安装后执行一次 `heartbeat-burn-alert-runner.sh run` 做 smoke，预期 deepseek 仍触发 `heartbeat_burn_alert_triggered`。仍不得清空 deepseek `HEARTBEAT.md`，除非 Anan 明确批准。
+下一步重新执行 `ops/local/final-go-live-runner.sh prepare`，让 approval packet 与最新 Tom commit `0286f21` 对齐，并继续停在人工批准前。另一个人工分支是处理 `deepseek` 与 `spark` 的非空 `HEARTBEAT.md`；在 Anan 明确批准前，仍不得清空这些文件。

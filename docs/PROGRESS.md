@@ -22,8 +22,14 @@
 - Verification:
   - `bash -n ops/tom-readonly/heartbeat-burn-alert-runner.sh ops/tom-readonly/install-heartbeat-burn-alert-cron.sh`
   - `npm test -- test/heartbeat-burn-alert-cron.test.ts`
+  - `npm test -- test/heartbeat-burn-alert-cron.test.ts test/heartbeat-burn-inspector.test.ts test/oss-readiness.test.ts`
+  - `npm run build`
+  - Deployed commit `0286f21` to Tom with `repo/ops/tom-readonly/update.sh`; readonly healthcheck passed for all five local OpenClaw gateways and collector snapshot.
+  - Installed Tom `OPENCLAW_HEARTBEAT_BURN_ALERT_CRON` with schedule `*/15 * * * *`; installer status returned `heartbeat_burn_alert_cron_installed` and `needsUpdate=false`.
+  - Manual Tom alert smoke returned exit code `2` by design because suspicious rows were found: `deepseek` as `periodic_small_growth` and `spark` as `recent_spike`.
+  - The alert smoke wrote `/srv/openclaw-control-center-readonly/runtime/heartbeat-burn-alerts/latest.json` and appended `events.ndjson`; safety fields confirmed no OpenClaw instance writes, no heartbeat clearing, no model API calls, no restarts, and no live managed action calls.
 - Remaining gap:
-  - Tom install/smoke is still pending for this phase. The cron should be installed after deployment and verified with `install-heartbeat-burn-alert-cron.sh status` plus one manual `heartbeat-burn-alert-runner.sh run`.
+  - The cleanup action remains manual by design. Both `deepseek` and `spark` should be reviewed before Anan decides whether to clear or disable their `HEARTBEAT.md` files.
 
 ## Phase 158 (Readonly heartbeat burn inspector) — Completed
 - Scope:
