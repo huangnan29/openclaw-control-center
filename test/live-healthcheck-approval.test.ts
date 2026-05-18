@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -124,6 +124,44 @@ test("live healthcheck approval approve requires and runs approval packet check"
     assert.equal(approval.approvalPacket.status, "ready");
     assert.equal(approval.approvalPacket.commit.current, "test-commit-1234567890");
     assert.match(log, /packet check .*packet\.json/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("live healthcheck approval prepare archives consumed record and writes a fresh template", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-live-approval-consumed-"));
+  try {
+    const { deployDir, approvalFile } = await prepareApprovalFile(dir);
+    const approval = JSON.parse(await readFile(approvalFile, "utf8"));
+    approval.approved = true;
+    approval.approvedBy = "Anan";
+    approval.approvedAt = "2026-05-17T18:24:19.802Z";
+    approval.consumed = true;
+    approval.consumedAt = "2026-05-17T18:24:39.181Z";
+    approval.consumedBy = "Anan";
+    await writeFile(approvalFile, `${JSON.stringify(approval, null, 2)}\n`, "utf8");
+
+    const output = execFileSync(SCRIPT, ["prepare", approvalFile], {
+      env: {
+        ...process.env,
+        DEPLOY_DIR: deployDir,
+        INSTANCE_ID: "tom",
+        OPERATOR: "Anan",
+      },
+      encoding: "utf8",
+    });
+
+    const status = JSON.parse(output);
+    const nextApproval = JSON.parse(await readFile(approvalFile, "utf8"));
+    const backups = await readdir(join(deployDir, "runtime", ".backup", "live-healthcheck-approval"));
+
+    assert.equal(status.status, "needs_manual_approval");
+    assert.equal(nextApproval.approved, false);
+    assert.equal(nextApproval.consumed, false);
+    assert.equal(nextApproval.approvedBy, "");
+    assert.equal(nextApproval.instanceId, "tom");
+    assert(backups.some((name) => name.endsWith("live-healthcheck-approval.json")));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

@@ -97,7 +97,29 @@ NODE
 prepare_template() {
   local output="${1:-$APPROVAL_FILE}"
   if [ -f "$output" ]; then
-    log "批准文件已存在，不覆盖：${output}"
+    local consumed
+    consumed="$(node - "$output" <<'NODE'
+const fs = require("node:fs");
+const file = process.argv[2];
+try {
+  const approval = JSON.parse(fs.readFileSync(file, "utf8"));
+  process.stdout.write(approval && approval.consumed === true ? "true" : "false");
+} catch {
+  process.stdout.write("false");
+}
+NODE
+)"
+    if [ "$consumed" = "true" ]; then
+      local backup_dir backup_file
+      backup_dir="$(dirname "$output")/.backup/live-healthcheck-approval"
+      backup_file="${backup_dir}/$(date -u +"%Y%m%dT%H%M%SZ")-$(basename "$output")"
+      mkdir -p "$backup_dir"
+      cp "$output" "$backup_file"
+      log "批准文件已被消费，已备份旧文件：${backup_file}"
+      write_template "$output" >/dev/null
+    else
+      log "批准文件已存在，不覆盖：${output}"
+    fi
   else
     write_template "$output" >/dev/null
   fi
