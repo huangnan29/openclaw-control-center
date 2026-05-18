@@ -1219,3 +1219,11 @@ cron 安装器已完成部署、受控 crontab 已安装，且 Tom workspace inb
 - 最新 suspiciousRows 从 3 降到 2：`main(periodic_small_growth)` 与 `deepseek(periodic_small_growth)`；`spark` 当前不再是最新 suspicious 实例。
 - 本次刷新只写 control-center runtime 的 `heartbeat-burn-alerts/latest.json` 与事件日志，不写 OpenClaw 实例目录、不清空 `HEARTBEAT.md`、不调用模型、不重启实例。
 - 已增强 `ops/local/final-go-live-review.sh`：warning 文案会带上 heartbeat/token 告警生成时间与大致年龄，避免最终审查时被旧 `latest.json` 误导。
+
+## 本轮新增（最终 live healthcheck 已执行）
+
+- 已按 Anan 授权执行最终验收：`ops/local/final-go-live-approve-and-run-from-tom-token.sh approve-and-run` 返回 `completed_final_live_healthcheck`。
+- 已只读复核：`ops/local/final-go-live-runner.sh verify-completed` 返回 `verified_final_live_healthcheck_completed`。
+- 验收安全字段确认：未写 OpenClaw 实例目录，未重启 OpenClaw 实例；live gate 和 managed-actions live API 只在批准的 healthcheck 窗口内使用。
+- 发现 completion audit 的状态机把 `approval=consumed` 误判为 `approval_packet_ready` 失败；正在修复为完成态识别，避免最终完成后被旧的“批准前”判断挡住。
+- 已完成本地状态机修复并通过测试：最终 review/audit 会把 `readiness=approval_consumed`、`approval=consumed` 识别为完成态；若仅剩 heartbeat/token 告警，则最终审计应返回 `completed_with_warnings`。

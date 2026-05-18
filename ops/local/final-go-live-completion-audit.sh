@@ -247,6 +247,10 @@ function req(id, label, status, evidence, detail = "") {
   return { id, label, status, evidence, detail };
 }
 
+function isFinalLiveHealthcheckCompleted(readiness) {
+  return readiness.status === "approval_consumed" || readiness.approval === "consumed";
+}
+
 function buildNextCommands(status, tom, healthcheck) {
   if (status === "completed") {
     return ["ops/local/final-go-live-runner.sh verify-completed"];
@@ -291,6 +295,7 @@ function buildAudit() {
   const heartbeatBurnAlertCron = summary.heartbeatBurnAlertCron || {};
   const heartbeatBurnAlert = summary.heartbeatBurnAlert || {};
   const usageWarnings = Array.isArray(review.report?.warnings) ? review.report.warnings : [];
+  const finalCompleted = isFinalLiveHealthcheckCompleted(readiness);
 
   const requirements = [
     req(
@@ -317,7 +322,14 @@ function buildAudit() {
     req(
       "approval_packet_ready",
       "最终 live healthcheck 批准前证据包",
-      readiness.status === "waiting_human_approval" && readiness.approvalPacket === "ready" && readiness.approval === "needs_manual_approval" ? "pass" : "fail",
+      (
+        readiness.status === "waiting_human_approval" &&
+        readiness.approvalPacket === "ready" &&
+        readiness.approval === "needs_manual_approval"
+      ) || (
+        finalCompleted &&
+        readiness.approvalPacket === "ready"
+      ) ? "pass" : "fail",
       "final-go-live-review readiness",
       `readiness=${readiness.status || "unknown"} approvalPacket=${readiness.approvalPacket || "unknown"} approval=${readiness.approval || "unknown"}`,
     ),
@@ -338,7 +350,7 @@ function buildAudit() {
     req(
       "final_live_healthcheck",
       "最终 live healthcheck 一次性验收",
-      readiness.status === "approval_consumed" || readiness.approval === "consumed" ? "pass" : "pending",
+      finalCompleted ? "pass" : "pending",
       "live-healthcheck readiness/approval",
       readiness.approval === "needs_manual_approval" ? "需要 Anan 显式 approve-and-run" : `approval=${readiness.approval || "unknown"}`,
     ),

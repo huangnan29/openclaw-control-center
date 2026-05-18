@@ -13,7 +13,7 @@ async function writeExecutable(file: string, content: string): Promise<void> {
   await chmod(file, 0o755);
 }
 
-async function writeHarness(dir: string, options: { healthcheckOk?: boolean } = {}) {
+async function writeHarness(dir: string, options: { healthcheckOk?: boolean; finalCompleted?: boolean } = {}) {
   const binDir = join(dir, "bin");
   const review = join(binDir, "final-go-live-review.sh");
   const ssh = join(binDir, "ssh");
@@ -21,6 +21,9 @@ async function writeHarness(dir: string, options: { healthcheckOk?: boolean } = 
   const discoveryConfig = join(dir, "discover.json");
   const key = join(dir, "tom.key");
   const healthcheckOk = options.healthcheckOk !== false;
+  const reviewStatus = options.finalCompleted ? "final_live_healthcheck_completed_with_usage_alerts" : "ready_for_human_approval_with_usage_alerts";
+  const readinessStatus = options.finalCompleted ? "approval_consumed" : "waiting_human_approval";
+  const approvalStatus = options.finalCompleted ? "consumed" : "needs_manual_approval";
   await mkdir(binDir, { recursive: true });
   await writeFile(key, "fake key\n", "utf8");
   await chmod(key, 0o600);
@@ -49,14 +52,14 @@ set -euo pipefail
 cat <<'JSON'
 {
   "schemaVersion": 1,
-  "status": "ready_for_human_approval_with_usage_alerts",
+  "status": "${reviewStatus}",
   "mode": "status",
   "tom": { "head": "be582a5" },
   "summary": {
     "readiness": {
-      "status": "waiting_human_approval",
+      "status": "${readinessStatus}",
       "approvalPacket": "ready",
-      "approval": "needs_manual_approval",
+      "approval": "${approvalStatus}",
       "issues": []
     },
     "dryRunInboxCron": {
@@ -176,6 +179,28 @@ test("final go-live completion audit 在 Tom healthcheck 失败时返回 precond
     assert(result.report.hardBlockers.some((item: string) => item.includes("Tom 单 Oracle 多实例只读健康检查")));
     assert(result.report.nextCommands.some((command: string) => command.includes("./healthcheck.sh")));
     assert(result.report.nextCommands.some((command: string) => command.includes("final-go-live-runner.sh prepare")));
+    assert(!result.report.nextCommands.some((command: string) => command.includes("approve-and-run")));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("final go-live completion audit 识别最终验收完成但仍有用量 warning", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-final-go-live-completion-audit-completed-"));
+  try {
+    const harness = await writeHarness(dir, { finalCompleted: true });
+    const result = runAudit({
+      DISCOVERY_CONFIG: harness.discoveryConfig,
+      FINAL_GO_LIVE_REVIEW_SCRIPT: harness.review,
+      FINAL_GO_LIVE_AUDIT_SSH_BIN: harness.ssh,
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.report.status, "completed_with_warnings");
+    assert(result.report.requirements.some((item: { id: string; status: string }) => item.id === "approval_packet_ready" && item.status === "pass"));
+    assert(result.report.requirements.some((item: { id: string; status: string }) => item.id === "final_live_healthcheck" && item.status === "pass"));
+    assert.equal(result.report.progress.failed, 0);
+    assert.equal(result.report.progress.pending, 0);
     assert(!result.report.nextCommands.some((command: string) => command.includes("approve-and-run")));
   } finally {
     await rm(dir, { recursive: true, force: true });

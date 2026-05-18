@@ -4973,3 +4973,24 @@
   - `bash -n ops/local/final-go-live-review.sh`
   - `npm test -- test/final-go-live-review.test.ts test/final-go-live-completion-audit.test.ts`
   - `npm run build`
+
+## Phase 106 Final live healthcheck completion-state audit (2026-05-19) — Completed
+- Scope: fix the final review/audit state machine after the approved live healthcheck consumes the approval record.
+- Changed files:
+  - `ops/local/final-go-live-review.sh`
+  - `ops/local/final-go-live-completion-audit.sh`
+  - `test/final-go-live-review.test.ts`
+  - `test/final-go-live-completion-audit.test.ts`
+  - `docs/PROGRESS.md`
+  - `task.md`
+- Runtime evidence:
+  - `approve-and-run` returned `completed_final_live_healthcheck`.
+  - `final-go-live-runner.sh verify-completed` returned `verified_final_live_healthcheck_completed`.
+  - Safety summary confirmed `writesOpenClawInstanceDirs=false` and `restartsOpenClawInstances=false`.
+- Implementation:
+  - Final review now recognizes `readiness=approval_consumed` / `approval=consumed` as completed state, not a precondition failure.
+  - Completion audit now treats consumed approval as passing both approval lifecycle and final live healthcheck requirements.
+- Verification:
+  - `bash -n ops/local/final-go-live-review.sh ops/local/final-go-live-completion-audit.sh`
+  - `npm test -- test/final-go-live-review.test.ts test/final-go-live-completion-audit.test.ts`
+  - `npm run build`

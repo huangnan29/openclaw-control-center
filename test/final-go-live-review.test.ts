@@ -13,7 +13,10 @@ async function writeExecutable(file: string, content: string): Promise<void> {
   await chmod(file, 0o755);
 }
 
-async function writeHarness(dir: string, options: { inboxCronStatus?: string; inboxNeedsUpdate?: boolean } = {}) {
+async function writeHarness(
+  dir: string,
+  options: { inboxCronStatus?: string; inboxNeedsUpdate?: boolean; finalCompleted?: boolean } = {},
+) {
   const binDir = join(dir, "bin");
   const ssh = join(binDir, "ssh");
   const sshCalls = join(dir, "ssh-calls.txt");
@@ -43,6 +46,8 @@ async function writeHarness(dir: string, options: { inboxCronStatus?: string; in
 
   const inboxStatus = options.inboxCronStatus || "inbox_cron_installed";
   const inboxNeedsUpdate = options.inboxNeedsUpdate === true;
+  const readinessStatus = options.finalCompleted ? "approval_consumed" : "waiting_human_approval";
+  const approvalStatus = options.finalCompleted ? "consumed" : "needs_manual_approval";
   await writeExecutable(
     ssh,
     `#!/usr/bin/env bash
@@ -56,10 +61,10 @@ if printf '%s\\n' "$*" | grep -q 'live-healthcheck-readiness.sh status'; then
   cat <<'JSON'
 {
   "schemaVersion": 1,
-  "status": "waiting_human_approval",
+  "status": "${readinessStatus}",
   "stages": {
     "approvalPacket": { "report": { "status": "ready", "issues": [] } },
-    "approval": { "report": { "status": "needs_manual_approval" } }
+    "approval": { "report": { "status": "${approvalStatus}" } }
   },
   "issues": [],
   "safety": {
@@ -186,6 +191,27 @@ test("final go-live review 在 dry-run inbox cron 需要更新时阻断批准建
     assert.equal(result.exitCode, 2);
     assert.equal(result.report.status, "blocked_preconditions");
     assert(result.report.issues.some((issue: string) => issue.includes("dry-run inbox cron")));
+    assert(!result.report.nextCommands.some((command: string) => command.includes("approve-and-run")));
+    assert.equal(result.report.safety.opensLiveGate, false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("final go-live review 识别最终验收完成态并不再建议 approve-and-run", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-final-go-live-review-completed-"));
+  try {
+    const harness = await writeHarness(dir, { finalCompleted: true });
+    const result = runReview({
+      DISCOVERY_CONFIG: harness.discoveryConfig,
+      FINAL_GO_LIVE_REVIEW_SSH_BIN: harness.ssh,
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.report.status, "final_live_healthcheck_completed_with_usage_alerts");
+    assert.equal(result.report.summary.readiness.status, "approval_consumed");
+    assert.equal(result.report.summary.readiness.approval, "consumed");
+    assert(result.report.nextCommands.some((command: string) => command.includes("verify-completed")));
     assert(!result.report.nextCommands.some((command: string) => command.includes("approve-and-run")));
     assert.equal(result.report.safety.opensLiveGate, false);
   } finally {

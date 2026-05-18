@@ -255,15 +255,20 @@ function usageWarningText(latest) {
   return `heartbeat/token 告警当前存在 ${count || "若干"} 个可疑实例${freshnessSuffix}`;
 }
 
+function isFinalLiveHealthcheckCompleted(ready) {
+  return ready.status === "approval_consumed" || ready.approval === "consumed";
+}
+
 function decide(parts) {
   const issues = [];
   const warnings = [];
   if (parts.tomHead.exitCode !== 0) issues.push("Tom HEAD 无法读取");
   if (parts.readiness.exitCode !== 0) issues.push("readiness 命令失败");
   const ready = readinessSummary(parts.readiness.report);
-  if (ready.status !== "waiting_human_approval") issues.push(`readiness=${ready.status}`);
+  const finalCompleted = isFinalLiveHealthcheckCompleted(ready);
+  if (!finalCompleted && ready.status !== "waiting_human_approval") issues.push(`readiness=${ready.status}`);
   if (ready.approvalPacket !== "ready") issues.push(`approvalPacket=${ready.approvalPacket}`);
-  if (ready.approval !== "needs_manual_approval") issues.push(`approval=${ready.approval}`);
+  if (!finalCompleted && ready.approval !== "needs_manual_approval") issues.push(`approval=${ready.approval}`);
   for (const issue of ready.issues || []) issues.push(String(issue));
 
   const inbox = cronSummary(parts.inboxCron.report);
@@ -280,11 +285,14 @@ function decide(parts) {
   return {
     status: issues.length > 0
       ? "blocked_preconditions"
-      : warnings.length > 0
-        ? "ready_for_human_approval_with_usage_alerts"
-        : "ready_for_human_approval",
+      : finalCompleted
+        ? (warnings.length > 0 ? "final_live_healthcheck_completed_with_usage_alerts" : "final_live_healthcheck_completed")
+        : warnings.length > 0
+          ? "ready_for_human_approval_with_usage_alerts"
+          : "ready_for_human_approval",
     issues,
     warnings,
+    finalCompleted,
   };
 }
 
@@ -370,11 +378,16 @@ const review = {
         "ops/local/final-go-live-runner.sh prepare",
         "repo/ops/tom-readonly/live-healthcheck-approval-review.sh status",
       ]
-    : [
-        "ops/local/final-go-live-approve-and-run-from-tom-token.sh status",
-        "CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK APPROVED_BY=Anan FINAL_GO_LIVE_OUTPUT=summary ops/local/final-go-live-approve-and-run-from-tom-token.sh approve-and-run",
-        "repo/ops/tom-readonly/heartbeat-burn-alert-runner.sh status",
-      ],
+    : decision.finalCompleted
+      ? [
+          "FINAL_GO_LIVE_OUTPUT=summary OPENCLAW_TOPOLOGY_MODE=local-only ops/local/final-go-live-runner.sh verify-completed",
+          "repo/ops/tom-readonly/heartbeat-burn-alert-runner.sh status",
+        ]
+      : [
+          "ops/local/final-go-live-approve-and-run-from-tom-token.sh status",
+          "CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK APPROVED_BY=Anan FINAL_GO_LIVE_OUTPUT=summary ops/local/final-go-live-approve-and-run-from-tom-token.sh approve-and-run",
+          "repo/ops/tom-readonly/heartbeat-burn-alert-runner.sh status",
+        ],
   safety: {
     readsStatusOnly: true,
     writesTomRuntime: false,
