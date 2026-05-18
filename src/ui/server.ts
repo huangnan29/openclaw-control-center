@@ -249,6 +249,7 @@ const OPENCLAW_CRON_JOBS_CANDIDATES = [
   join(process.cwd(), "..", "..", "..", "..", "cron", "jobs.json"),
 ];
 const DOCS_DIR = join(process.cwd(), "docs");
+const FAVICON_PATH = join(DOCS_DIR, "assets", "openclaw-control-center-icon.png");
 const README_PATH = join(process.cwd(), "README.md");
 const AGENT_ROOT_DIR = process.env.OPENCLAW_AGENT_ROOT?.trim() || join(process.cwd(), "..");
 const MEMORY_DIR_CANDIDATES = [
@@ -1302,6 +1303,17 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
           return writeApiError(res, 404, "NOT_FOUND", "Doc file not found.");
         }
         return writeText(res, 200, body, "text/markdown; charset=utf-8");
+      }
+
+      if ((method === "GET" || method === "HEAD") && path === "/favicon.ico") {
+        assertAllowedQueryParams(url.searchParams, [], true);
+        const buffer = await readFile(FAVICON_PATH);
+        res.writeHead(200, {
+          "content-type": "image/png",
+          "cache-control": "public, max-age=86400",
+        });
+        res.end(method === "HEAD" ? undefined : buffer);
+        return;
       }
 
       if (method === "GET" && path === "/snapshot") {
