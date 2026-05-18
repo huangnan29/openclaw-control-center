@@ -1,0 +1,6 @@
+{
+  "_note": "这是 control-center 只读用量页的月度预算告警策略。费用来自模型价格表估算，不等同于供应商账单；调整本文件后同步到 runtime/usage-budget-policy.json 即可生效。",
+  "currency": "USD",
+  "monthlyLimitCost": 10,
+  "warnRatio": 0.8
+}

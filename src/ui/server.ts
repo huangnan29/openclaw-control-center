@@ -137,6 +137,12 @@ import {
   type UsageCostMode,
   type UsageCostSnapshot,
 } from "../runtime/usage-cost";
+import {
+  evaluateUsageBudget,
+  loadUsageBudgetPolicy,
+  type UsageBudgetPolicyLoadResult,
+  type UsageBudgetStatus,
+} from "../runtime/usage-budget-policy";
 import { type StructuredChatDocEntry } from "../runtime/doc-hub";
 import {
   PROJECT_STATES,
@@ -1238,11 +1244,12 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
                 : undefined,
             ].filter((value): value is string => typeof value === "string" && value.length > 0);
             const overviewSnapshot = scopedSnapshot ?? snapshot;
-            const [managedActionAudit, managedActionReadiness, historyView, pricingCatalog] = await Promise.all([
+            const [managedActionAudit, managedActionReadiness, historyView, pricingCatalog, usageBudgetPolicy] = await Promise.all([
               readManagedActionDryRunAudits({ limit: 8 }),
               readManagedActionReadiness(),
               loadMultiInstanceHistoryView(overviewSnapshot),
               loadModelPricingCatalog(),
+              loadUsageBudgetPolicy(),
             ]);
             const html = renderMultiInstanceOverview(
               overviewSnapshot,
@@ -1256,6 +1263,7 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
               overviewTrendWindow,
               multiInstanceUsageFilters,
               pricingCatalog,
+              usageBudgetPolicy,
             );
             return writeText(res, 200, html, "text/html; charset=utf-8");
           }
@@ -7465,6 +7473,41 @@ function formatPreciseCost(value: number): string {
   return value.toFixed(4);
 }
 
+function formatBudgetCost(value: number | undefined, currency: string): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "-";
+  const normalizedCurrency = currency.trim().toUpperCase();
+  if (normalizedCurrency === "USD") return `$${formatPreciseCost(value)}`;
+  return `${normalizedCurrency || "USD"} ${formatPreciseCost(value)}`;
+}
+
+function budgetStatusLabel(status: UsageBudgetStatus, language: UiLanguage): string {
+  if (status === "ok") return pickUiText(language, "Normal", "正常");
+  if (status === "warn") return pickUiText(language, "Warning", "预警");
+  if (status === "over") return pickUiText(language, "Over limit", "超额");
+  return pickUiText(language, "Not configured", "未配置");
+}
+
+function budgetBadgeClass(status: UsageBudgetStatus): string {
+  if (status === "ok") return "connected";
+  if (status === "warn") return "partial";
+  if (status === "over") return "error";
+  return "not_connected";
+}
+
+function budgetChipTone(status: UsageBudgetStatus): string {
+  if (status === "ok") return "ok";
+  if (status === "warn") return "warn";
+  if (status === "over") return "danger";
+  return "blocked";
+}
+
+function budgetMessageForUi(status: UsageBudgetStatus, language: UiLanguage): string {
+  if (status === "ok") return pickUiText(language, "Estimated spend is inside the configured monthly limit.", "预估费用仍在月度预算内。");
+  if (status === "warn") return pickUiText(language, "Estimated spend is close to the configured monthly limit.", "预估费用已经接近月度预算线。");
+  if (status === "over") return pickUiText(language, "Estimated spend is over the configured monthly limit.", "预估费用已经超过月度预算线。");
+  return pickUiText(language, "Add runtime/usage-budget-policy.json to enable budget alerts.", "添加 runtime/usage-budget-policy.json 后可启用预算告警。");
+}
+
 function renderMultiInstanceHealthPanel(items: InstanceSnapshot[], language: UiLanguage, title?: string): string {
   const t = (en: string, zh: string): string => pickUiText(language, en, zh);
   const rows = items
@@ -7503,6 +7546,59 @@ function renderMultiInstanceHealthPanel(items: InstanceSnapshot[], language: UiL
     </div>
     ${renderDataSourceNote(language, t("Gateway connection state + derived session status.", "gateway 连接状态 + 会话状态推导"))}
     ${rows ? `<div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Instance", "实例"))}</th><th>${escapeHtml(t("Health", "健康"))}</th><th>${escapeHtml(t("Sessions", "会话"))}</th><th>Agent</th><th>${escapeHtml(t("Running", "运行中"))}</th><th>${escapeHtml(t("Blocked", "阻塞"))}</th><th>${escapeHtml(t("Errors", "错误"))}</th><th>${escapeHtml(t("Pending", "待审"))}</th><th>${escapeHtml(t("Latest", "最近"))}</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-state">${escapeHtml(t("No instances configured.", "尚未配置实例。"))}</div>`}
+  </section>`;
+}
+
+function renderMultiInstanceUsageBudgetPanel(
+  items: InstanceSnapshot[],
+  language: UiLanguage,
+  pricingCatalog: ModelContextCatalogEntry[] = [],
+  policyLoad?: UsageBudgetPolicyLoadResult,
+  filters: MultiInstanceUsageFilters = {},
+): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const policy = policyLoad?.policy ?? { currency: "USD", warnRatio: 0.8 };
+  const visibleCost = items.reduce(
+    (sum, item) =>
+      sum + item.snapshot.statuses.reduce((inner, status) => inner + estimateSessionStatusCost(status, pricingCatalog), 0),
+    0,
+  );
+  const evaluation = evaluateUsageBudget({
+    usedCost: visibleCost,
+    monthlyLimitCost: policy.monthlyLimitCost,
+    warnRatio: policy.warnRatio,
+  });
+  const currency = policy.currency || "USD";
+  const scopeLabel = hasMultiInstanceUsageFilters(filters)
+    ? t("Current filtered scope", "当前筛选范围")
+    : t("Visible readonly scope", "当前只读可见范围");
+  const chips = [
+    renderFleetMetricChip(t("Estimated spend", "本期估算"), formatBudgetCost(evaluation.usedCost, currency), budgetChipTone(evaluation.status)),
+    renderFleetMetricChip(t("Budget limit", "预算上限"), formatBudgetCost(evaluation.limitCost, currency)),
+    renderFleetMetricChip(
+      t("Used ratio", "已用比例"),
+      typeof evaluation.usagePercent === "number" ? formatPercent(evaluation.usagePercent) : "-",
+    ),
+    renderFleetMetricChip(t("Remaining", "剩余额度"), formatBudgetCost(evaluation.remainingCost, currency)),
+    renderFleetMetricChip(t("Warn line", "预警线"), formatBudgetCost(evaluation.warnAtCost, currency)),
+  ].join("");
+  const status = badge(budgetBadgeClass(evaluation.status), budgetStatusLabel(evaluation.status, language));
+  const sourceLabel = policyLoad?.loadedFromFile
+    ? `${basenameForUi(policyLoad.path)} · ${scopeLabel}`
+    : `${t("Policy file missing", "策略文件未配置")} · ${scopeLabel}`;
+  const issueText = policyLoad && policyLoad.issues.length > 0
+    ? `<div class="notice warning">${escapeHtml(policyLoad.issues.join("; "))}</div>`
+    : "";
+
+  return `<section class="panel">
+    <div class="panel-head">
+      <h2>${escapeHtml(t("Budget alerts", "预算告警"))}</h2>
+      <div>${status}</div>
+    </div>
+    ${renderDataSourceNote(language, `${sourceLabel}; ${t("cost is estimated from model pricing catalog", "费用来自模型价格表估算")}`)}
+    <div class="meta">${escapeHtml(budgetMessageForUi(evaluation.status, language))}</div>
+    <div class="status-strip">${chips}</div>
+    ${issueText}
   </section>`;
 }
 
@@ -8153,6 +8249,7 @@ function renderMultiInstanceSectionBody(input: {
   overviewTrendWindow: OverviewTrendWindow;
   usageFilters: MultiInstanceUsageFilters;
   pricingCatalog: ModelContextCatalogEntry[];
+  usageBudgetPolicy?: UsageBudgetPolicyLoadResult;
 }): string {
   const { snapshot, language, activeSection } = input;
   const t = (en: string, zh: string): string => pickUiText(language, en, zh);
@@ -8160,6 +8257,7 @@ function renderMultiInstanceSectionBody(input: {
     const usageItems = applyMultiInstanceUsageFilters(snapshot.instances, input.usageFilters);
     return `
       ${renderMultiInstanceUsageFiltersPanel(snapshot.instances, language, input.selectedServerId, input.usageFilters)}
+      ${renderMultiInstanceUsageBudgetPanel(usageItems, language, input.pricingCatalog, input.usageBudgetPolicy, input.usageFilters)}
       ${renderMultiInstanceTrendPanel(input.historyView, language)}
       <section class="overview-layout">
         <div>
@@ -8273,6 +8371,7 @@ function renderMultiInstanceOverview(
   overviewTrendWindow: OverviewTrendWindow = "24h",
   usageFilters: MultiInstanceUsageFilters = {},
   pricingCatalog: ModelContextCatalogEntry[] = [],
+  usageBudgetPolicy?: UsageBudgetPolicyLoadResult,
 ): string {
   const t = (en: string, zh: string): string => pickUiText(language, en, zh);
   const totalChips = [
@@ -8309,6 +8408,7 @@ function renderMultiInstanceOverview(
     overviewTrendWindow,
     usageFilters,
     pricingCatalog,
+    usageBudgetPolicy,
   });
 
   return `<!doctype html>
@@ -21193,8 +21293,26 @@ export function pickLatestSessionActivityTimestampForSmoke(...values: Array<stri
 export function renderMultiInstanceOverviewForSmoke(
   snapshot: MultiInstanceSnapshot,
   language: UiLanguage = "en",
+  options: {
+    activeSection?: DashboardSection;
+    usageBudgetPolicy?: UsageBudgetPolicyLoadResult;
+    pricingCatalog?: ModelContextCatalogEntry[];
+  } = {},
 ): string {
-  return renderMultiInstanceOverview(snapshot, language);
+  return renderMultiInstanceOverview(
+    snapshot,
+    language,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    options.activeSection,
+    "24h",
+    {},
+    options.pricingCatalog ?? [],
+    options.usageBudgetPolicy,
+  );
 }
 
 export function renderDashboardSectionNavForSmoke(

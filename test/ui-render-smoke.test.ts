@@ -336,6 +336,29 @@ test("multi-instance overview renders status metrics detail links and selected s
   assert(!html.includes("gateway unavailable <unsafe>"));
 });
 
+test("multi-instance usage page renders budget alerts from policy", async () => {
+  const { renderMultiInstanceOverviewForSmoke } = await import("../src/ui/server");
+  const snapshot = routeSmokeMultiSnapshot([smokeInstance("tom", "Tom")], "tom");
+
+  const html = renderMultiInstanceOverviewForSmoke(snapshot, "zh", {
+    activeSection: "usage-cost",
+    usageBudgetPolicy: {
+      policy: {
+        currency: "USD",
+        monthlyLimitCost: 0.01,
+        warnRatio: 0.8,
+      },
+      path: "/tmp/runtime/usage-budget-policy.json",
+      loadedFromFile: true,
+      issues: [],
+    },
+  });
+
+  assert(html.includes("预算告警"));
+  assert(html.includes("预算上限"));
+  assert(html.includes("超额"));
+});
+
 test("multi-instance routes render overview detail and invalid-instance fallback", async () => {
   const { startUiServer } = await import("../src/ui/server");
   const previousInstancesJson = process.env.OPENCLAW_INSTANCES_JSON;
