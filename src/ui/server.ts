@@ -524,6 +524,7 @@ interface DashboardSearchResult {
 }
 
 type UsageView = "cumulative" | "today";
+type OverviewTrendWindow = "24h" | "7d";
 
 interface DashboardOptions {
   section: DashboardSection;
@@ -1177,6 +1178,7 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
         const language: UiLanguage = hasExplicitLanguage ? resolvedLanguage : "zh";
         const compactStatusStrip = resolveCompactStatusStrip(url.searchParams, prefs.preferences.compactStatusStrip);
         const usageView = resolveUsageView(url.searchParams);
+        const overviewTrendWindow = resolveOverviewTrendWindow(url.searchParams);
         const search = resolveDashboardSearchQuery(url.searchParams);
         const selectedRoomId = normalizeQueryString(url.searchParams.get("roomId"), "roomId", 160, true);
         const selectedTaskCardId = normalizeQueryString(url.searchParams.get("taskCardId"), "taskCardId", 180, true);
@@ -1235,6 +1237,7 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
               managedActionReadiness,
               historyView,
               section,
+              overviewTrendWindow,
             );
             return writeText(res, 200, html, "text/html; charset=utf-8");
           }
@@ -6429,6 +6432,8 @@ function renderMultiInstanceOverviewDashboard(
   snapshot: MultiInstanceSnapshot,
   history: MultiInstanceHistoryView | undefined,
   language: UiLanguage,
+  selectedServerId: string | undefined,
+  trendWindow: OverviewTrendWindow,
 ): string {
   const t = (en: string, zh: string): string => pickUiText(language, en, zh);
   const metrics = snapshot.instances.map((item) => ({ item, metrics: buildInstanceUiMetrics(item) }));
@@ -6452,6 +6457,14 @@ function renderMultiInstanceOverviewDashboard(
     .sort((a, b) => Date.parse(b) - Date.parse(a))[0];
   const samples = history?.samples.filter((sample) => !Number.isNaN(Date.parse(sample.generatedAt))) ?? [];
   const latestSample = samples[samples.length - 1];
+  const trendHours = trendWindow === "7d" ? 24 * 7 : 24;
+  const scopedTrendSamples = samplesWithinHours(samples, trendHours);
+  const window24Href = buildMultiInstanceOverviewWindowHref(language, selectedServerId, "24h");
+  const window7dHref = buildMultiInstanceOverviewWindowHref(language, selectedServerId, "7d");
+  const usageHref = buildMultiInstanceSectionHref("usage-cost", language, selectedServerId);
+  const teamHref = buildMultiInstanceSectionHref("team", language, selectedServerId);
+  const tasksHref = buildMultiInstanceSectionHref("projects-tasks", language, selectedServerId);
+  const settingsHref = buildMultiInstanceSectionHref("settings", language, selectedServerId);
   const instanceShareRows = buildInstanceUsageShareRows(metrics);
   const workloadRows: FleetDistributionRow[] = metrics
     .map(({ item, metrics: itemMetrics }) => ({
@@ -6489,16 +6502,16 @@ function renderMultiInstanceOverviewDashboard(
       : `<div class="overview-mini-trends">
           ${renderTrendCard(
             t("Token pulse", "用量脉冲"),
-            t("Latest collector samples", "最近 collector 样本"),
-            samplesWithinHours(samples, 24),
+            trendWindow === "7d" ? t("Last 7 days", "最近 7 天") : t("Last 24 hours", "最近 24 小时"),
+            scopedTrendSamples,
             (sample) => sample.totals.totalTokens,
             formatInt,
             language,
           )}
           ${renderTrendCard(
             t("Session pulse", "会话脉冲"),
-            t("Latest collector samples", "最近 collector 样本"),
-            samplesWithinHours(samples, 24),
+            trendWindow === "7d" ? t("Last 7 days", "最近 7 天") : t("Last 24 hours", "最近 24 小时"),
+            scopedTrendSamples,
             (sample) => sample.totals.sessions,
             formatInt,
             language,
@@ -6511,6 +6524,18 @@ function renderMultiInstanceOverviewDashboard(
       <div class="meta">${escapeHtml(t("Live readonly signals across the selected Oracle scope.", "当前 Oracle 范围内的实时只读信号。"))}</div>
     </div>
     ${renderDataSourceNote(language, t("Readonly gateway snapshots + collector history.", "只读 gateway 快照 + collector 历史"))}
+    <div class="overview-control-row">
+      <div class="segment-switch overview-window-switch" role="tablist" aria-label="${escapeHtml(t("Trend window", "趋势窗口"))}">
+        <a class="segment-item${trendWindow === "24h" ? " active" : ""}" href="${escapeHtml(window24Href)}">${escapeHtml(t("24h", "24 小时"))}</a>
+        <a class="segment-item${trendWindow === "7d" ? " active" : ""}" href="${escapeHtml(window7dHref)}">${escapeHtml(t("7d", "7 天"))}</a>
+      </div>
+      <div class="overview-drill-row">
+        <a href="${escapeHtml(usageHref)}">${escapeHtml(t("Usage detail", "用量明细"))}</a>
+        <a href="${escapeHtml(teamHref)}">${escapeHtml(t("Agents", "Agent"))}</a>
+        <a href="${escapeHtml(tasksHref)}">${escapeHtml(t("Tasks and logs", "任务与日志"))}</a>
+        <a href="${escapeHtml(settingsHref)}">${escapeHtml(t("Safety", "安全"))}</a>
+      </div>
+    </div>
     <div class="status-strip overview-status-strip">${chips}</div>
     <div class="overview-context-row">
       <span>${escapeHtml(t("Latest activity", "最近活动"))}: ${escapeHtml(latestActivityAt ? formatUiTimestamp(latestActivityAt, language) : t("Not available", "暂无"))}</span>
@@ -7867,6 +7892,19 @@ function buildMultiInstanceSectionHref(section: DashboardSection, language: UiLa
   return `/?${params.toString()}`;
 }
 
+function buildMultiInstanceOverviewWindowHref(
+  language: UiLanguage,
+  selectedServerId: string | undefined,
+  trendWindow: OverviewTrendWindow,
+): string {
+  const params = new URLSearchParams();
+  params.set("section", "overview");
+  params.set("lang", language);
+  if (selectedServerId) params.set("server", selectedServerId);
+  if (trendWindow === "7d") params.set("window", "7d");
+  return `/?${params.toString()}`;
+}
+
 function multiInstanceSectionTitle(section: DashboardSection, language: UiLanguage): string {
   if (section === "usage-cost") return pickUiText(language, "Usage and Cost", "用量与成本");
   if (section === "team") return pickUiText(language, "Staff and Agents", "员工与 Agent");
@@ -7919,6 +7957,8 @@ function renderMultiInstanceSectionBody(input: {
   historyView?: MultiInstanceHistoryView;
   managedActionAudit?: Awaited<ReturnType<typeof readManagedActionDryRunAudits>>;
   managedActionReadiness?: ManagedActionLiveReadinessSnapshot;
+  selectedServerId?: string;
+  overviewTrendWindow: OverviewTrendWindow;
 }): string {
   const { snapshot, language, activeSection } = input;
   const t = (en: string, zh: string): string => pickUiText(language, en, zh);
@@ -7986,7 +8026,7 @@ function renderMultiInstanceSectionBody(input: {
   }
 
   return `
-    ${renderMultiInstanceOverviewDashboard(snapshot, input.historyView, language)}
+    ${renderMultiInstanceOverviewDashboard(snapshot, input.historyView, language, input.selectedServerId, input.overviewTrendWindow)}
     ${renderMultiInstanceStatsPanel(snapshot.instances, language)}
     ${renderMultiInstanceTrendPanel(input.historyView, language)}
     ${renderServerHealthPanel(snapshot, language)}
@@ -8027,6 +8067,7 @@ function renderMultiInstanceOverview(
   managedActionReadiness?: ManagedActionLiveReadinessSnapshot,
   historyView?: MultiInstanceHistoryView,
   activeSection: DashboardSection = "overview",
+  overviewTrendWindow: OverviewTrendWindow = "24h",
 ): string {
   const t = (en: string, zh: string): string => pickUiText(language, en, zh);
   const totalChips = [
@@ -8059,6 +8100,8 @@ function renderMultiInstanceOverview(
     historyView,
     managedActionAudit,
     managedActionReadiness,
+    selectedServerId,
+    overviewTrendWindow,
   });
 
   return `<!doctype html>
@@ -8116,6 +8159,12 @@ function renderMultiInstanceOverview(
     .trend-summary { display: flex; justify-content: space-between; gap: 10px; margin-top: 8px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
     .overview-command-panel { border-color: rgba(78, 121, 167, 0.22); box-shadow: 0 12px 32px rgba(17, 24, 39, 0.05); }
     .overview-status-strip { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+    .overview-control-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; align-items: center; margin: 12px 0 4px; }
+    .segment-switch { display: inline-flex; flex-wrap: wrap; gap: 4px; border: 1px solid var(--border); border-radius: 8px; padding: 4px; background: rgba(255, 255, 255, 0.8); }
+    .segment-item { border-radius: 6px; padding: 6px 10px; color: #344054; text-decoration: none; font-size: 13px; font-weight: 700; }
+    .segment-item.active { color: #fff; background: #4e79a7; }
+    .overview-drill-row { display: flex; flex-wrap: wrap; gap: 8px; }
+    .overview-drill-row a { border: 1px solid rgba(78, 121, 167, 0.26); border-radius: 999px; padding: 7px 10px; color: #315f8d; background: rgba(78, 121, 167, 0.08); font-size: 13px; font-weight: 700; text-decoration: none; }
     .overview-context-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; color: var(--muted); font-size: 12px; }
     .overview-context-row span { border: 1px solid rgba(17, 24, 39, 0.1); border-radius: 999px; background: rgba(255, 255, 255, 0.7); padding: 5px 9px; }
     .overview-chart-wall { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
@@ -14759,6 +14808,11 @@ function resolveCompactStatusStrip(searchParams: URLSearchParams, fallback: bool
 function resolveUsageView(searchParams: URLSearchParams): UsageView {
   const usageView = normalizeQueryString(searchParams.get("usage_view"), "usage_view", 16, false);
   return usageView === "today" ? "today" : "cumulative";
+}
+
+function resolveOverviewTrendWindow(searchParams: URLSearchParams): OverviewTrendWindow {
+  const window = normalizeQueryString(searchParams.get("window"), "window", 16, false);
+  return window === "7d" ? "7d" : "24h";
 }
 
 function resolveUiLanguage(searchParams: URLSearchParams, fallback: UiLanguage): UiLanguage {
