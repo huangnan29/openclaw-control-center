@@ -51,6 +51,34 @@ test("usage-cost snapshot computes context percent and burn-rate status when sou
   assert.equal(usage.periods.find((item) => item.key === "today")?.sourceStatus, "connected");
 });
 
+test("usage-cost snapshot estimates missing cost from model pricing catalog", async () => {
+  const { computeUsageCostSnapshot } = await import("../src/runtime/usage-cost");
+  const snapshot = buildSnapshotFixture({
+    model: "gpt-priced",
+    tokensIn: 2_000_000,
+    tokensOut: 500_000,
+    cost: 0,
+  });
+
+  const usage = computeUsageCostSnapshot(
+    snapshot,
+    [],
+    [
+      {
+        match: "gpt-priced",
+        contextWindowTokens: 128000,
+        provider: "OpenAI",
+        inputCostPerMillionTokens: 2,
+        outputCostPerMillionTokens: 8,
+      },
+    ],
+  );
+
+  assert.equal(usage.periods.find((item) => item.key === "today")?.estimatedCost, 8);
+  assert.equal(usage.breakdown.byModel[0]?.estimatedCost, 8);
+  assert.equal(usage.breakdown.byProvider[0]?.estimatedCost, 8);
+});
+
 test("usage-cost snapshot uses runtime session events for real requests, trends, and breakdown rows", async () => {
   const { computeUsageCostSnapshot } = await import("../src/runtime/usage-cost");
   const snapshot = buildSnapshotFixture({

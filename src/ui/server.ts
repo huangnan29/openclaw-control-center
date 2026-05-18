@@ -129,7 +129,14 @@ import {
   previewStaleAcksPrune,
 } from "../runtime/notification-center";
 import { buildPixelState } from "../runtime/pixel-state";
-import { buildUsageCostSnapshot, type UsageCostMode, type UsageCostSnapshot } from "../runtime/usage-cost";
+import {
+  buildUsageCostSnapshot,
+  estimateSessionStatusCost,
+  loadModelPricingCatalog,
+  type ModelContextCatalogEntry,
+  type UsageCostMode,
+  type UsageCostSnapshot,
+} from "../runtime/usage-cost";
 import { type StructuredChatDocEntry } from "../runtime/doc-hub";
 import {
   PROJECT_STATES,
@@ -1231,10 +1238,11 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
                 : undefined,
             ].filter((value): value is string => typeof value === "string" && value.length > 0);
             const overviewSnapshot = scopedSnapshot ?? snapshot;
-            const [managedActionAudit, managedActionReadiness, historyView] = await Promise.all([
+            const [managedActionAudit, managedActionReadiness, historyView, pricingCatalog] = await Promise.all([
               readManagedActionDryRunAudits({ limit: 8 }),
               readManagedActionReadiness(),
               loadMultiInstanceHistoryView(overviewSnapshot),
+              loadModelPricingCatalog(),
             ]);
             const html = renderMultiInstanceOverview(
               overviewSnapshot,
@@ -1247,6 +1255,7 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
               section,
               overviewTrendWindow,
               multiInstanceUsageFilters,
+              pricingCatalog,
             );
             return writeText(res, 200, html, "text/html; charset=utf-8");
           }
@@ -6258,13 +6267,19 @@ interface MultiInstanceHistoryView {
   samples: CollectorHistorySample[];
 }
 
-function buildInstanceUiMetrics(item: InstanceSnapshot): MultiInstanceUiMetrics {
+function buildInstanceUiMetrics(
+  item: InstanceSnapshot,
+  pricingCatalog: ModelContextCatalogEntry[] = [],
+): MultiInstanceUiMetrics {
   const sessions = item.snapshot.sessions;
   const statusBySession = new Map(item.snapshot.statuses.map((status) => [status.sessionKey, status]));
   const agentIds = collectAgentIdsForInstance(item);
   const tokensIn = item.snapshot.statuses.reduce((total, status) => total + (status.tokensIn ?? 0), 0);
   const tokensOut = item.snapshot.statuses.reduce((total, status) => total + (status.tokensOut ?? 0), 0);
-  const cost = item.snapshot.statuses.reduce((total, status) => total + (status.cost ?? 0), 0);
+  const cost = item.snapshot.statuses.reduce(
+    (total, status) => total + estimateSessionStatusCost(status, pricingCatalog),
+    0,
+  );
   const lastActivityAt = sessions
     .map((session) => pickLatestTimestamp([session.lastMessageAt, statusBySession.get(session.sessionKey)?.updatedAt]))
     .filter((value): value is string => typeof value === "string" && !Number.isNaN(Date.parse(value)))
@@ -6327,8 +6342,11 @@ function buildInstanceUsageShareRows(metrics: Array<{ item: InstanceSnapshot; me
     .sort((a, b) => b.tokens - a.tokens);
 }
 
-function buildModelUsageShareRows(items: InstanceSnapshot[]): MultiInstanceUsageShareRow[] {
-  return buildUsageModelRows(items)
+function buildModelUsageShareRows(
+  items: InstanceSnapshot[],
+  pricingCatalog: ModelContextCatalogEntry[] = [],
+): MultiInstanceUsageShareRow[] {
+  return buildUsageModelRows(items, pricingCatalog)
     .map((row) =>
       toUsageShareRow({
         key: row.model,
@@ -6443,9 +6461,10 @@ function renderMultiInstanceOverviewDashboard(
   language: UiLanguage,
   selectedServerId: string | undefined,
   trendWindow: OverviewTrendWindow,
+  pricingCatalog: ModelContextCatalogEntry[] = [],
 ): string {
   const t = (en: string, zh: string): string => pickUiText(language, en, zh);
-  const metrics = snapshot.instances.map((item) => ({ item, metrics: buildInstanceUiMetrics(item) }));
+  const metrics = snapshot.instances.map((item) => ({ item, metrics: buildInstanceUiMetrics(item, pricingCatalog) }));
   const collectorStates = snapshot.instances.map((item) => buildCollectorSnapshotUiState(item, language, snapshot.generatedAt));
   const freshCollectors = collectorStates.filter((item) => item.tone === "connected").length;
   const riskSignals = snapshot.totals.blocked + snapshot.totals.errors + snapshot.totals.pendingApprovals;
@@ -7243,7 +7262,10 @@ function resolveSessionAgentId(session: ReadModelSnapshot["sessions"][number]): 
   return normalizeAgentId(session.agentId) ?? "unassigned";
 }
 
-function buildMultiInstanceAgentRows(items: InstanceSnapshot[]): MultiInstanceAgentRow[] {
+function buildMultiInstanceAgentRows(
+  items: InstanceSnapshot[],
+  pricingCatalog: ModelContextCatalogEntry[] = [],
+): MultiInstanceAgentRow[] {
   const rows = new Map<string, MultiInstanceAgentRow>();
 
   const ensureRow = (item: InstanceSnapshot, agentId: string, displayName?: string, fromConfig = false): MultiInstanceAgentRow => {
@@ -7292,7 +7314,7 @@ function buildMultiInstanceAgentRows(items: InstanceSnapshot[]): MultiInstanceAg
       if (session.state === "error") row.errors += 1;
       row.tokensIn += status?.tokensIn ?? 0;
       row.tokensOut += status?.tokensOut ?? 0;
-      row.cost += status?.cost ?? 0;
+      row.cost += status ? estimateSessionStatusCost(status, pricingCatalog) : 0;
       row.lastActivityAt = pickLatestTimestamp([row.lastActivityAt, session.lastMessageAt, status?.updatedAt]);
     }
 
@@ -7484,9 +7506,14 @@ function renderMultiInstanceHealthPanel(items: InstanceSnapshot[], language: UiL
   </section>`;
 }
 
-function renderMultiInstanceUsagePanel(items: InstanceSnapshot[], language: UiLanguage, title?: string): string {
+function renderMultiInstanceUsagePanel(
+  items: InstanceSnapshot[],
+  language: UiLanguage,
+  title?: string,
+  pricingCatalog: ModelContextCatalogEntry[] = [],
+): string {
   const t = (en: string, zh: string): string => pickUiText(language, en, zh);
-  const metrics = items.map((item) => ({ item, metrics: buildInstanceUiMetrics(item) }));
+  const metrics = items.map((item) => ({ item, metrics: buildInstanceUiMetrics(item, pricingCatalog) }));
   const totals = metrics.reduce(
     (acc, item) => ({
       tokensIn: acc.tokensIn + item.metrics.tokensIn,
@@ -7496,7 +7523,7 @@ function renderMultiInstanceUsagePanel(items: InstanceSnapshot[], language: UiLa
     }),
     { tokensIn: 0, tokensOut: 0, totalTokens: 0, cost: 0 },
   );
-  const modelRows = buildUsageModelRows(items)
+  const modelRows = buildUsageModelRows(items, pricingCatalog)
     .slice(0, 8)
     .map(
       (row) =>
@@ -7504,7 +7531,7 @@ function renderMultiInstanceUsagePanel(items: InstanceSnapshot[], language: UiLa
     )
     .join("");
   const instanceShareRows = buildInstanceUsageShareRows(metrics);
-  const modelShareRows = buildModelUsageShareRows(items);
+  const modelShareRows = buildModelUsageShareRows(items, pricingCatalog);
   const modelShareTotal = modelShareRows.reduce((sum, row) => sum + row.tokens, 0);
   const chartHtml =
     totals.totalTokens > 0
@@ -7545,7 +7572,10 @@ function renderMultiInstanceUsagePanel(items: InstanceSnapshot[], language: UiLa
   </section>`;
 }
 
-function buildUsageModelRows(items: InstanceSnapshot[]): Array<{
+function buildUsageModelRows(
+  items: InstanceSnapshot[],
+  pricingCatalog: ModelContextCatalogEntry[] = [],
+): Array<{
   model: string;
   tokensIn: number;
   tokensOut: number;
@@ -7559,7 +7589,7 @@ function buildUsageModelRows(items: InstanceSnapshot[]): Array<{
       const row = rows.get(model) ?? { model, tokensIn: 0, tokensOut: 0, cost: 0, sessions: 0 };
       row.tokensIn += status.tokensIn ?? 0;
       row.tokensOut += status.tokensOut ?? 0;
-      row.cost += status.cost ?? 0;
+      row.cost += estimateSessionStatusCost(status, pricingCatalog);
       row.sessions += 1;
       rows.set(model, row);
     }
@@ -7893,9 +7923,13 @@ function renderMultiInstanceStaffWorkloadPanel(items: InstanceSnapshot[], langua
   </section>`;
 }
 
-function renderMultiInstanceUsageByAgentPanel(items: InstanceSnapshot[], language: UiLanguage): string {
+function renderMultiInstanceUsageByAgentPanel(
+  items: InstanceSnapshot[],
+  language: UiLanguage,
+  pricingCatalog: ModelContextCatalogEntry[] = [],
+): string {
   const t = (en: string, zh: string): string => pickUiText(language, en, zh);
-  const rows = buildMultiInstanceAgentRows(items)
+  const rows = buildMultiInstanceAgentRows(items, pricingCatalog)
     .filter((row) => row.tokensIn + row.tokensOut > 0)
     .sort((a, b) => b.tokensIn + b.tokensOut - (a.tokensIn + a.tokensOut))
     .slice(0, 20)
@@ -8118,6 +8152,7 @@ function renderMultiInstanceSectionBody(input: {
   selectedServerId?: string;
   overviewTrendWindow: OverviewTrendWindow;
   usageFilters: MultiInstanceUsageFilters;
+  pricingCatalog: ModelContextCatalogEntry[];
 }): string {
   const { snapshot, language, activeSection } = input;
   const t = (en: string, zh: string): string => pickUiText(language, en, zh);
@@ -8128,8 +8163,8 @@ function renderMultiInstanceSectionBody(input: {
       ${renderMultiInstanceTrendPanel(input.historyView, language)}
       <section class="overview-layout">
         <div>
-          ${renderMultiInstanceUsagePanel(usageItems, language, t("Usage overview", "用量总览"))}
-          ${renderMultiInstanceUsageByAgentPanel(usageItems, language)}
+          ${renderMultiInstanceUsagePanel(usageItems, language, t("Usage overview", "用量总览"), input.pricingCatalog)}
+          ${renderMultiInstanceUsageByAgentPanel(usageItems, language, input.pricingCatalog)}
         </div>
         <div>
           ${renderMultiInstanceStatsPanel(usageItems, language)}
@@ -8187,7 +8222,14 @@ function renderMultiInstanceSectionBody(input: {
   }
 
   return `
-    ${renderMultiInstanceOverviewDashboard(snapshot, input.historyView, language, input.selectedServerId, input.overviewTrendWindow)}
+    ${renderMultiInstanceOverviewDashboard(
+      snapshot,
+      input.historyView,
+      language,
+      input.selectedServerId,
+      input.overviewTrendWindow,
+      input.pricingCatalog,
+    )}
     ${renderMultiInstanceStatsPanel(snapshot.instances, language)}
     ${renderMultiInstanceTrendPanel(input.historyView, language)}
     ${renderServerHealthPanel(snapshot, language)}
@@ -8230,6 +8272,7 @@ function renderMultiInstanceOverview(
   activeSection: DashboardSection = "overview",
   overviewTrendWindow: OverviewTrendWindow = "24h",
   usageFilters: MultiInstanceUsageFilters = {},
+  pricingCatalog: ModelContextCatalogEntry[] = [],
 ): string {
   const t = (en: string, zh: string): string => pickUiText(language, en, zh);
   const totalChips = [
@@ -8265,6 +8308,7 @@ function renderMultiInstanceOverview(
     selectedServerId,
     overviewTrendWindow,
     usageFilters,
+    pricingCatalog,
   });
 
   return `<!doctype html>

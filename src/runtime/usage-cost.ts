@@ -193,10 +193,13 @@ interface UsageDigest {
   };
 }
 
-interface ModelContextCatalogEntry {
+export interface ModelContextCatalogEntry {
   match: string;
   contextWindowTokens: number;
   provider?: string;
+  inputCostPerMillionTokens?: number;
+  outputCostPerMillionTokens?: number;
+  costPerMillionTokens?: number;
 }
 
 interface RuntimeSessionContext {
@@ -333,6 +336,10 @@ async function loadCachedModelContextCatalog(): Promise<ModelContextCatalogEntry
   );
 }
 
+export async function loadModelPricingCatalog(): Promise<ModelContextCatalogEntry[]> {
+  return loadCachedModelContextCatalog();
+}
+
 async function loadCachedRuntimeUsageData(): Promise<RuntimeUsageData> {
   return loadSourceWithCache(
     runtimeUsageDataCache,
@@ -424,7 +431,7 @@ export function computeUsageCostSnapshot(
   const sessionProjectMap = buildSessionProjectMap(snapshot);
   const runtime = resolveRuntimeUsage(runtimeUsage, sessionProjectMap);
 
-  const periods = buildUsagePeriods(snapshot, digests, todayIso, runtime);
+  const periods = buildUsagePeriods(snapshot, digests, todayIso, runtime, modelCatalog);
   const period30 = periods.find((item) => item.key === "30d");
 
   let runtimeContextRows = 0;
@@ -474,14 +481,14 @@ export function computeUsageCostSnapshot(
       ? aggregateBreakdownFromStatuses(snapshot.statuses, (status) => {
           const session = sessionByKey.get(status.sessionKey);
           return session?.agentId ?? "Unassigned";
-        })
+        }, modelCatalog)
       : aggregateBreakdownFromRuntime(runtimeEvents30d, runtime.sourceStatus, (event) => event.agentId || "Unassigned");
 
   const byProject =
     runtime.sourceStatus === "not_connected"
       ? aggregateBreakdownFromStatuses(snapshot.statuses, (status) => {
           return sessionProjectMap.get(status.sessionKey) ?? "Unmapped project";
-        })
+        }, modelCatalog)
       : aggregateBreakdownFromRuntime(
           runtimeEvents30d,
           runtime.sourceStatus,
@@ -490,7 +497,11 @@ export function computeUsageCostSnapshot(
 
   const byModel =
     runtime.sourceStatus === "not_connected"
-      ? aggregateBreakdownFromStatuses(snapshot.statuses, (status) => status.model?.trim() || "Model not reported")
+      ? aggregateBreakdownFromStatuses(
+          snapshot.statuses,
+          (status) => status.model?.trim() || "Model not reported",
+          modelCatalog,
+        )
       : aggregateBreakdownFromRuntime(
           runtimeEvents30d,
           runtime.sourceStatus,
@@ -500,7 +511,7 @@ export function computeUsageCostSnapshot(
 
   const byProvider =
     runtime.sourceStatus === "not_connected"
-      ? aggregateBreakdownFromStatuses(snapshot.statuses, (status) => inferProvider(status.model))
+      ? aggregateBreakdownFromStatuses(snapshot.statuses, (status) => inferProvider(status.model), modelCatalog)
       : aggregateBreakdownFromRuntime(
           runtimeEvents30d,
           runtime.sourceStatus,
@@ -524,20 +535,28 @@ export function computeUsageCostSnapshot(
       ? aggregateBreakdownFromStatuses(snapshot.statuses, (status) => {
           const session = sessionByKey.get(status.sessionKey);
           return session?.agentId ?? "Unassigned";
-        })
+        }, modelCatalog)
       : aggregateBreakdownFromRuntime(runtimeEventsToday, runtime.sourceStatus, (event) => event.agentId || "Unassigned");
   const byProjectToday =
     runtime.sourceStatus === "not_connected"
-      ? aggregateBreakdownFromStatuses(snapshot.statuses, (status) => sessionProjectMap.get(status.sessionKey) ?? "Unmapped project")
+      ? aggregateBreakdownFromStatuses(
+          snapshot.statuses,
+          (status) => sessionProjectMap.get(status.sessionKey) ?? "Unmapped project",
+          modelCatalog,
+        )
       : aggregateBreakdownFromRuntime(runtimeEventsToday, runtime.sourceStatus, (event) => event.projectId ?? "Unmapped project");
   const byModelToday =
     runtime.sourceStatus === "not_connected"
-      ? aggregateBreakdownFromStatuses(snapshot.statuses, (status) => status.model?.trim() || "Model not reported")
+      ? aggregateBreakdownFromStatuses(
+          snapshot.statuses,
+          (status) => status.model?.trim() || "Model not reported",
+          modelCatalog,
+        )
       : aggregateBreakdownFromRuntime(runtimeEventsToday, runtime.sourceStatus, (event) => event.model?.trim() || "Model not reported");
   const byTaskToday = buildTaskBreakdownFromRuntime(snapshot, runtimeEventsToday, runtime.sourceStatus);
   const byProviderToday =
     runtime.sourceStatus === "not_connected"
-      ? aggregateBreakdownFromStatuses(snapshot.statuses, (status) => inferProvider(status.model))
+      ? aggregateBreakdownFromStatuses(snapshot.statuses, (status) => inferProvider(status.model), modelCatalog)
       : aggregateBreakdownFromRuntime(
           runtimeEventsToday,
           runtime.sourceStatus,
@@ -639,11 +658,29 @@ async function loadModelContextCatalog(): Promise<ModelContextCatalogEntry[]> {
       const match = asString(obj.match);
       const contextWindowTokens = asPositiveNumber(obj.contextWindowTokens);
       const provider = asString(obj.provider);
+      const inputCostPerMillionTokens = readCatalogPrice(obj, [
+        "inputCostPerMillionTokens",
+        "inputUsdPerMillionTokens",
+        "promptCostPerMillionTokens",
+      ]);
+      const outputCostPerMillionTokens = readCatalogPrice(obj, [
+        "outputCostPerMillionTokens",
+        "outputUsdPerMillionTokens",
+        "completionCostPerMillionTokens",
+      ]);
+      const costPerMillionTokens = readCatalogPrice(obj, [
+        "costPerMillionTokens",
+        "usdPerMillionTokens",
+        "blendedCostPerMillionTokens",
+      ]);
       if (!match || contextWindowTokens === undefined) continue;
       entries.push({
         match: match.toLowerCase(),
         contextWindowTokens,
         provider: provider || undefined,
+        ...(inputCostPerMillionTokens !== undefined ? { inputCostPerMillionTokens } : {}),
+        ...(outputCostPerMillionTokens !== undefined ? { outputCostPerMillionTokens } : {}),
+        ...(costPerMillionTokens !== undefined ? { costPerMillionTokens } : {}),
       });
     }
     return entries;
@@ -1002,6 +1039,7 @@ function buildUsagePeriods(
   digests: UsageDigest[],
   todayIso: string,
   runtime: RuntimeUsageResolved,
+  modelCatalog: ModelContextCatalogEntry[],
 ): UsagePeriodSummary[] {
   const windows: Array<{ key: "today" | "7d" | "30d"; days: number; label: string }> = [
     { key: "today", days: 1, label: "Today" },
@@ -1050,7 +1088,7 @@ function buildUsagePeriods(
         (sum, status) => sum + (status.tokensIn ?? 0) + (status.tokensOut ?? 0),
         0,
       );
-      aggregate.cost = snapshot.statuses.reduce((sum, status) => sum + (status.cost ?? 0), 0);
+      aggregate.cost = snapshot.statuses.reduce((sum, status) => sum + estimateSessionStatusCost(status, modelCatalog), 0);
       aggregate.statuses = snapshot.statuses.length;
     }
 
@@ -1237,6 +1275,7 @@ function buildSessionProjectMap(snapshot: ReadModelSnapshot): Map<string, string
 function aggregateBreakdownFromStatuses(
   statuses: ReadModelSnapshot["statuses"],
   keySelector: (status: ReadModelSnapshot["statuses"][number]) => string,
+  modelCatalog: ModelContextCatalogEntry[] = [],
 ): UsageBreakdownRow[] {
   const byKey = new Map<string, UsageBreakdownRow>();
   for (const status of statuses) {
@@ -1251,12 +1290,51 @@ function aggregateBreakdownFromStatuses(
       sourceStatus: "connected",
     };
     current.tokens += (status.tokensIn ?? 0) + (status.tokensOut ?? 0);
-    current.estimatedCost += status.cost ?? 0;
+    current.estimatedCost += estimateSessionStatusCost(status, modelCatalog);
     current.sessions += 1;
     byKey.set(key, current);
   }
 
   return [...byKey.values()].sort((a, b) => b.tokens - a.tokens).slice(0, 12);
+}
+
+export function estimateSessionStatusCost(
+  status: ReadModelSnapshot["statuses"][number],
+  modelCatalog: ModelContextCatalogEntry[],
+): number {
+  const observedCost = status.cost ?? 0;
+  if (observedCost > 0) return observedCost;
+  return estimateModelCost({
+    model: status.model,
+    tokensIn: status.tokensIn ?? 0,
+    tokensOut: status.tokensOut ?? 0,
+    totalTokens: (status.tokensIn ?? 0) + (status.tokensOut ?? 0),
+    modelCatalog,
+  });
+}
+
+function estimateModelCost(input: {
+  model: string | undefined;
+  tokensIn?: number;
+  tokensOut?: number;
+  totalTokens: number;
+  modelCatalog: ModelContextCatalogEntry[];
+}): number {
+  const entry = resolveContextCatalogEntry(input.modelCatalog, input.model ?? "");
+  if (!entry) return 0;
+  const tokensIn = Math.max(0, input.tokensIn ?? 0);
+  const tokensOut = Math.max(0, input.tokensOut ?? 0);
+  if (
+    typeof entry.inputCostPerMillionTokens === "number" ||
+    typeof entry.outputCostPerMillionTokens === "number"
+  ) {
+    return (tokensIn / 1_000_000) * (entry.inputCostPerMillionTokens ?? 0) +
+      (tokensOut / 1_000_000) * (entry.outputCostPerMillionTokens ?? 0);
+  }
+  if (typeof entry.costPerMillionTokens === "number") {
+    return (Math.max(0, input.totalTokens) / 1_000_000) * entry.costPerMillionTokens;
+  }
+  return 0;
 }
 
 function aggregateBreakdownFromRuntime(
@@ -1783,6 +1861,14 @@ function resolveContextCatalogEntry(
   const normalized = model.trim().toLowerCase();
   if (!normalized) return undefined;
   return catalog.find((entry) => normalized.includes(entry.match));
+}
+
+function readCatalogPrice(obj: Record<string, unknown>, keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = asNonNegativeNumber(obj[key]);
+    if (value !== undefined) return value;
+  }
+  return undefined;
 }
 
 function resolveContextThresholdState(

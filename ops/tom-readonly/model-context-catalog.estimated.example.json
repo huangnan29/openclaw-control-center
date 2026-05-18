@@ -1,0 +1,47 @@
+{
+  "_note": "这是 control-center 的模型上下文与价格估算表。费用只用于运营看板估算，不等同于供应商账单；模型价格变化时只需要调整本文件并同步到 runtime/model-context-catalog.json。",
+  "models": [
+    {
+      "match": "gpt-5.5",
+      "provider": "OpenAI",
+      "contextWindowTokens": 400000,
+      "inputCostPerMillionTokens": 1.25,
+      "outputCostPerMillionTokens": 10
+    },
+    {
+      "match": "gpt-5.4",
+      "provider": "OpenAI",
+      "contextWindowTokens": 400000,
+      "inputCostPerMillionTokens": 1.25,
+      "outputCostPerMillionTokens": 10
+    },
+    {
+      "match": "gpt-5.3-codex",
+      "provider": "OpenAI",
+      "contextWindowTokens": 400000,
+      "inputCostPerMillionTokens": 1.25,
+      "outputCostPerMillionTokens": 10
+    },
+    {
+      "match": "gpt-5.2",
+      "provider": "OpenAI",
+      "contextWindowTokens": 400000,
+      "inputCostPerMillionTokens": 1.25,
+      "outputCostPerMillionTokens": 10
+    },
+    {
+      "match": "minimax-m2.7-highspeed",
+      "provider": "MiniMax",
+      "contextWindowTokens": 200000,
+      "inputCostPerMillionTokens": 0.15,
+      "outputCostPerMillionTokens": 0.6
+    },
+    {
+      "match": "deepseek-v4-pro",
+      "provider": "DeepSeek",
+      "contextWindowTokens": 128000,
+      "inputCostPerMillionTokens": 0.27,
+      "outputCostPerMillionTokens": 1.1
+    }
+  ]
+}
