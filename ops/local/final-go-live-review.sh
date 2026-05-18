@@ -343,7 +343,8 @@ const review = {
         "repo/ops/tom-readonly/live-healthcheck-approval-review.sh status",
       ]
     : [
-        "CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK APPROVED_BY=Anan LOCAL_API_TOKEN=<本地令牌> ops/local/final-go-live-runner.sh approve-and-run",
+        "ops/local/final-go-live-approve-and-run-from-tom-token.sh status",
+        "CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK APPROVED_BY=Anan FINAL_GO_LIVE_OUTPUT=summary ops/local/final-go-live-approve-and-run-from-tom-token.sh approve-and-run",
         "repo/ops/tom-readonly/heartbeat-burn-alert-runner.sh status",
       ],
   safety: {

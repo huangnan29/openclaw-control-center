@@ -64,10 +64,13 @@ Tom 单 Oracle 上线下一步：
 - 已新增 `ops/local/final-go-live-approve-and-run-from-tom-token.sh`。
 - 该包装器用于最终人工批准时减少手工读取 `LOCAL_API_TOKEN` 的出错概率。
 - 已扩展 `status` 模式：只读检查 Tom 容器 token 长度和 approval review 状态，不要求确认短语，不打印 token，不执行 approval。
+- 已把 `final-go-live-review.sh status` 与 `final-go-live-completion-audit.sh status` 的下一步命令收敛到包装器：先运行 `ops/local/final-go-live-approve-and-run-from-tom-token.sh status`，再显式确认执行包装器 `approve-and-run`。
+- 新的 review/audit nextCommands 不再要求人工手写 `LOCAL_API_TOKEN=<本地令牌>`。
 - 缺少 `CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK` 或 `APPROVED_BY` 时，脚本在连接 Tom 前阻断。
 - `approve-and-run` 确认齐全后，它只读 SSH 到 Tom，通过 `docker inspect openclaw-control-center-readonly` 从容器环境读取 `LOCAL_API_TOKEN`，不打印、不落盘，然后作为子进程环境传给 `ops/local/final-go-live-runner.sh approve-and-run`。
 - 最终是否写 approval、打开一次性 live healthcheck 窗口、调用 live API，仍完全由既有 runner 的 review/readiness/approval 闸门决定。
 - 已新增 `test/final-go-live-approve-and-run-from-tom-token.test.ts`，覆盖 status 只读 preflight、缺确认不连接 Tom、成功委托时不打印 token、token 为空时不委托 runner。
+- 已更新 `test/final-go-live-review.test.ts` 与 `test/final-go-live-completion-audit.test.ts`，断言 review/audit 输出包装器命令且不再输出 `LOCAL_API_TOKEN=<本地令牌>`。
 - 真实 Tom `status` preflight 已返回 `preflight_ready_for_human_approval`，token length 为 28，review 为 `ready_for_human_approval_with_usage_alerts`，未委托 final runner。
 
 ## 本轮新增（approve-and-run 最终入口）

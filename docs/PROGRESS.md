@@ -1,5 +1,24 @@
 # Progress
 
+## Phase 165 (Final next-command convergence) — Completed
+- Scope:
+  - Make the final human-approval path less error-prone by removing manual token handling from the primary review/audit next commands.
+- Changed files:
+  - `ops/local/final-go-live-review.sh`
+  - `ops/local/final-go-live-completion-audit.sh`
+  - `test/final-go-live-review.test.ts`
+  - `test/final-go-live-completion-audit.test.ts`
+  - `task.md`
+- Implementation:
+  - Updated final review and completion audit to recommend the token-wrapper preflight first.
+  - The primary next command now uses `final-go-live-approve-and-run-from-tom-token.sh approve-and-run`.
+  - Added regression assertions that review/audit no longer emit `LOCAL_API_TOKEN=<本地令牌>` in their approval next commands.
+- Verification:
+  - `bash -n ops/local/final-go-live-review.sh ops/local/final-go-live-completion-audit.sh`
+  - `npm test -- test/final-go-live-review.test.ts test/final-go-live-completion-audit.test.ts`
+- Remaining gap:
+  - Final live healthcheck still requires Anan to explicitly run the approved wrapper command.
+
 ## Phase 164 (Final approval wrapper preflight) — Completed
 - Scope:
   - Add a no-approval preflight for the final token wrapper so Anan can verify readiness before running the approved live healthcheck.

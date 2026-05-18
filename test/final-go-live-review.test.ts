@@ -153,7 +153,9 @@ test("final go-live review 汇总人工批准前状态并保留用量告警为 w
     assert.equal(result.report.safety.opensLiveGate, false);
     assert.equal(result.report.safety.callsManagedActionsLiveApi, false);
     assert.equal(result.report.safety.writesOpenClawInstanceDirs, false);
-    assert(result.report.nextCommands.some((command: string) => command.includes("approve-and-run")));
+    assert(result.report.nextCommands.some((command: string) => command.includes("final-go-live-approve-and-run-from-tom-token.sh status")));
+    assert(result.report.nextCommands.some((command: string) => command.includes("final-go-live-approve-and-run-from-tom-token.sh approve-and-run")));
+    assert(!result.report.nextCommands.some((command: string) => command.includes("LOCAL_API_TOKEN=<本地令牌>")));
     const sshCalls = await readFile(harness.sshCalls, "utf8");
     assert.doesNotMatch(sshCalls, /approve runtime\/live-healthcheck-approval/);
     assert.doesNotMatch(sshCalls, /managed-actions\/live/);
