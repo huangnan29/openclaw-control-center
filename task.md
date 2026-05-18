@@ -77,6 +77,14 @@ Tom 单 Oracle 上线下一步：
 - 已更新 `test/final-go-live-runner.test.ts` 与 `test/live-healthcheck-approval-review.test.ts`，断言 prepare/approval review 等常见入口输出包装器命令。
 - 真实 Tom `status` preflight 已返回 `preflight_ready_for_human_approval`，token length 为 28，review 为 `ready_for_human_approval_with_usage_alerts`，未委托 final runner。
 
+## 本轮新增（heartbeat/token warning 明细）
+
+- 已增强 `ops/tom-readonly/heartbeat-burn-alert-runner.sh status`：保留原有 `latest.suspiciousRows` 数量字段，同时新增 `latest.suspiciousInstances` 明细。
+- 已增强 `ops/local/final-go-live-review.sh status`：当 heartbeat/token 告警存在实例明细时，warning 会展示实例与信号，例如 `main(periodic_small_growth)`。
+- completion audit 会继承 review 的 warning 明细，避免只看到“若干可疑实例”而不知道具体是谁。
+- 已通过只读 Tom 检查确认当前 warning 指向 `main(periodic_small_growth)`、`deepseek(periodic_small_growth)`、`spark(recent_spike)`；这些仍是 warning，不是最终上线硬阻塞。
+- 本次没有清空 `HEARTBEAT.md`、没有修改 OpenClaw 实例目录、没有重启实例、没有调用模型。
+
 ## 本轮新增（approve-and-run 最终入口）
 
 - 已扩展 `ops/local/final-go-live-runner.sh`，新增 `approve-and-run` 模式。

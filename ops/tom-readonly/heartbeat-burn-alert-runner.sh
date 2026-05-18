@@ -125,6 +125,9 @@ function status() {
           status: latest.status,
           generatedAt: latest.generatedAt,
           suspiciousRows: latest.summary?.suspiciousRows ?? 0,
+          suspiciousInstances: Array.isArray(latest.suspiciousRows)
+            ? latest.suspiciousRows.map(summarizeRow)
+            : [],
         }
       : undefined,
     nextCommands: [
@@ -183,7 +186,7 @@ function summarizeRow(row) {
   return {
     instanceId: row.instanceId,
     instanceName: row.instanceName,
-    signal: row.status,
+    signal: row.signal || row.status,
     totalDelta: row.totalDelta,
     recentDelta: row.recentDelta,
     medianDelta: row.medianDelta,

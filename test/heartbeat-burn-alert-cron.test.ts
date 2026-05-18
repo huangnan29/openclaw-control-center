@@ -160,6 +160,13 @@ test("heartbeat burn alert runner 写 control-center runtime 告警且不修改�
 
     const latest = JSON.parse(await readFile(join(alertDir, "latest.json"), "utf8"));
     assert.equal(latest.status, "heartbeat_burn_alert_triggered");
+    const status = runJson(RUNNER, ["status"], {
+      DEPLOY_DIR: dir,
+      HEARTBEAT_BURN_ALERT_DIR: alertDir,
+    });
+    assert.equal(status.report.latest.suspiciousRows, 1);
+    assert.equal(status.report.latest.suspiciousInstances[0].instanceId, "deepseek");
+    assert.equal(status.report.latest.suspiciousInstances[0].signal, "periodic_small_growth");
     const events = await readFile(join(alertDir, "events.ndjson"), "utf8");
     assert.match(events, /periodic_small_growth/);
   } finally {

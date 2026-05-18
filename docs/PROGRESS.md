@@ -1,5 +1,25 @@
 # Progress
 
+## Phase 167 (Heartbeat warning instance details) — Completed
+- Scope:
+  - Make heartbeat/token warnings actionable without requiring a separate SSH inspection.
+- Changed files:
+  - `ops/tom-readonly/heartbeat-burn-alert-runner.sh`
+  - `ops/local/final-go-live-review.sh`
+  - `test/heartbeat-burn-alert-cron.test.ts`
+  - `test/final-go-live-review.test.ts`
+  - `test/final-go-live-completion-audit.test.ts`
+- Implementation:
+  - `heartbeat-burn-alert-runner.sh status` now includes `latest.suspiciousInstances` while preserving the existing numeric `latest.suspiciousRows` field.
+  - `final-go-live-review.sh status` formats usage warnings with instance ids and signals when details are available.
+  - Completion audit inherits the clearer warning detail from the review output.
+- Verification:
+  - `bash -n ops/tom-readonly/heartbeat-burn-alert-runner.sh ops/local/final-go-live-review.sh ops/local/final-go-live-completion-audit.sh`
+  - `npm test -- test/heartbeat-burn-alert-cron.test.ts test/final-go-live-review.test.ts test/final-go-live-completion-audit.test.ts test/oss-readiness.test.ts`
+  - `npm run build`
+- Remaining gap:
+  - Final live healthcheck still requires Anan to explicitly run the confirmed wrapper `approve-and-run` command.
+
 ## Phase 166 (Prepare and approval review command convergence) — Completed
 - Scope:
   - Finish converging the common final-approval entrypoints onto the token-wrapper flow.

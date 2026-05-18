@@ -73,11 +73,15 @@ cat <<'JSON'
       "status": "heartbeat_burn_alert_status_ready",
       "latest": {
         "status": "heartbeat_burn_alert_triggered",
-        "suspiciousRows": 2
+        "suspiciousRows": 2,
+        "suspiciousInstances": [
+          { "instanceId": "main", "signal": "periodic_small_growth" },
+          { "instanceId": "deepseek", "signal": "periodic_small_growth" }
+        ]
       }
     }
   },
-  "warnings": ["heartbeat/token 告警当前存在 2 个可疑实例"],
+  "warnings": ["heartbeat/token 告警当前存在 2 个可疑实例：main(periodic_small_growth)，deepseek(periodic_small_growth)"],
   "safety": {
     "opensLiveGate": false,
     "callsManagedActionsLiveApi": false,
@@ -138,6 +142,7 @@ test("final go-live completion audit 标出人工 approval 为唯一硬阻塞", 
     assert.equal(result.report.status, "blocked_human_approval_required");
     assert.equal(result.report.progress.warnings, 1);
     assert(result.report.requirements.some((item: { id: string; status: string }) => item.id === "usage_alerts_review" && item.status === "warning"));
+    assert(result.report.requirements.some((item: { id: string; detail: string }) => item.id === "usage_alerts_review" && item.detail.includes("main(periodic_small_growth)")));
     assert(result.report.requirements.some((item: { id: string; status: string }) => item.id === "final_live_healthcheck" && item.status === "pending"));
     assert(result.report.hardBlockers.some((item: string) => item.includes("最终 live healthcheck")));
     assert.equal(result.report.safety.opensLiveGate, false);

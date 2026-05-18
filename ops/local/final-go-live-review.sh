@@ -227,6 +227,21 @@ function alertSummary(report) {
   };
 }
 
+function suspiciousInstanceLabel(row) {
+  const instanceId = row?.instanceId || "unknown";
+  const signal = row?.signal || "unknown";
+  return `${instanceId}(${signal})`;
+}
+
+function usageWarningText(latest) {
+  const count = latest?.suspiciousRows ?? 0;
+  const instances = Array.isArray(latest?.suspiciousInstances) ? latest.suspiciousInstances : [];
+  if (instances.length > 0) {
+    return `heartbeat/token 告警当前存在 ${count || instances.length} 个可疑实例：${instances.map(suspiciousInstanceLabel).join("，")}`;
+  }
+  return `heartbeat/token 告警当前存在 ${count || "若干"} 个可疑实例`;
+}
+
 function decide(parts) {
   const issues = [];
   const warnings = [];
@@ -246,7 +261,7 @@ function decide(parts) {
   }
   const heartbeatAlert = alertSummary(parts.heartbeatAlert.report);
   if (heartbeatAlert.latest?.suspiciousRows > 0 || heartbeatAlert.latest?.status === "heartbeat_burn_alert_triggered") {
-    warnings.push(`heartbeat/token 告警当前存在 ${heartbeatAlert.latest?.suspiciousRows ?? "若干"} 个可疑实例`);
+    warnings.push(usageWarningText(heartbeatAlert.latest));
   }
 
   return {

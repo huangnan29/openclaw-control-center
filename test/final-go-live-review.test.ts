@@ -102,7 +102,11 @@ if printf '%s\\n' "$*" | grep -q 'heartbeat-burn-alert-runner.sh status'; then
   "latest": {
     "status": "heartbeat_burn_alert_triggered",
     "generatedAt": "2026-05-18T15:45:02.278Z",
-    "suspiciousRows": 2
+    "suspiciousRows": 2,
+    "suspiciousInstances": [
+      { "instanceId": "main", "signal": "periodic_small_growth" },
+      { "instanceId": "deepseek", "signal": "periodic_small_growth" }
+    ]
   }
 }
 JSON
@@ -150,6 +154,8 @@ test("final go-live review 汇总人工批准前状态并保留用量告警为 w
     assert.equal(result.report.summary.dryRunInboxCron.needsUpdate, false);
     assert.equal(result.report.summary.heartbeatBurnAlertCron.needsUpdate, false);
     assert.equal(result.report.summary.heartbeatBurnAlert.latest.suspiciousRows, 2);
+    assert(result.report.warnings.some((warning: string) => warning.includes("main(periodic_small_growth)")));
+    assert(result.report.warnings.some((warning: string) => warning.includes("deepseek(periodic_small_growth)")));
     assert.equal(result.report.safety.opensLiveGate, false);
     assert.equal(result.report.safety.callsManagedActionsLiveApi, false);
     assert.equal(result.report.safety.writesOpenClawInstanceDirs, false);
