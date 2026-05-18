@@ -25,6 +25,11 @@ import { computeBudgetSummary } from "../runtime/budget-governance";
 import { BUDGET_POLICY_PATH, loadBudgetPolicy } from "../runtime/budget-policy";
 import { commanderExceptions, commanderExceptionsFeed } from "../runtime/commander";
 import { buildCronOverview } from "../runtime/cron-overview";
+import {
+  collectorHistoryPathForSnapshotPath,
+  loadCollectorHistoryFile,
+  type CollectorHistorySample,
+} from "../runtime/collector-history";
 import { buildDoneChecklist } from "../runtime/done-checklist";
 import {
   filterAuditTimeline,
@@ -1214,17 +1219,20 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
                 ? pickUiText(language, "Server not found. Showing all readonly instances.", "未找到该服务器，已显示全部只读实例。")
                 : undefined,
             ].filter((value): value is string => typeof value === "string" && value.length > 0);
-            const [managedActionAudit, managedActionReadiness] = await Promise.all([
+            const overviewSnapshot = scopedSnapshot ?? snapshot;
+            const [managedActionAudit, managedActionReadiness, historyView] = await Promise.all([
               readManagedActionDryRunAudits({ limit: 8 }),
               readManagedActionReadiness(),
+              loadMultiInstanceHistoryView(overviewSnapshot),
             ]);
             const html = renderMultiInstanceOverview(
-              scopedSnapshot ?? snapshot,
+              overviewSnapshot,
               language,
               warningParts.join("; ") || undefined,
               scopedSnapshot ? requestedServerId : undefined,
               managedActionAudit,
               managedActionReadiness,
+              historyView,
             );
             return writeText(res, 200, html, "text/html; charset=utf-8");
           }
@@ -6218,6 +6226,13 @@ interface FleetDistributionRow {
   tone?: string;
 }
 
+interface MultiInstanceHistoryView {
+  status: "connected" | "partial" | "not_connected";
+  detail: string;
+  sourcePaths: string[];
+  samples: CollectorHistorySample[];
+}
+
 function buildInstanceUiMetrics(item: InstanceSnapshot): MultiInstanceUiMetrics {
   const sessions = item.snapshot.sessions;
   const statusBySession = new Map(item.snapshot.statuses.map((status) => [status.sessionKey, status]));
@@ -6395,6 +6410,207 @@ function renderMultiInstanceStatsPanel(items: InstanceSnapshot[], language: UiLa
       ${renderFleetDistributionChart(t("Session state distribution", "会话状态分布"), stateRows, language)}
     </div>
   </section>`;
+}
+
+async function loadMultiInstanceHistoryView(snapshot: MultiInstanceSnapshot): Promise<MultiInstanceHistoryView> {
+  const instanceIds = new Set(snapshot.instances.map((item) => item.instance.id));
+  const historyPaths = [
+    ...new Set(
+      snapshot.instances
+        .map((item) => item.instance.collectorSnapshotPath ?? item.collector?.sourcePath)
+        .filter((path): path is string => typeof path === "string" && path.trim().length > 0)
+        .map((path) => collectorHistoryPathForSnapshotPath(path)),
+    ),
+  ];
+
+  if (historyPaths.length === 0) {
+    return {
+      status: "not_connected",
+      detail: "collector history source is not configured.",
+      sourcePaths: [],
+      samples: [],
+    };
+  }
+
+  const results = await Promise.all(historyPaths.map((path) => loadCollectorHistoryFile(path)));
+  const connected = results.filter((result) => result.status === "connected" && result.history);
+  const samples = connected
+    .flatMap((result) => result.history?.samples.map((sample) => filterHistorySampleForInstances(sample, instanceIds)) ?? [])
+    .filter((sample): sample is CollectorHistorySample => Boolean(sample))
+    .sort((a, b) => Date.parse(a.generatedAt) - Date.parse(b.generatedAt));
+
+  return {
+    status: connected.length === 0 ? "not_connected" : connected.length === results.length ? "connected" : "partial",
+    detail:
+      connected.length === 0
+        ? results.map((result) => result.detail).join("; ")
+        : `loaded ${samples.length} scoped history sample${samples.length === 1 ? "" : "s"} from ${connected.length} collector file${connected.length === 1 ? "" : "s"}.`,
+    sourcePaths: results.map((result) => result.sourcePath),
+    samples,
+  };
+}
+
+function filterHistorySampleForInstances(
+  sample: CollectorHistorySample,
+  instanceIds: Set<string>,
+): CollectorHistorySample | undefined {
+  const instances = sample.instances.filter((item) => instanceIds.has(item.id));
+  if (instances.length === 0) return undefined;
+  return {
+    ...sample,
+    totals: summarizeHistorySamples(instances),
+    instances,
+  };
+}
+
+function summarizeHistorySamples(instances: CollectorHistorySample["instances"]): CollectorHistorySample["totals"] {
+  return instances.reduce(
+    (totals, item) => {
+      totals.instances += 1;
+      if (item.status === "connected") totals.connected += 1;
+      if (item.status === "partial") totals.partial += 1;
+      if (item.status === "not_connected") totals.notConnected += 1;
+      totals.sessions += item.sessions;
+      totals.running += item.running;
+      totals.blocked += item.blocked;
+      totals.errors += item.errors;
+      totals.pendingApprovals += item.pendingApprovals;
+      totals.tokensIn += item.tokensIn;
+      totals.tokensOut += item.tokensOut;
+      totals.totalTokens += item.totalTokens;
+      totals.cost += item.cost;
+      return totals;
+    },
+    {
+      instances: 0,
+      connected: 0,
+      partial: 0,
+      notConnected: 0,
+      sessions: 0,
+      running: 0,
+      blocked: 0,
+      errors: 0,
+      pendingApprovals: 0,
+      tokensIn: 0,
+      tokensOut: 0,
+      totalTokens: 0,
+      cost: 0,
+    },
+  );
+}
+
+function renderMultiInstanceTrendPanel(history: MultiInstanceHistoryView | undefined, language: UiLanguage): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const samples = history?.samples.filter((sample) => !Number.isNaN(Date.parse(sample.generatedAt))) ?? [];
+  const latest = samples[samples.length - 1];
+  const latestLabel = latest ? formatUiTimestamp(latest.generatedAt, language) : t("Not available", "暂无");
+  const sourceDetail = history?.sourcePaths.length
+    ? history.sourcePaths.map((path) => basenameForUi(path)).join(", ")
+    : t("No history file yet", "暂无历史文件");
+  const statusDetail = history?.status === "connected" || history?.status === "partial"
+    ? `${t("Samples loaded", "已加载样本")} ${samples.length}`
+    : t("History file is not connected yet.", "历史文件尚未接入。");
+  const body =
+    samples.length === 0
+      ? `<div class="empty-state">${escapeHtml(t("History will appear after the next collector snapshot runs.", "下一次 collector 快照运行后会开始出现历史趋势。"))}</div>`
+      : `<div class="trend-grid">
+          ${renderTrendCard(
+            t("24h usage trend", "24h 用量趋势"),
+            t("Snapshot total tokens", "快照总 token"),
+            samplesWithinHours(samples, 24),
+            (sample) => sample.totals.totalTokens,
+            formatInt,
+            language,
+          )}
+          ${renderTrendCard(
+            t("7d session trend", "7d 会话趋势"),
+            t("Visible sessions", "可见会话数"),
+            samplesWithinHours(samples, 24 * 7),
+            (sample) => sample.totals.sessions,
+            formatInt,
+            language,
+          )}
+          ${renderTrendCard(
+            t("7d risk trend", "7d 风险趋势"),
+            t("Blocked + errors + pending approvals", "阻塞 + 错误 + 待审批"),
+            samplesWithinHours(samples, 24 * 7),
+            (sample) => sample.totals.blocked + sample.totals.errors + sample.totals.pendingApprovals,
+            formatInt,
+            language,
+          )}
+        </div>`;
+
+  return `<section class="panel" id="fleet-trends">
+    <div class="panel-head">
+      <h2>${escapeHtml(t("Historical trends", "历史趋势"))}</h2>
+      <div class="meta">${escapeHtml(t("Readonly collector history; updated by snapshot runs.", "只读 collector 历史，由快照任务更新。"))}</div>
+    </div>
+    ${renderDataSourceNote(language, `${t("Collector history", "collector 历史")} · ${sourceDetail}`)}
+    <div class="meta">${escapeHtml(t("Latest sample", "最新样本"))}${escapeHtml(language === "zh" ? "：" : ": ")}${escapeHtml(latestLabel)} · ${escapeHtml(statusDetail)}</div>
+    ${body}
+  </section>`;
+}
+
+function renderTrendCard(
+  title: string,
+  metricLabel: string,
+  samples: CollectorHistorySample[],
+  pickValue: (sample: CollectorHistorySample) => number,
+  formatValue: (value: number) => string,
+  language: UiLanguage,
+): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const visibleSamples = downsampleHistorySamples(samples, 48);
+  const values = visibleSamples.map((sample) => Math.max(0, pickValue(sample)));
+  const max = Math.max(...values, 1);
+  const firstValue = samples.length > 0 ? Math.max(0, pickValue(samples[0] as CollectorHistorySample)) : 0;
+  const latestValue = samples.length > 0 ? Math.max(0, pickValue(samples[samples.length - 1] as CollectorHistorySample)) : 0;
+  const delta = latestValue - firstValue;
+  const bars = visibleSamples
+    .map((sample, index) => {
+      const value = values[index] ?? 0;
+      const height = Math.max(4, (value / max) * 100);
+      return `<span class="trend-bar" style="height:${height.toFixed(2)}%;" title="${escapeHtml(formatUiTimestamp(sample.generatedAt, language))}: ${escapeHtml(formatValue(value))}"></span>`;
+    })
+    .join("");
+  return `<article class="trend-card">
+    <div class="trend-card-head">
+      <div>
+        <div class="trend-title">${escapeHtml(title)}</div>
+        <div class="meta">${escapeHtml(metricLabel)}</div>
+      </div>
+      <strong>${escapeHtml(formatValue(latestValue))}</strong>
+    </div>
+    <div class="trend-bars" aria-label="${escapeHtml(title)}">${bars || `<span class="trend-bar empty"></span>`}</div>
+    <div class="trend-summary">
+      <span>${escapeHtml(t("Samples", "样本"))}: ${samples.length}</span>
+      <span>${escapeHtml(t("Change", "变化"))}: ${escapeHtml(formatSignedInt(delta))}</span>
+    </div>
+  </article>`;
+}
+
+function samplesWithinHours(samples: CollectorHistorySample[], hours: number): CollectorHistorySample[] {
+  if (samples.length <= 1) return samples;
+  const latest = samples[samples.length - 1];
+  const latestMs = Date.parse(latest?.generatedAt ?? "");
+  if (!Number.isFinite(latestMs)) return samples;
+  const scoped = samples.filter((sample) => Date.parse(sample.generatedAt) >= latestMs - hours * 60 * 60 * 1000);
+  return scoped.length > 0 ? scoped : samples;
+}
+
+function downsampleHistorySamples(samples: CollectorHistorySample[], limit: number): CollectorHistorySample[] {
+  if (samples.length <= limit) return samples;
+  const step = Math.ceil(samples.length / limit);
+  const downsampled = samples.filter((_, index) => index % step === 0);
+  const last = samples[samples.length - 1];
+  if (last && downsampled[downsampled.length - 1]?.generatedAt !== last.generatedAt) downsampled.push(last);
+  return downsampled;
+}
+
+function formatSignedInt(value: number): string {
+  const rounded = Math.round(value);
+  if (rounded > 0) return `+${formatInt(rounded)}`;
+  return formatInt(rounded);
 }
 
 interface ServerUiSummary {
@@ -7282,6 +7498,7 @@ function renderMultiInstanceOverview(
   selectedServerId?: string,
   managedActionAudit?: Awaited<ReturnType<typeof readManagedActionDryRunAudits>>,
   managedActionReadiness?: ManagedActionLiveReadinessSnapshot,
+  historyView?: MultiInstanceHistoryView,
 ): string {
   const t = (en: string, zh: string): string => pickUiText(language, en, zh);
   const totalChips = [
@@ -7351,6 +7568,15 @@ function renderMultiInstanceOverview(
     .pie-swatch { width: 10px; height: 10px; border-radius: 999px; }
     .pie-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pie-val { color: var(--muted); font-variant-numeric: tabular-nums; }
+    .trend-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-top: 12px; }
+    .trend-card { border: 1px solid var(--border); border-radius: 8px; background: rgba(255, 255, 255, 0.76); padding: 12px; min-width: 0; }
+    .trend-card-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+    .trend-card-head strong { font-size: 20px; line-height: 1; font-variant-numeric: tabular-nums; }
+    .trend-title { font-weight: 700; }
+    .trend-bars { height: 96px; display: flex; align-items: end; gap: 3px; margin-top: 12px; padding-top: 8px; border-top: 1px solid rgba(17, 24, 39, 0.08); }
+    .trend-bar { flex: 1 1 3px; min-width: 3px; border-radius: 999px 999px 0 0; background: linear-gradient(180deg, #4e79a7, #76b7b2); }
+    .trend-bar.empty { height: 4px; background: rgba(17, 24, 39, 0.12); }
+    .trend-summary { display: flex; justify-content: space-between; gap: 10px; margin-top: 8px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
     .overview-layout { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(320px, 0.9fr); gap: 12px; align-items: start; margin-top: 14px; }
     .instance-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
     .card, .panel { border: 1px solid var(--border); border-radius: 8px; background: #fff; padding: 14px; }
@@ -7417,6 +7643,7 @@ function renderMultiInstanceOverview(
     ${warningHtml}
     <section class="status-strip">${totalChips}</section>
     ${renderMultiInstanceStatsPanel(snapshot.instances, language)}
+    ${renderMultiInstanceTrendPanel(historyView, language)}
     ${renderServerHealthPanel(snapshot, language, selectedServerId)}
     ${renderCollectorSnapshotPanel(snapshot.instances, language, snapshot.generatedAt)}
     ${renderManagedActionReadinessPanel(managedActionReadiness ?? buildFallbackManagedActionLiveReadiness(), language)}

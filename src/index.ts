@@ -22,6 +22,10 @@ import {
   selectCollectorExportScope,
   writeCollectorSnapshotFile,
 } from "./runtime/collector-exporter";
+import {
+  appendCollectorHistorySample,
+  collectorHistoryPathForSnapshotPath,
+} from "./runtime/collector-history";
 import { validateExportFileDryRun } from "./runtime/import-dry-run";
 import { loadOpenClawInstanceConfigs } from "./runtime/instance-config";
 import { monitorIntervalMs, nextContinuousMonitorDelayMs, runMonitorOnce } from "./runtime/monitor";
@@ -223,15 +227,19 @@ async function runCommand(
 
   if (command === "collector-snapshot") {
     const outputPath = resolveCollectorSnapshotOutput(arg);
+    const historyPath = process.env.OPENCLAW_COLLECTOR_HISTORY_PATH?.trim() || collectorHistoryPathForSnapshotPath(outputPath);
     const scope = selectCollectorExportScope(loadOpenClawInstanceConfigs(), process.env.OPENCLAW_COLLECTOR_SERVER_ID);
     const snapshot = await buildCollectorSnapshot(scope);
     const written = await writeCollectorSnapshotFile(snapshot, outputPath);
+    const history = await appendCollectorHistorySample(snapshot, historyPath);
     console.log("[mission-control] collector snapshot", {
       serverId: snapshot.serverId,
       serverName: snapshot.serverName,
       generatedAt: snapshot.generatedAt,
       outputPath: written.path,
       instances: written.instances,
+      historyPath: history.path,
+      historySamples: history.samples,
     });
     return;
   }
