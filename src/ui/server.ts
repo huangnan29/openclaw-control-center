@@ -236,6 +236,7 @@ import type {
   ReadModelSnapshot,
   RoomParticipantRole,
   RoomStage,
+  SessionStatusSnapshot,
   TaskListItem,
   TaskState,
 } from "../types";
@@ -525,6 +526,12 @@ interface DashboardSearchResult {
 
 type UsageView = "cumulative" | "today";
 type OverviewTrendWindow = "24h" | "7d";
+
+interface MultiInstanceUsageFilters {
+  instanceId?: string;
+  agentId?: string;
+  model?: string;
+}
 
 interface DashboardOptions {
   section: DashboardSection;
@@ -1179,6 +1186,7 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
         const compactStatusStrip = resolveCompactStatusStrip(url.searchParams, prefs.preferences.compactStatusStrip);
         const usageView = resolveUsageView(url.searchParams);
         const overviewTrendWindow = resolveOverviewTrendWindow(url.searchParams);
+        const multiInstanceUsageFilters = resolveMultiInstanceUsageFilters(url.searchParams);
         const search = resolveDashboardSearchQuery(url.searchParams);
         const selectedRoomId = normalizeQueryString(url.searchParams.get("roomId"), "roomId", 160, true);
         const selectedTaskCardId = normalizeQueryString(url.searchParams.get("taskCardId"), "taskCardId", 180, true);
@@ -1238,6 +1246,7 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
               historyView,
               section,
               overviewTrendWindow,
+              multiInstanceUsageFilters,
             );
             return writeText(res, 200, html, "text/html; charset=utf-8");
           }
@@ -7558,6 +7567,155 @@ function buildUsageModelRows(items: InstanceSnapshot[]): Array<{
   return [...rows.values()].sort((a, b) => b.tokensIn + b.tokensOut - (a.tokensIn + a.tokensOut));
 }
 
+function hasMultiInstanceUsageFilters(filters: MultiInstanceUsageFilters): boolean {
+  return Boolean(filters.instanceId || filters.agentId || filters.model);
+}
+
+function usageStatusModel(status: SessionStatusSnapshot): string {
+  return status.model?.trim() || "unknown";
+}
+
+function applyMultiInstanceUsageFilters(items: InstanceSnapshot[], filters: MultiInstanceUsageFilters): InstanceSnapshot[] {
+  const scopedItems = filters.instanceId ? items.filter((item) => item.instance.id === filters.instanceId) : items;
+  if (!filters.agentId && !filters.model) return scopedItems;
+
+  return scopedItems
+    .map((item): InstanceSnapshot | undefined => {
+      const sessionByKey = new Map(item.snapshot.sessions.map((session) => [session.sessionKey, session]));
+      const statuses = item.snapshot.statuses.filter((status) => {
+        if (filters.model && usageStatusModel(status) !== filters.model) return false;
+        if (filters.agentId) {
+          const session = sessionByKey.get(status.sessionKey);
+          if (!session || resolveSessionAgentId(session) !== filters.agentId) return false;
+        }
+        return true;
+      });
+      const statusSessionKeys = new Set(statuses.map((status) => status.sessionKey));
+      const sessions = item.snapshot.sessions.filter((session) => {
+        if (filters.agentId && resolveSessionAgentId(session) !== filters.agentId) return false;
+        if (filters.model && !statusSessionKeys.has(session.sessionKey)) return false;
+        return true;
+      });
+      const sessionKeys = new Set(sessions.map((session) => session.sessionKey));
+      if (sessions.length === 0 && statuses.length === 0) return undefined;
+      const tasks = item.snapshot.tasks.tasks.filter((task) => {
+        if (task.sessionKeys.some((sessionKey) => sessionKeys.has(sessionKey))) return true;
+        if (filters.agentId && !filters.model) return normalizeAgentId(task.owner) === filters.agentId;
+        return false;
+      });
+      const taskProjectIds = new Set(tasks.map((task) => task.projectId));
+      const approvals = item.snapshot.approvals.filter((approval) => {
+        if (approval.sessionKey && sessionKeys.has(approval.sessionKey)) return true;
+        if (filters.agentId && !filters.model) return normalizeAgentId(approval.agentId) === filters.agentId;
+        return false;
+      });
+      const agentRoster = item.snapshot.agentRoster && filters.agentId
+        ? {
+            ...item.snapshot.agentRoster,
+            entries: item.snapshot.agentRoster.entries.filter((entry) => normalizeAgentId(entry.agentId) === filters.agentId),
+          }
+        : item.snapshot.agentRoster;
+      return {
+        ...item,
+        snapshot: {
+          ...item.snapshot,
+          sessions,
+          statuses,
+          approvals,
+          projects: {
+            ...item.snapshot.projects,
+            projects: item.snapshot.projects.projects.filter((project) => taskProjectIds.has(project.projectId)),
+          },
+          projectSummaries: item.snapshot.projectSummaries.filter((project) => taskProjectIds.has(project.projectId)),
+          tasks: {
+            ...item.snapshot.tasks,
+            tasks,
+            agentBudgets: filters.agentId
+              ? item.snapshot.tasks.agentBudgets.filter((budget) => normalizeAgentId(budget.agentId) === filters.agentId)
+              : item.snapshot.tasks.agentBudgets,
+          },
+          agentRoster,
+        },
+      };
+    })
+    .filter((item): item is InstanceSnapshot => Boolean(item));
+}
+
+function buildMultiInstanceUsageFilterHref(
+  language: UiLanguage,
+  selectedServerId: string | undefined,
+  filters: MultiInstanceUsageFilters,
+): string {
+  const params = new URLSearchParams();
+  params.set("section", "usage-cost");
+  params.set("lang", language);
+  if (selectedServerId) params.set("server", selectedServerId);
+  if (filters.instanceId) params.set("usage_instance", filters.instanceId);
+  if (filters.agentId) params.set("usage_agent", filters.agentId);
+  if (filters.model) params.set("usage_model", filters.model);
+  return `/?${params.toString()}`;
+}
+
+function renderUsageFilterSelect(
+  name: string,
+  label: string,
+  allLabel: string,
+  options: Array<{ value: string; label: string }>,
+  selectedValue: string | undefined,
+): string {
+  const optionHtml = [
+    `<option value="">${escapeHtml(allLabel)}</option>`,
+    ...options.map((option) => `<option value="${escapeHtml(option.value)}"${selectedValue === option.value ? " selected" : ""}>${escapeHtml(option.label)}</option>`),
+  ].join("");
+  return `<label><span>${escapeHtml(label)}</span><select name="${escapeHtml(name)}">${optionHtml}</select></label>`;
+}
+
+function renderMultiInstanceUsageFiltersPanel(
+  items: InstanceSnapshot[],
+  language: UiLanguage,
+  selectedServerId: string | undefined,
+  filters: MultiInstanceUsageFilters,
+): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const instanceOptions = items.map((item) => ({ value: item.instance.id, label: item.instance.name }));
+  const agentOptions = [...new Map(
+    buildMultiInstanceAgentRows(items).map((row) => [
+      row.agentId,
+      {
+        value: row.agentId,
+        label: row.displayName === row.agentId ? row.agentId : `${row.displayName} (${row.agentId})`,
+      },
+    ]),
+  ).values()].sort((a, b) => a.label.localeCompare(b.label));
+  const modelOptions = buildUsageModelRows(items).map((row) => ({ value: row.model, label: `${row.model} · ${formatInt(row.tokensIn + row.tokensOut)}` }));
+  const filteredItems = applyMultiInstanceUsageFilters(items, filters);
+  const filteredStatusCount = filteredItems.reduce((sum, item) => sum + item.snapshot.statuses.length, 0);
+  const filteredTokenCount = filteredItems.reduce((sum, item) => sum + item.snapshot.statuses.reduce((inner, status) => inner + (status.tokensIn ?? 0) + (status.tokensOut ?? 0), 0), 0);
+  const resetHref = buildMultiInstanceUsageFilterHref(language, selectedServerId, {});
+  const hiddenServer = selectedServerId ? `<input type="hidden" name="server" value="${escapeHtml(selectedServerId)}" />` : "";
+  const summary = hasMultiInstanceUsageFilters(filters)
+    ? `${t("Filtered status rows", "筛选后状态行")} ${formatInt(filteredStatusCount)} · ${t("Usage", "用量")} ${formatInt(filteredTokenCount)}`
+    : t("Showing all visible usage rows.", "显示全部可见用量行。");
+  return `<section class="panel usage-filter-panel">
+    <div class="panel-head">
+      <h2>${escapeHtml(t("Usage filters", "用量筛选"))}</h2>
+      <div class="meta">${escapeHtml(summary)}</div>
+    </div>
+    <form class="usage-filter-form" method="get" action="/">
+      <input type="hidden" name="section" value="usage-cost" />
+      <input type="hidden" name="lang" value="${escapeHtml(language)}" />
+      ${hiddenServer}
+      ${renderUsageFilterSelect("usage_instance", t("Instance", "实例"), t("All instances", "全部实例"), instanceOptions, filters.instanceId)}
+      ${renderUsageFilterSelect("usage_agent", "Agent", t("All agents", "全部 Agent"), agentOptions, filters.agentId)}
+      ${renderUsageFilterSelect("usage_model", "Model", t("All models", "全部模型"), modelOptions, filters.model)}
+      <div class="usage-filter-actions">
+        <button type="submit">${escapeHtml(t("Apply", "应用"))}</button>
+        <a href="${escapeHtml(resetHref)}">${escapeHtml(t("Reset", "重置"))}</a>
+      </div>
+    </form>
+  </section>`;
+}
+
 function renderMultiInstanceAgentRosterPanel(items: InstanceSnapshot[], language: UiLanguage, title?: string): string {
   const t = (en: string, zh: string): string => pickUiText(language, en, zh);
   const rows = buildMultiInstanceAgentRows(items)
@@ -7959,20 +8117,23 @@ function renderMultiInstanceSectionBody(input: {
   managedActionReadiness?: ManagedActionLiveReadinessSnapshot;
   selectedServerId?: string;
   overviewTrendWindow: OverviewTrendWindow;
+  usageFilters: MultiInstanceUsageFilters;
 }): string {
   const { snapshot, language, activeSection } = input;
   const t = (en: string, zh: string): string => pickUiText(language, en, zh);
   if (activeSection === "usage-cost") {
+    const usageItems = applyMultiInstanceUsageFilters(snapshot.instances, input.usageFilters);
     return `
+      ${renderMultiInstanceUsageFiltersPanel(snapshot.instances, language, input.selectedServerId, input.usageFilters)}
       ${renderMultiInstanceTrendPanel(input.historyView, language)}
       <section class="overview-layout">
         <div>
-          ${renderMultiInstanceUsagePanel(snapshot.instances, language, t("Usage overview", "用量总览"))}
-          ${renderMultiInstanceUsageByAgentPanel(snapshot.instances, language)}
+          ${renderMultiInstanceUsagePanel(usageItems, language, t("Usage overview", "用量总览"))}
+          ${renderMultiInstanceUsageByAgentPanel(usageItems, language)}
         </div>
         <div>
-          ${renderMultiInstanceStatsPanel(snapshot.instances, language)}
-          ${renderCollectorSnapshotPanel(snapshot.instances, language, snapshot.generatedAt)}
+          ${renderMultiInstanceStatsPanel(usageItems, language)}
+          ${renderCollectorSnapshotPanel(usageItems.length > 0 ? usageItems : snapshot.instances, language, snapshot.generatedAt)}
         </div>
       </section>`;
   }
@@ -8068,6 +8229,7 @@ function renderMultiInstanceOverview(
   historyView?: MultiInstanceHistoryView,
   activeSection: DashboardSection = "overview",
   overviewTrendWindow: OverviewTrendWindow = "24h",
+  usageFilters: MultiInstanceUsageFilters = {},
 ): string {
   const t = (en: string, zh: string): string => pickUiText(language, en, zh);
   const totalChips = [
@@ -8102,6 +8264,7 @@ function renderMultiInstanceOverview(
     managedActionReadiness,
     selectedServerId,
     overviewTrendWindow,
+    usageFilters,
   });
 
   return `<!doctype html>
@@ -8165,6 +8328,13 @@ function renderMultiInstanceOverview(
     .segment-item.active { color: #fff; background: #4e79a7; }
     .overview-drill-row { display: flex; flex-wrap: wrap; gap: 8px; }
     .overview-drill-row a { border: 1px solid rgba(78, 121, 167, 0.26); border-radius: 999px; padding: 7px 10px; color: #315f8d; background: rgba(78, 121, 167, 0.08); font-size: 13px; font-weight: 700; text-decoration: none; }
+    .usage-filter-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; align-items: end; }
+    .usage-filter-form label { display: grid; gap: 5px; min-width: 0; }
+    .usage-filter-form label span { color: var(--muted); font-size: 12px; }
+    .usage-filter-form select { width: 100%; border: 1px solid var(--border); border-radius: 8px; background: #fff; color: var(--text); padding: 9px 10px; font: inherit; }
+    .usage-filter-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .usage-filter-actions button, .usage-filter-actions a { border: 1px solid rgba(78, 121, 167, 0.28); border-radius: 8px; padding: 9px 12px; background: #4e79a7; color: #fff; font-weight: 700; text-decoration: none; font: inherit; cursor: pointer; }
+    .usage-filter-actions a { background: rgba(78, 121, 167, 0.08); color: #315f8d; }
     .overview-context-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; color: var(--muted); font-size: 12px; }
     .overview-context-row span { border: 1px solid rgba(17, 24, 39, 0.1); border-radius: 999px; background: rgba(255, 255, 255, 0.7); padding: 5px 9px; }
     .overview-chart-wall { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
@@ -14813,6 +14983,14 @@ function resolveUsageView(searchParams: URLSearchParams): UsageView {
 function resolveOverviewTrendWindow(searchParams: URLSearchParams): OverviewTrendWindow {
   const window = normalizeQueryString(searchParams.get("window"), "window", 16, false);
   return window === "7d" ? "7d" : "24h";
+}
+
+function resolveMultiInstanceUsageFilters(searchParams: URLSearchParams): MultiInstanceUsageFilters {
+  return {
+    instanceId: normalizeQueryString(searchParams.get("usage_instance"), "usage_instance", 120, false),
+    agentId: normalizeQueryString(searchParams.get("usage_agent"), "usage_agent", 160, false),
+    model: normalizeQueryString(searchParams.get("usage_model"), "usage_model", 160, false),
+  };
 }
 
 function resolveUiLanguage(searchParams: URLSearchParams, fallback: UiLanguage): UiLanguage {
