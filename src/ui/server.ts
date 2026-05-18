@@ -6413,6 +6413,115 @@ function renderMultiInstanceStatsPanel(items: InstanceSnapshot[], language: UiLa
   </section>`;
 }
 
+function renderMultiInstanceOverviewDashboard(
+  snapshot: MultiInstanceSnapshot,
+  history: MultiInstanceHistoryView | undefined,
+  language: UiLanguage,
+): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const metrics = snapshot.instances.map((item) => ({ item, metrics: buildInstanceUiMetrics(item) }));
+  const collectorStates = snapshot.instances.map((item) => buildCollectorSnapshotUiState(item, language, snapshot.generatedAt));
+  const freshCollectors = collectorStates.filter((item) => item.tone === "connected").length;
+  const riskSignals = snapshot.totals.blocked + snapshot.totals.errors + snapshot.totals.pendingApprovals;
+  const totals = metrics.reduce(
+    (acc, entry) => ({
+      agents: acc.agents + entry.metrics.agents,
+      projects: acc.projects + entry.metrics.projects,
+      tasks: acc.tasks + entry.metrics.tasks,
+      cronJobs: acc.cronJobs + entry.metrics.cronJobs,
+      tokens: acc.tokens + entry.metrics.totalTokens,
+      cost: acc.cost + entry.metrics.cost,
+    }),
+    { agents: 0, projects: 0, tasks: 0, cronJobs: 0, tokens: 0, cost: 0 },
+  );
+  const latestActivityAt = metrics
+    .map((entry) => entry.metrics.lastActivityAt)
+    .filter((value): value is string => typeof value === "string" && !Number.isNaN(Date.parse(value)))
+    .sort((a, b) => Date.parse(b) - Date.parse(a))[0];
+  const samples = history?.samples.filter((sample) => !Number.isNaN(Date.parse(sample.generatedAt))) ?? [];
+  const latestSample = samples[samples.length - 1];
+  const instanceShareRows = buildInstanceUsageShareRows(metrics);
+  const workloadRows: FleetDistributionRow[] = metrics
+    .map(({ item, metrics: itemMetrics }) => ({
+      label: item.instance.name,
+      value: itemMetrics.sessions,
+      detail: `${t("Running", "运行中")} ${itemMetrics.running} · ${t("Tasks", "任务")} ${itemMetrics.tasks}`,
+      tone: itemMetrics.errors > 0 ? "danger" : itemMetrics.blocked + itemMetrics.pendingApprovals > 0 ? "warn" : "ok",
+    }))
+    .sort((a, b) => b.value - a.value);
+  const riskRows: FleetDistributionRow[] = metrics
+    .map(({ item, metrics: itemMetrics }) => ({
+      label: item.instance.name,
+      value: itemMetrics.blocked + itemMetrics.errors + itemMetrics.pendingApprovals,
+      detail: `${t("Blocked", "阻塞")} ${itemMetrics.blocked} · ${t("Errors", "错误")} ${itemMetrics.errors} · ${t("Pending", "待审")} ${itemMetrics.pendingApprovals}`,
+      tone: itemMetrics.errors > 0 ? "danger" : itemMetrics.blocked + itemMetrics.pendingApprovals > 0 ? "warn" : "ok",
+    }))
+    .sort((a, b) => b.value - a.value);
+  const inventoryRows: FleetDistributionRow[] = [
+    { label: "Agent", value: totals.agents, detail: t("Visible configured and derived agents.", "可见的配置与推导 Agent。"), tone: "active" },
+    { label: t("Tasks", "任务"), value: totals.tasks, detail: t("Readonly task records.", "只读任务记录。"), tone: "ok" },
+    { label: t("Projects", "项目"), value: totals.projects, detail: t("Project records across instances.", "跨实例项目记录。"), tone: "ok" },
+    { label: "Cron", value: totals.cronJobs, detail: t("Configured recurring jobs.", "已配置的周期任务。"), tone: "active" },
+  ];
+  const chips = [
+    renderFleetMetricChip(t("Instances online", "在线实例"), `${snapshot.totals.connected}/${snapshot.totals.instances}`, snapshot.totals.notConnected > 0 ? "warn" : "ok"),
+    renderFleetMetricChip(t("Fresh collectors", "新鲜快照"), `${freshCollectors}/${collectorStates.length}`, freshCollectors === collectorStates.length ? "ok" : "warn"),
+    renderFleetMetricChip(t("Visible sessions", "可见会话"), formatInt(snapshot.totals.sessions), snapshot.totals.running > 0 ? "active" : ""),
+    renderFleetMetricChip(t("Risk signals", "风险信号"), formatInt(riskSignals), riskSignals > 0 ? "warn" : "ok"),
+    renderFleetMetricChip(t("Total usage", "总用量"), formatInt(totals.tokens)),
+    renderFleetMetricChip(t("Estimated cost", "预估费用"), formatPreciseCost(totals.cost)),
+  ].join("");
+  const trendPreview =
+    samples.length === 0
+      ? `<div class="empty-state">${escapeHtml(t("Trend history will appear after collector snapshots accumulate.", "collector 快照累积后会显示趋势历史。"))}</div>`
+      : `<div class="overview-mini-trends">
+          ${renderTrendCard(
+            t("Token pulse", "用量脉冲"),
+            t("Latest collector samples", "最近 collector 样本"),
+            samplesWithinHours(samples, 24),
+            (sample) => sample.totals.totalTokens,
+            formatInt,
+            language,
+          )}
+          ${renderTrendCard(
+            t("Session pulse", "会话脉冲"),
+            t("Latest collector samples", "最近 collector 样本"),
+            samplesWithinHours(samples, 24),
+            (sample) => sample.totals.sessions,
+            formatInt,
+            language,
+          )}
+        </div>`;
+
+  return `<section class="panel overview-command-panel">
+    <div class="panel-head">
+      <h2>${escapeHtml(t("Operations overview", "运营总览"))}</h2>
+      <div class="meta">${escapeHtml(t("Live readonly signals across the selected Oracle scope.", "当前 Oracle 范围内的实时只读信号。"))}</div>
+    </div>
+    ${renderDataSourceNote(language, t("Readonly gateway snapshots + collector history.", "只读 gateway 快照 + collector 历史"))}
+    <div class="status-strip overview-status-strip">${chips}</div>
+    <div class="overview-context-row">
+      <span>${escapeHtml(t("Latest activity", "最近活动"))}: ${escapeHtml(latestActivityAt ? formatUiTimestamp(latestActivityAt, language) : t("Not available", "暂无"))}</span>
+      <span>${escapeHtml(t("Latest collector sample", "最新 collector 样本"))}: ${escapeHtml(latestSample ? formatUiTimestamp(latestSample.generatedAt, language) : t("Not available", "暂无"))}</span>
+      <span>${escapeHtml(t("History samples", "历史样本"))}: ${formatInt(samples.length)}</span>
+    </div>
+    <div class="fleet-chart-grid overview-chart-wall">
+      ${renderFleetDistributionChart(t("Workload by instance", "按实例工作量"), workloadRows, language)}
+      ${renderFleetPieCard(
+        t("Token share by instance", "按实例用量占比"),
+        t("Current token distribution from session status fields.", "来自 session status 字段的当前 token 分布。"),
+        instanceShareRows,
+        totals.tokens,
+        t("Usage", "用量"),
+        language,
+      )}
+      ${renderFleetDistributionChart(t("Operational inventory", "运营对象分布"), inventoryRows, language)}
+      ${renderFleetDistributionChart(t("Risk queue by instance", "按实例风险队列"), riskRows, language)}
+    </div>
+    ${trendPreview}
+  </section>`;
+}
+
 async function loadMultiInstanceHistoryView(snapshot: MultiInstanceSnapshot): Promise<MultiInstanceHistoryView> {
   const instanceIds = new Set(snapshot.instances.map((item) => item.instance.id));
   const historyPaths = [
@@ -7865,6 +7974,7 @@ function renderMultiInstanceSectionBody(input: {
   }
 
   return `
+    ${renderMultiInstanceOverviewDashboard(snapshot, input.historyView, language)}
     ${renderMultiInstanceStatsPanel(snapshot.instances, language)}
     ${renderMultiInstanceTrendPanel(input.historyView, language)}
     ${renderServerHealthPanel(snapshot, language)}
@@ -7992,6 +8102,12 @@ function renderMultiInstanceOverview(
     .trend-bar { flex: 1 1 3px; min-width: 3px; border-radius: 999px 999px 0 0; background: linear-gradient(180deg, #4e79a7, #76b7b2); }
     .trend-bar.empty { height: 4px; background: rgba(17, 24, 39, 0.12); }
     .trend-summary { display: flex; justify-content: space-between; gap: 10px; margin-top: 8px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+    .overview-command-panel { border-color: rgba(78, 121, 167, 0.22); box-shadow: 0 12px 32px rgba(17, 24, 39, 0.05); }
+    .overview-status-strip { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+    .overview-context-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; color: var(--muted); font-size: 12px; }
+    .overview-context-row span { border: 1px solid rgba(17, 24, 39, 0.1); border-radius: 999px; background: rgba(255, 255, 255, 0.7); padding: 5px 9px; }
+    .overview-chart-wall { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+    .overview-mini-trends { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-top: 12px; }
     .overview-layout { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(320px, 0.9fr); gap: 12px; align-items: start; margin-top: 14px; }
     .instance-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
     .card, .panel { border: 1px solid var(--border); border-radius: 8px; background: #fff; padding: 14px; }
