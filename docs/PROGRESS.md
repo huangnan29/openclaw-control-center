@@ -4938,6 +4938,8 @@
 - Scope: make Tom go-live healthcheck reject gateway containers that are restarting or still in Docker `starting` health state, even if their `/health` port answers briefly during a restart window.
 - Changed files:
   - `ops/tom-readonly/healthcheck.sh`
+  - `ops/tom-readonly/update.sh`
+  - `ops/tom-readonly/rollback.sh`
   - `ops/local/final-go-live-completion-audit.sh`
   - `test/final-go-live-completion-audit.test.ts`
   - `ops/tom-readonly/README.md`
@@ -4945,6 +4947,7 @@
 - Implementation:
   - Added `GATEWAY_CONTAINERS` to Tom `healthcheck.sh` with the five local gateway containers.
   - `healthcheck.sh` now requires every configured gateway container to be `running` and Docker health `healthy` before checking gateway ports.
+  - `update.sh` and `rollback.sh` now sync the repository version of `healthcheck.sh` into the deployment root before running it.
   - `final-go-live-completion-audit.sh` no longer suggests `approve-and-run` when any precondition is failed; it points back to healthcheck and `prepare` first.
 - Current finding:
   - Tom `deepseek` gateway is unstable because runtime and file checks show `DEEPSEEK_API_KEY` is missing or empty.

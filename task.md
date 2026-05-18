@@ -1209,5 +1209,6 @@ cron 安装器已完成部署、受控 crontab 已安装，且 Tom workspace inb
 - deepseek gateway 日志显示启动失败根因是 `DEEPSEEK_API_KEY` 缺失或为空；运行时检查与 `.env` 文件检查也确认该变量未设置。
 - 没有修改、重启或停止任何 OpenClaw 实例；诊断只读取 Docker 状态、日志与健康端口。
 - 已增强 `ops/tom-readonly/healthcheck.sh`：除 gateway 端口外，还会检查 gateway 容器 Docker health，避免把重启窗口中的短暂 `/health` 响应误判为稳定健康。
+- 已发现 Tom 根目录 `./healthcheck.sh` 与仓库版不同步；已调整 `update.sh` 与 `rollback.sh`，后续更新/回滚会先把仓库版健康检查脚本同步到部署根目录再执行。
 - 已调整 `ops/local/final-go-live-completion-audit.sh`：当前置项失败时，不再把最终 `approve-and-run` 放入 `nextCommands`。
 - 当前上线阻塞从“人工批准”回退为“前置项未稳定”：需要先补齐 deepseek 实例的 `DEEPSEEK_API_KEY`，或由 Anan 明确批准临时移除/停用 deepseek 这个实例的健康纳入范围。

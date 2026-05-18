@@ -28,8 +28,8 @@
 - `register-local-instance.example.json`：本机实例注册配置样板。
 - `register-remote-collector.sh`：把已经拉取并校验过的远端 collector snapshot 注册到 Tom `config/instances.json`，默认 `plan` 不写入。
 - `register-remote-collector.example.json`：远端 collector 注册配置样板。
-- `update.sh`：拉取 `multi-instance-readonly-control-center` 分支，重建控制中心容器，随后执行健康检查。
-- `rollback.sh`：回滚到指定提交；如果不传提交，则使用最近一次 `update.sh` 记录的 `previous-good.commit`。
+- `update.sh`：拉取 `multi-instance-readonly-control-center` 分支，同步部署目录根部 `healthcheck.sh`，重建控制中心容器，随后执行健康检查。
+- `rollback.sh`：回滚到指定提交并同步对应版本的 `healthcheck.sh`；如果不传提交，则使用最近一次 `update.sh` 记录的 `previous-good.commit`。
 - `../local/discover-remote-oracle-credentials.sh`：在本机只读发现第二台 Oracle 的候选 SSH host/key，`probe` 需显式确认且只执行只读 SSH 探测；拿到明确 host/key 后可用 `write-push-config` 只写本机 push 配置。
 - `../local/discover-remote-oracle-credentials.example.json`：本机候选发现配置样板，不包含真实密钥内容。
 - `../local/remote-oracle-intake.sh`：本机侧凭据接入编排器；`doctor/plan` 不写文件不联网，`apply` 显式确认后只写本机 push 配置和 Tom control-center runtime，`run` 会继续触发 Tom 端安全 rollout。

@@ -37,6 +37,16 @@ ensure_clean_repo() {
   git -C "$repo_dir" diff --cached --quiet || fail "repo 存在暂存改动，停止更新：${repo_dir}"
 }
 
+sync_deploy_scripts() {
+  local repo_dir="$1"
+  local healthcheck="$2"
+  local source_healthcheck="${repo_dir}/ops/tom-readonly/healthcheck.sh"
+
+  [ -f "$source_healthcheck" ] || fail "找不到仓库健康检查脚本：${source_healthcheck}"
+  install -m 0755 "$source_healthcheck" "$healthcheck"
+  log "已同步健康检查脚本：${healthcheck}"
+}
+
 main() {
   local repo_dir="${DEPLOY_DIR}/repo"
   local healthcheck="${DEPLOY_DIR}/healthcheck.sh"
@@ -60,6 +70,8 @@ main() {
   local after_commit
   after_commit="$(git -C "$repo_dir" rev-parse HEAD)"
   log "更新后提交：${after_commit}"
+
+  sync_deploy_scripts "$repo_dir" "$healthcheck"
 
   log "重新构建并启动控制中心容器"
   cd "$DEPLOY_DIR"
