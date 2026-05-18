@@ -1017,3 +1017,18 @@ cron 安装器已完成部署、受控 crontab 已安装，且 Tom workspace inb
 ## 阶段完成后的下一步
 
 部署已完成。下一步重新执行 `ops/local/final-go-live-runner.sh prepare`，让 approval packet 与最新 Tom commit 对齐；然后复核 `live-healthcheck-readiness.sh status` 为 `waiting_human_approval` 且 `issues=[]`。仍不得执行 approval `approve`、不得打开 live gate。
+
+## 本轮新增（异常用量线索）
+
+- 已在 `src/ui/server.ts` 为多实例 `usage-cost` 页面新增 `Usage anomaly clues / 异常用量线索` 面板。
+- 该面板只读取 collector history 中的 token 增量，不调用模型、不写 runtime、不修改任何 OpenClaw 实例目录。
+- 面板会识别“周期性小额增长”形态，展示实例、窗口增量、中位时间间隔、中位 token 增量、节奏分数和最近样本时间。
+- 该能力用于提前发现类似 deepseek heartbeat/定时轮询持续消耗 token 的情况。
+- 已新增 `test/ui-render-smoke.test.ts` 回归测试，模拟 deepseek 每 30 分钟增加 280 token，确认页面出现“异常用量线索”“周期性小额增长”和 `heartbeat` 提示。
+- 已验证 `npm test -- test/ui-render-smoke.test.ts`，36/36 通过。
+- 已验证 `npm run build`。
+- 本轮没有执行 approval `approve`，没有打开 live gate，没有调用 managed action live API，没有修改或重启任何 OpenClaw 实例。
+
+## 阶段完成后的下一步
+
+下一步把这次异常用量线索部署到 Tom，并用当前线上 collector history 轻量确认 deepseek 是否在页面上被标记出来；随后再继续 final go-live `prepare` 复核。仍不得执行 approval `approve`、不得打开 live gate、不得触发真实 managed action。

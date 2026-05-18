@@ -6328,6 +6328,19 @@ interface MultiInstanceHistoryView {
   samples: CollectorHistorySample[];
 }
 
+interface UsageAnomalyRow {
+  instanceId: string;
+  instanceName: string;
+  signal: "periodic_small_growth" | "recent_spike";
+  totalDelta: number;
+  nonZeroDeltas: number;
+  recentDelta: number;
+  medianDelta: number;
+  medianIntervalMinutes?: number;
+  rhythmScore: number;
+  latestAt: string;
+}
+
 function buildInstanceUiMetrics(
   item: InstanceSnapshot,
   pricingCatalog: ModelContextCatalogEntry[] = [],
@@ -6785,6 +6798,134 @@ function renderMultiInstanceTrendPanel(history: MultiInstanceHistoryView | undef
     <div class="meta">${escapeHtml(t("Latest sample", "最新样本"))}${escapeHtml(language === "zh" ? "：" : ": ")}${escapeHtml(latestLabel)} · ${escapeHtml(statusDetail)}</div>
     ${body}
   </section>`;
+}
+
+function renderUsageAnomalyPanel(
+  items: InstanceSnapshot[],
+  history: MultiInstanceHistoryView | undefined,
+  language: UiLanguage,
+): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const rows = buildUsageAnomalyRows(items, history);
+  const body = rows.length > 0
+    ? `<div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Instance", "实例"))}</th><th>${escapeHtml(t("Signal", "线索"))}</th><th>${escapeHtml(t("Window delta", "窗口增量"))}</th><th>${escapeHtml(t("Rhythm", "节奏"))}</th><th>${escapeHtml(t("Median step", "中位增量"))}</th><th>${escapeHtml(t("Latest", "最近"))}</th></tr></thead><tbody>${rows
+        .map((row) => {
+          const signalLabel =
+            row.signal === "periodic_small_growth"
+              ? t("Periodic small growth", "周期性小额增长")
+              : t("Recent spike", "最近突增");
+          const signalDetail =
+            row.signal === "periodic_small_growth"
+              ? `${t("Nonzero steps", "非零增量次数")}=${row.nonZeroDeltas}; ${t("likely heartbeat or scheduled polling if no task is expected.", "如果没有预期任务，优先检查 heartbeat 或定时轮询。")}`
+              : `${t("Latest step", "最近增量")} +${Math.round(row.recentDelta)} tokens; ${t("review audit before acting.", "处理前先复核审计记录。")}`;
+          const rhythmLabel = row.medianIntervalMinutes
+            ? `${Math.round(row.medianIntervalMinutes)} ${t("min", "分钟")} · ${formatPercent(row.rhythmScore * 100)}`
+            : "-";
+          return `<tr>
+            <td>${escapeHtml(row.instanceName)}<div class="meta"><code>${escapeHtml(row.instanceId)}</code></div></td>
+            <td>${badge(row.signal === "recent_spike" ? "error" : "partial", signalLabel)}<div class="meta">${escapeHtml(signalDetail)}</div></td>
+            <td>${formatSignedInt(row.totalDelta)}</td>
+            <td>${escapeHtml(rhythmLabel)}</td>
+            <td>${formatInt(row.medianDelta)}</td>
+            <td>${escapeHtml(formatUiTimestamp(row.latestAt, language))}</td>
+          </tr>`;
+        })
+        .join("")}</tbody></table></div>`
+    : `<div class="empty-state">${escapeHtml(t("No suspicious token-growth pattern is visible in the current history window.", "当前历史窗口没有看到可疑的 token 增长模式。"))}</div>`;
+
+  return `<section class="panel">
+    <div class="panel-head">
+      <h2>${escapeHtml(t("Usage anomaly clues", "异常用量线索"))}</h2>
+      <div class="meta">${escapeHtml(t("Heuristic only; use it to spot heartbeat or scheduled polling burn early.", "启发式判断；用于尽早发现 heartbeat 或定时轮询消耗。"))}</div>
+    </div>
+    ${renderDataSourceNote(language, t("Collector history token deltas; readonly analysis, no model calls.", "collector 历史 token 增量；只读分析，不调用模型"))}
+    ${body}
+  </section>`;
+}
+
+function buildUsageAnomalyRows(
+  items: InstanceSnapshot[],
+  history: MultiInstanceHistoryView | undefined,
+): UsageAnomalyRow[] {
+  const samples = history?.samples.filter((sample) => !Number.isNaN(Date.parse(sample.generatedAt))) ?? [];
+  if (samples.length < 3) return [];
+
+  const visible = new Map(items.map((item) => [item.instance.id, item.instance.name]));
+  const scopedSamples = samplesWithinHours(samples, 24);
+  const rows: UsageAnomalyRow[] = [];
+  for (const [instanceId, instanceName] of visible) {
+    const points = scopedSamples
+      .map((sample) => {
+        const instance = sample.instances.find((item) => item.id === instanceId);
+        if (!instance) return undefined;
+        return {
+          generatedAt: sample.generatedAt,
+          timestampMs: Date.parse(sample.generatedAt),
+          totalTokens: instance.totalTokens,
+        };
+      })
+      .filter((point): point is { generatedAt: string; timestampMs: number; totalTokens: number } => Boolean(point))
+      .sort((a, b) => a.timestampMs - b.timestampMs);
+    if (points.length < 3) continue;
+
+    const first = points[0];
+    const latest = points[points.length - 1];
+    if (!first || !latest) continue;
+
+    const deltas: Array<{ tokens: number; intervalMinutes: number }> = [];
+    for (let index = 1; index < points.length; index += 1) {
+      const previous = points[index - 1];
+      const current = points[index];
+      if (!previous || !current) continue;
+      const tokens = current.totalTokens - previous.totalTokens;
+      if (tokens <= 0) continue;
+      const intervalMinutes = (current.timestampMs - previous.timestampMs) / 60_000;
+      if (!Number.isFinite(intervalMinutes) || intervalMinutes <= 0) continue;
+      deltas.push({ tokens, intervalMinutes });
+    }
+    if (deltas.length === 0) continue;
+
+    const totalDelta = latest.totalTokens - first.totalTokens;
+    const medianDelta = medianNumber(deltas.map((item) => item.tokens));
+    const medianIntervalMinutes = medianNumber(deltas.map((item) => item.intervalMinutes));
+    const rhythmScore = medianDelta > 0
+      ? deltas.filter((item) => Math.abs(item.tokens - medianDelta) / medianDelta <= 0.45).length / deltas.length
+      : 0;
+    const recentDelta = deltas[deltas.length - 1]?.tokens ?? 0;
+    const periodicSmallGrowth =
+      deltas.length >= 4 &&
+      medianDelta > 0 &&
+      medianDelta <= 2_000 &&
+      medianIntervalMinutes >= 10 &&
+      medianIntervalMinutes <= 90 &&
+      rhythmScore >= 0.55;
+    const recentSpike = recentDelta >= Math.max(20_000, medianDelta * 5);
+
+    if (!periodicSmallGrowth && !recentSpike) continue;
+
+    rows.push({
+      instanceId,
+      instanceName,
+      signal: recentSpike ? "recent_spike" : "periodic_small_growth",
+      totalDelta,
+      nonZeroDeltas: deltas.length,
+      recentDelta,
+      medianDelta,
+      medianIntervalMinutes,
+      rhythmScore,
+      latestAt: latest.generatedAt,
+    });
+  }
+
+  return rows.sort((a, b) => b.totalDelta - a.totalDelta);
+}
+
+function medianNumber(values: number[]): number {
+  const clean = values.filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+  if (clean.length === 0) return 0;
+  const mid = Math.floor(clean.length / 2);
+  if (clean.length % 2 === 1) return clean[mid] ?? 0;
+  return ((clean[mid - 1] ?? 0) + (clean[mid] ?? 0)) / 2;
 }
 
 function renderTrendCard(
@@ -8354,6 +8495,7 @@ function renderMultiInstanceSectionBody(input: {
     return `
       ${renderMultiInstanceUsageFiltersPanel(snapshot.instances, language, input.selectedServerId, input.usageFilters)}
       ${renderMultiInstanceUsageBudgetPanel(usageItems, language, input.pricingCatalog, input.usageBudgetPolicy, input.usageFilters)}
+      ${renderUsageAnomalyPanel(usageItems, input.historyView, language)}
       ${renderMultiInstanceTrendPanel(input.historyView, language)}
       <section class="overview-layout">
         <div>
@@ -21395,6 +21537,7 @@ export function renderMultiInstanceOverviewForSmoke(
     activeSection?: DashboardSection;
     usageBudgetPolicy?: UsageBudgetPolicyLoadResult;
     pricingCatalog?: ModelContextCatalogEntry[];
+    historyView?: MultiInstanceHistoryView;
   } = {},
 ): string {
   return renderMultiInstanceOverview(
@@ -21404,7 +21547,7 @@ export function renderMultiInstanceOverviewForSmoke(
     undefined,
     undefined,
     undefined,
-    undefined,
+    options.historyView,
     options.activeSection,
     "24h",
     {},

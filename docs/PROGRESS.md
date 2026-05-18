@@ -1,5 +1,24 @@
 # Progress
 
+## Phase 157 (Usage anomaly clues for heartbeat burn) — Completed
+- Scope:
+  - Make periodic token growth visible before it turns into a confusing bill or quota surprise.
+  - Keep the signal read-only and derived from collector history, with no model calls and no instance mutation.
+- Changed files:
+  - `src/ui/server.ts`
+  - `test/ui-render-smoke.test.ts`
+  - `docs/PROGRESS.md`
+- Implementation:
+  - Added a `Usage anomaly clues / 异常用量线索` panel to the multi-instance Usage page.
+  - The panel reads collector history token deltas and flags periodic small growth, the pattern seen when heartbeat or scheduled polling repeatedly consumes small token batches.
+  - The detector reports instance, window delta, median interval, median token step, rhythm score, and latest sample time.
+  - Empty and partial-history states stay explicit so the panel does not pretend to know more than the collector history can prove.
+- Verification:
+  - `npm test -- test/ui-render-smoke.test.ts`
+  - `npm run build`
+- Remaining gap:
+  - This is a heuristic UI clue, not a root-cause parser of the underlying OpenClaw session text. The next step is to add a one-click operator runbook link for heartbeat cleanup per instance.
+
 ## Phase 156 (English-first README and official showcase prep) — Completed
 - Scope:
   - Make the repository easier for OpenClaw maintainers and international users to understand at first glance.

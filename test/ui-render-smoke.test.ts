@@ -363,6 +363,68 @@ test("multi-instance usage page renders budget alerts from policy", async () => 
   assert(html.includes("最近告警记录"));
 });
 
+test("multi-instance usage page flags periodic token growth from collector history", async () => {
+  const { renderMultiInstanceOverviewForSmoke } = await import("../src/ui/server");
+  const snapshot = routeSmokeMultiSnapshot([smokeInstance("deepseek", "DeepSeek")], "deepseek");
+  const baseMs = Date.parse("2026-05-18T08:00:00.000Z");
+  const samples = [0, 1, 2, 3, 4, 5].map((index) => {
+    const totalTokens = 84_000 + index * 280;
+    return {
+      generatedAt: new Date(baseMs + index * 30 * 60 * 1000).toISOString(),
+      serverId: "tom-oracle",
+      serverName: "Tom Oracle",
+      totals: {
+        instances: 1,
+        connected: 1,
+        partial: 0,
+        notConnected: 0,
+        sessions: 3,
+        running: 0,
+        blocked: 0,
+        errors: 0,
+        pendingApprovals: 0,
+        tokensIn: totalTokens,
+        tokensOut: 0,
+        totalTokens,
+        cost: 0,
+      },
+      instances: [
+        {
+          id: "deepseek",
+          name: "DeepSeek",
+          status: "connected" as const,
+          sessions: 3,
+          running: 0,
+          blocked: 0,
+          errors: 0,
+          pendingApprovals: 0,
+          tokensIn: totalTokens,
+          tokensOut: 0,
+          totalTokens,
+          cost: 0,
+        },
+      ],
+      models: [],
+    };
+  });
+
+  const html = renderMultiInstanceOverviewForSmoke(snapshot, "zh", {
+    activeSection: "usage-cost",
+    historyView: {
+      status: "connected",
+      detail: "loaded smoke history",
+      sourcePaths: ["/tmp/history.json"],
+      samples,
+    },
+  });
+
+  assert(html.includes("异常用量线索"));
+  assert(html.includes("周期性小额增长"));
+  assert(html.includes("deepseek"));
+  assert(html.includes("heartbeat"));
+  assert(html.includes("30 分钟"));
+});
+
 test("usage budget policy API saves control-center runtime policy in readonly multi-instance mode", async () => {
   const { startUiServer } = await import("../src/ui/server");
   const previousInstancesJson = process.env.OPENCLAW_INSTANCES_JSON;
