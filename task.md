@@ -1027,8 +1027,14 @@ cron 安装器已完成部署、受控 crontab 已安装，且 Tom workspace inb
 - 已新增 `test/ui-render-smoke.test.ts` 回归测试，模拟 deepseek 每 30 分钟增加 280 token，确认页面出现“异常用量线索”“周期性小额增长”和 `heartbeat` 提示。
 - 已验证 `npm test -- test/ui-render-smoke.test.ts`，36/36 通过。
 - 已验证 `npm run build`。
+- 已提交并推送 `a975557 usage: flag periodic token growth`。
+- 第一版部署到 Tom 后，页面已出现“异常用量线索”面板，但 deepseek 未被标记；根因为 collector 每 2 分钟采样，而算法误把相邻采样间隔当作增长节奏。
+- 已修复为“相邻非零增长事件之间的间隔”，并提交推送 `44b39e5 fix: detect sampled periodic token growth`。
+- 已再次部署到 Tom，`update.sh` 通过，5 个 OpenClaw gateway 健康端口、总览页、实例详情页、只读写接口拦截、容器安全边界和 collector 快照均通过。
+- 已在 Tom 页面级确认 `/?section=usage-cost&usage_instance=deepseek&lang=zh` 显示 deepseek “最近突增”：窗口增量 `+13,509`，节奏 `30 分钟`，中位增量 `282`，最近增量 `+8182 tokens`。
+- 已执行本机只读 `FINAL_GO_LIVE_OUTPUT=summary OPENCLAW_TOPOLOGY_MODE=local-only ops/local/final-go-live-runner.sh status`，返回 `ready_for_existing_instance_healthcheck`，安全字段为 `opensLiveGate=false`、`callsManagedActionsLiveApi=false`、`writesOpenClawInstanceDirs=false`、`restartsOpenClawInstances=false`。
 - 本轮没有执行 approval `approve`，没有打开 live gate，没有调用 managed action live API，没有修改或重启任何 OpenClaw 实例。
 
 ## 阶段完成后的下一步
 
-下一步把这次异常用量线索部署到 Tom，并用当前线上 collector history 轻量确认 deepseek 是否在页面上被标记出来；随后再继续 final go-live `prepare` 复核。仍不得执行 approval `approve`、不得打开 live gate、不得触发真实 managed action。
+下一步执行一次只读 `ops/local/final-go-live-status.sh check` 或 `final-go-live-runner.sh prepare`，把最新提交重新推进到人工批准边界；如果 Anan 暂时不想进入 live healthcheck 人工批准流程，则先处理 deepseek heartbeat 根因：清空或关闭 `/srv/openclaw-deepseek/workspace/HEARTBEAT.md`。仍不得执行 approval `approve`、不得打开 live gate、不得触发真实 managed action。
