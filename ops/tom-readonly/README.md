@@ -10,7 +10,7 @@
 
 ## 脚本
 
-- `healthcheck.sh`：检查 gateway 健康、总览页、实例详情页、写接口 403、容器只读安全边界，以及 collector 快照新鲜度。
+- `healthcheck.sh`：检查 gateway 容器 Docker health 与端口健康、总览页、实例详情页、写接口 403、容器只读安全边界，以及 collector 快照新鲜度。
 - `collector-snapshot.sh`：在 Tom 本地生成 collector JSON 快照，只写控制中心 runtime，不修改任何 OpenClaw 实例目录。
 - `install-collector-cron.sh`：幂等安装 Tom collector 快照定时任务，只更新 crontab 中的 OpenClaw 标记块。
 - `remote-collector-onboarding.sh`：为第二台 Oracle 生成只读 collector 接入包，默认 `plan` 不写入，`write` 只写 control-center runtime 下的 onboarding 文件。

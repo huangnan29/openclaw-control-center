@@ -221,6 +221,12 @@ function runTomHealthcheck(tom) {
   };
 }
 
+function tomHealthcheckCommand(tom) {
+  if (tom.error || !tom.host) return "修复 ops/local/discover-remote-oracle-credentials.example.json 中的 Tom SSH 配置";
+  const keyPart = tom.sshKey ? ` -i ${shellQuote(tom.sshKey)}` : "";
+  return `${sshBin}${keyPart} ${tom.user}@${tom.host} ${shellQuote(`cd ${shellQuote(tom.deployDir)} && ./healthcheck.sh`)}`;
+}
+
 function docsReady() {
   const files = [
     "docs/MULTI_INSTANCE_READONLY.md",
@@ -239,6 +245,38 @@ function docsReady() {
 
 function req(id, label, status, evidence, detail = "") {
   return { id, label, status, evidence, detail };
+}
+
+function buildNextCommands(status, tom, healthcheck) {
+  if (status === "completed") {
+    return ["ops/local/final-go-live-runner.sh verify-completed"];
+  }
+
+  if (status === "completed_with_warnings") {
+    return [
+      "FINAL_GO_LIVE_OUTPUT=summary OPENCLAW_TOPOLOGY_MODE=local-only ops/local/final-go-live-review.sh status",
+      "repo/ops/tom-readonly/heartbeat-burn-alert-runner.sh status",
+    ];
+  }
+
+  if (status === "blocked_preconditions") {
+    const commands = [
+      "FINAL_GO_LIVE_OUTPUT=summary OPENCLAW_TOPOLOGY_MODE=local-only ops/local/final-go-live-review.sh status",
+    ];
+    if (healthcheck.exitCode !== 0) commands.push(tomHealthcheckCommand(tom));
+    commands.push(
+      "FINAL_GO_LIVE_OUTPUT=summary OPENCLAW_TOPOLOGY_MODE=local-only ops/local/final-go-live-runner.sh prepare",
+      "repo/ops/tom-readonly/heartbeat-burn-alert-runner.sh status",
+    );
+    return commands;
+  }
+
+  return [
+    "FINAL_GO_LIVE_OUTPUT=summary OPENCLAW_TOPOLOGY_MODE=local-only ops/local/final-go-live-review.sh status",
+    "ops/local/final-go-live-approve-and-run-from-tom-token.sh status",
+    "CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK APPROVED_BY=Anan FINAL_GO_LIVE_OUTPUT=summary ops/local/final-go-live-approve-and-run-from-tom-token.sh approve-and-run",
+    "repo/ops/tom-readonly/heartbeat-burn-alert-runner.sh status",
+  ];
 }
 
 function buildAudit() {
@@ -350,19 +388,7 @@ function buildAudit() {
       ...(Array.isArray(review.report?.warnings) ? review.report.warnings : []),
       ...(healthcheck.issues || []),
     ],
-    nextCommands: status === "completed"
-      ? ["ops/local/final-go-live-runner.sh verify-completed"]
-      : status === "completed_with_warnings"
-        ? [
-            "FINAL_GO_LIVE_OUTPUT=summary OPENCLAW_TOPOLOGY_MODE=local-only ops/local/final-go-live-review.sh status",
-            "repo/ops/tom-readonly/heartbeat-burn-alert-runner.sh status",
-          ]
-      : [
-          "FINAL_GO_LIVE_OUTPUT=summary OPENCLAW_TOPOLOGY_MODE=local-only ops/local/final-go-live-review.sh status",
-          "ops/local/final-go-live-approve-and-run-from-tom-token.sh status",
-          "CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK APPROVED_BY=Anan FINAL_GO_LIVE_OUTPUT=summary ops/local/final-go-live-approve-and-run-from-tom-token.sh approve-and-run",
-          "repo/ops/tom-readonly/heartbeat-burn-alert-runner.sh status",
-        ],
+    nextCommands: buildNextCommands(status, tom, healthcheck),
     evidence: {
       reviewExitCode: review.exitCode,
       healthcheckExitCode: healthcheck.exitCode,

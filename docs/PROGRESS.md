@@ -4933,3 +4933,23 @@
   - added regressions for nested OpenClaw history envelopes and residual-running downgrade from real nested payloads
 - Remaining gap:
   - Employee-state cleanup now has correct nested history semantics. Broader session lists and drilldowns still rely on the underlying runtime state field for their primary state label, which can remain stale until the upstream runtime closes the session state.
+
+## Phase 104 Tom healthcheck gateway stability guard (2026-05-19) — Completed
+- Scope: make Tom go-live healthcheck reject gateway containers that are restarting or still in Docker `starting` health state, even if their `/health` port answers briefly during a restart window.
+- Changed files:
+  - `ops/tom-readonly/healthcheck.sh`
+  - `ops/local/final-go-live-completion-audit.sh`
+  - `test/final-go-live-completion-audit.test.ts`
+  - `ops/tom-readonly/README.md`
+  - `docs/MULTI_INSTANCE_READONLY.md`
+- Implementation:
+  - Added `GATEWAY_CONTAINERS` to Tom `healthcheck.sh` with the five local gateway containers.
+  - `healthcheck.sh` now requires every configured gateway container to be `running` and Docker health `healthy` before checking gateway ports.
+  - `final-go-live-completion-audit.sh` no longer suggests `approve-and-run` when any precondition is failed; it points back to healthcheck and `prepare` first.
+- Current finding:
+  - Tom `deepseek` gateway is unstable because runtime and file checks show `DEEPSEEK_API_KEY` is missing or empty.
+  - This is an OpenClaw instance configuration blocker; the control center did not modify or restart that instance.
+- Verification:
+  - `bash -n ops/tom-readonly/healthcheck.sh ops/local/final-go-live-completion-audit.sh`
+  - `npm test -- test/final-go-live-completion-audit.test.ts test/oss-readiness.test.ts`
+  - `npm run build`

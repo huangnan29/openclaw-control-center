@@ -617,7 +617,7 @@ LOCAL_TOKEN_AUTH_REQUIRED=true
 
 Tom 的长期灰度部署可以使用 `ops/tom-readonly/` 下的脚本：
 
-- `healthcheck.sh`：检查 gateway、只读页面、写接口 403、容器端口、`privileged`、`docker.sock`、实例只读挂载和 collector 快照新鲜度。
+- `healthcheck.sh`：检查 gateway 容器 Docker health、gateway 端口、只读页面、写接口 403、容器端口、`privileged`、`docker.sock`、实例只读挂载和 collector 快照新鲜度，避免把重启窗口内的短暂端口响应误判为稳定健康。
 - `install-collector-cron.sh`：安装 Tom collector 快照定时任务。
 - `update.sh`：拉取 `multi-instance-readonly-control-center` 分支，重建控制中心容器，并自动运行健康检查。
 - `rollback.sh`：回滚到指定提交；不传提交时使用最近一次更新前记录的 `previous-good.commit`。

@@ -8,6 +8,7 @@ CONTAINER_NAME="${CONTAINER_NAME:-openclaw-control-center-readonly}"
 BASE_URL="${BASE_URL:-http://127.0.0.1:4311}"
 INSTANCE_IDS="${INSTANCE_IDS:-main tom third deepseek spark}"
 GATEWAY_PORTS="${GATEWAY_PORTS:-18789 18791 18793 18795 18797}"
+GATEWAY_CONTAINERS="${GATEWAY_CONTAINERS:-openclaw-openclaw-gateway-1 openclaw-work-openclaw-gateway-1 openclaw-third-openclaw-gateway-1 openclaw-deepseek-openclaw-gateway-1 openclaw-spark-openclaw-gateway-1}"
 INSTANCE_MOUNTS="${INSTANCE_MOUNTS:-/instances/main/config /instances/main/workspace /instances/tom/config /instances/tom/workspace /instances/third/config /instances/third/workspace /instances/deepseek/config /instances/deepseek/workspace /instances/spark/config /instances/spark/workspace}"
 COLLECTOR_SNAPSHOT_MAX_AGE_SECONDS="${COLLECTOR_SNAPSHOT_MAX_AGE_SECONDS:-300}"
 HTTP_RETRY_COUNT="${HTTP_RETRY_COUNT:-20}"
@@ -99,6 +100,22 @@ check_http_pages() {
 }
 
 check_gateway_health() {
+  local container
+  for container in ${GATEWAY_CONTAINERS}; do
+    log "检查 OpenClaw gateway 容器健康状态：${container}"
+    docker inspect "$container" >/dev/null 2>&1 || fail "找不到 gateway 容器：${container}"
+
+    local status
+    local health
+    local restart_count
+    status="$(docker inspect -f '{{.State.Status}}' "$container")"
+    health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container")"
+    restart_count="$(docker inspect -f '{{.RestartCount}}' "$container")"
+
+    [ "$status" = "running" ] || fail "gateway 容器未运行：${container} status=${status} restartCount=${restart_count}"
+    [ "$health" = "healthy" ] || fail "gateway 容器健康状态不是 healthy：${container} health=${health} restartCount=${restart_count}"
+  done
+
   local port
   for port in ${GATEWAY_PORTS}; do
     log "检查 OpenClaw gateway 健康端口：${port}"

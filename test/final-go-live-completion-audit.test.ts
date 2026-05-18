@@ -174,6 +174,9 @@ test("final go-live completion audit 在 Tom healthcheck 失败时返回 precond
     assert.equal(result.report.status, "blocked_preconditions");
     assert(result.report.requirements.some((item: { id: string; status: string }) => item.id === "tom_readonly_health" && item.status === "fail"));
     assert(result.report.hardBlockers.some((item: string) => item.includes("Tom 单 Oracle 多实例只读健康检查")));
+    assert(result.report.nextCommands.some((command: string) => command.includes("./healthcheck.sh")));
+    assert(result.report.nextCommands.some((command: string) => command.includes("final-go-live-runner.sh prepare")));
+    assert(!result.report.nextCommands.some((command: string) => command.includes("approve-and-run")));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
