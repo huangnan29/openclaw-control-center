@@ -1127,7 +1127,14 @@ cron 安装器已完成部署、受控 crontab 已安装，且 Tom workspace inb
 - 已更新 `ops/tom-readonly/README.md`、`docs/MULTI_INSTANCE_READONLY.md`、`docs/FAQ.md`、`implementation_plan.md` 与 `test/oss-readiness.test.ts`。
 - 已验证 `bash -n ops/local/final-go-live-review.sh`。
 - 已验证 `npm test -- test/final-go-live-review.test.ts`，2/2 通过。
+- 已验证 `npm test -- test/final-go-live-review.test.ts test/final-go-live-runner.test.ts test/managed-action-inbox-cron.test.ts test/heartbeat-burn-alert-cron.test.ts test/oss-readiness.test.ts`，30/30 通过。
+- 已验证 `npm run build`。
+- 已提交并推送 `9bac0f4 ops: add final go-live review summary`。
+- 已部署到 Tom，`update.sh` 通过，5 个 OpenClaw gateway 健康端口、总览页、实例详情页、只读写接口拦截、容器安全边界和 collector 快照均通过。
+- 部署后第一次并行 review smoke 正确发现 approval packet commit mismatch 并阻断；随后执行 `final-go-live-runner.sh prepare` 刷新证据包到当前 Tom commit。
+- 刷新后真实只读 review smoke 返回 `ready_for_human_approval_with_usage_alerts`：`tomHead=9bac0f4`、`readiness=waiting_human_approval`、`approvalPacket=ready`、`approval=needs_manual_approval`、`dryRunInboxCron=inbox_cron_installed needsUpdate=false`、`heartbeatBurnAlertCron=heartbeat_burn_alert_cron_installed needsUpdate=false`。
+- review smoke 仍提示 heartbeat/token 告警当前存在 2 个可疑实例；安全字段确认 `writesTomRuntime=false`、`writesApprovalFile=false`、`writesOpenClawInstanceDirs=false`、`clearsHeartbeatFiles=false`、`opensLiveGate=false`、`callsManagedActionsLiveApi=false`、`callsModelApis=false`。
 
 ## 阶段完成后的下一步
 
-下一步运行完整相关回归与 build，部署到 Tom 后执行 `FINAL_GO_LIVE_OUTPUT=summary OPENCLAW_TOPOLOGY_MODE=local-only ops/local/final-go-live-review.sh status` 做真实只读 smoke，并再次确认最终状态仍停在人工批准前。
+当前 Tom 已到人工批准前短摘要就绪状态。下一步仍是人工分支：Anan 审查摘要和证据包后显式运行 `approve-and-run`，或先人工处理 heartbeat/token 告警中的可疑实例。

@@ -21,8 +21,13 @@
 - Verification:
   - `bash -n ops/local/final-go-live-review.sh`
   - `npm test -- test/final-go-live-review.test.ts`
+  - `npm test -- test/final-go-live-review.test.ts test/final-go-live-runner.test.ts test/managed-action-inbox-cron.test.ts test/heartbeat-burn-alert-cron.test.ts test/oss-readiness.test.ts`
+  - `npm run build`
+  - Deployed commit `9bac0f4` to Tom with `repo/ops/tom-readonly/update.sh`; readonly healthcheck passed for all five local OpenClaw gateways and collector snapshot.
+  - Re-ran final go-live `prepare` after deployment to refresh the approval packet for commit `9bac0f4`.
+  - Real read-only review smoke returned `ready_for_human_approval_with_usage_alerts`: readiness `waiting_human_approval`, approval packet `ready`, approval `needs_manual_approval`, both cron blocks installed with `needsUpdate=false`, and heartbeat/token warnings still present for two instances.
 - Remaining gap:
-  - Tom deployment and live read-only smoke are still pending for this phase.
+  - Final live healthcheck remains intentionally paused until Anan explicitly runs `approve-and-run`. Heartbeat cleanup also remains manual.
 
 ## Phase 159 (Readonly heartbeat burn alert cron) — Completed
 - Scope:
