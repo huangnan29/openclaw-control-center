@@ -233,13 +233,26 @@ function suspiciousInstanceLabel(row) {
   return `${instanceId}(${signal})`;
 }
 
+function alertFreshnessLabel(latest) {
+  const generatedAt = typeof latest?.generatedAt === "string" && latest.generatedAt.trim() !== "" ? latest.generatedAt.trim() : "";
+  if (!generatedAt) return "";
+
+  const generatedAtMs = Date.parse(generatedAt);
+  if (!Number.isFinite(generatedAtMs)) return `告警时间：${generatedAt}`;
+
+  const ageMinutes = Math.max(0, Math.round((Date.now() - generatedAtMs) / 60_000));
+  return `告警时间：${generatedAt}，约 ${ageMinutes} 分钟前`;
+}
+
 function usageWarningText(latest) {
   const count = latest?.suspiciousRows ?? 0;
   const instances = Array.isArray(latest?.suspiciousInstances) ? latest.suspiciousInstances : [];
+  const freshness = alertFreshnessLabel(latest);
+  const freshnessSuffix = freshness ? `（${freshness}）` : "";
   if (instances.length > 0) {
-    return `heartbeat/token 告警当前存在 ${count || instances.length} 个可疑实例：${instances.map(suspiciousInstanceLabel).join("，")}`;
+    return `heartbeat/token 告警当前存在 ${count || instances.length} 个可疑实例：${instances.map(suspiciousInstanceLabel).join("，")}${freshnessSuffix}`;
   }
-  return `heartbeat/token 告警当前存在 ${count || "若干"} 个可疑实例`;
+  return `heartbeat/token 告警当前存在 ${count || "若干"} 个可疑实例${freshnessSuffix}`;
 }
 
 function decide(parts) {

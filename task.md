@@ -1212,3 +1212,10 @@ cron 安装器已完成部署、受控 crontab 已安装，且 Tom workspace inb
 - 已发现 Tom 根目录 `./healthcheck.sh` 与仓库版不同步；已调整 `update.sh` 与 `rollback.sh`，后续更新/回滚会先把仓库版健康检查脚本同步到部署根目录再执行。
 - 已调整 `ops/local/final-go-live-completion-audit.sh`：当前置项失败时，不再把最终 `approve-and-run` 放入 `nextCommands`。
 - 当前上线阻塞从“人工批准”回退为“前置项未稳定”：需要先补齐 deepseek 实例的 `DEEPSEEK_API_KEY`，或由 Anan 明确批准临时移除/停用 deepseek 这个实例的健康纳入范围。
+
+## 本轮新增（上线 warning 新鲜度）
+
+- 已安全刷新 Tom heartbeat/token 告警 latest：`repo/ops/tom-readonly/heartbeat-burn-alert-runner.sh run` 返回 `heartbeat_burn_alert_triggered`，这是发现告警时的预期返回码。
+- 最新 suspiciousRows 从 3 降到 2：`main(periodic_small_growth)` 与 `deepseek(periodic_small_growth)`；`spark` 当前不再是最新 suspicious 实例。
+- 本次刷新只写 control-center runtime 的 `heartbeat-burn-alerts/latest.json` 与事件日志，不写 OpenClaw 实例目录、不清空 `HEARTBEAT.md`、不调用模型、不重启实例。
+- 已增强 `ops/local/final-go-live-review.sh`：warning 文案会带上 heartbeat/token 告警生成时间与大致年龄，避免最终审查时被旧 `latest.json` 误导。

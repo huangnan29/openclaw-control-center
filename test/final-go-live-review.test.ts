@@ -156,6 +156,7 @@ test("final go-live review 汇总人工批准前状态并保留用量告警为 w
     assert.equal(result.report.summary.heartbeatBurnAlert.latest.suspiciousRows, 2);
     assert(result.report.warnings.some((warning: string) => warning.includes("main(periodic_small_growth)")));
     assert(result.report.warnings.some((warning: string) => warning.includes("deepseek(periodic_small_growth)")));
+    assert(result.report.warnings.some((warning: string) => warning.includes("告警时间：2026-05-18T15:45:02.278Z")));
     assert.equal(result.report.safety.opensLiveGate, false);
     assert.equal(result.report.safety.callsManagedActionsLiveApi, false);
     assert.equal(result.report.safety.writesOpenClawInstanceDirs, false);

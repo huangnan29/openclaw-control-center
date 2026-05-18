@@ -4956,3 +4956,20 @@
   - `bash -n ops/tom-readonly/healthcheck.sh ops/local/final-go-live-completion-audit.sh`
   - `npm test -- test/final-go-live-completion-audit.test.ts test/oss-readiness.test.ts`
   - `npm run build`
+
+## Phase 105 Go-live warning freshness visibility (2026-05-19) — Completed
+- Scope: make final go-live review/audit warnings show the heartbeat/token alert generation time so stale `latest.json` data is visible during approval review.
+- Changed files:
+  - `ops/local/final-go-live-review.sh`
+  - `test/final-go-live-review.test.ts`
+  - `docs/PROGRESS.md`
+  - `task.md`
+- Implementation:
+  - `final-go-live-review.sh` warning text now includes `latest.generatedAt` and an approximate age when the alert timestamp is parseable.
+- Current runtime finding:
+  - After a safe `heartbeat-burn-alert-runner.sh run`, current suspicious instances dropped from 3 to 2: `main(periodic_small_growth)` and `deepseek(periodic_small_growth)`.
+  - The runner only wrote control-center runtime alert files; it did not modify any OpenClaw instance directory.
+- Verification:
+  - `bash -n ops/local/final-go-live-review.sh`
+  - `npm test -- test/final-go-live-review.test.ts test/final-go-live-completion-audit.test.ts`
+  - `npm run build`
