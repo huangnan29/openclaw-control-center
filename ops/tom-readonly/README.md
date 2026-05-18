@@ -53,6 +53,8 @@
 - `install-managed-action-inbox-cron.sh`：安装 dry-run inbox 批处理定时器；`status/plan` 不写 crontab，`apply/remove` 必须显式确认，只更新当前用户 crontab 中的受控标记块。
 - `install-managed-action-agents-instructions.sh`：把 Tom `AGENTS.md` 中的 control-center inbox 使用规范安装为受控标记块；`plan/status` 不写文件，`apply` 必须显式确认并备份原文件。
 - `heartbeat-burn-inspector.sh`：只读分析 collector history 中的 token 增量节奏，并可通过 control-center 容器只读查看对应实例 `HEARTBEAT.md` 元数据；用于定位 deepseek 这类 heartbeat/定时轮询消耗，不会清空文件或修改实例。
+- `heartbeat-burn-alert-runner.sh`：调用只读 inspector，并把异常用量告警结果写入 control-center runtime；不修改实例、不调用模型。
+- `install-heartbeat-burn-alert-cron.sh`：安装 heartbeat/token 异常用量告警定时器；`status/plan` 不写 crontab，`apply/remove` 必须显式确认，只更新当前用户 crontab 中的受控标记块。
 
 ## Tom 上的常用命令
 
@@ -160,6 +162,12 @@ repo/ops/tom-readonly/install-managed-action-inbox-cron.sh apply
 repo/ops/tom-readonly/heartbeat-burn-inspector.sh status
 repo/ops/tom-readonly/heartbeat-burn-inspector.sh status deepseek
 repo/ops/tom-readonly/heartbeat-burn-inspector.sh check deepseek
+repo/ops/tom-readonly/heartbeat-burn-alert-runner.sh status
+repo/ops/tom-readonly/heartbeat-burn-alert-runner.sh run
+repo/ops/tom-readonly/install-heartbeat-burn-alert-cron.sh status
+repo/ops/tom-readonly/install-heartbeat-burn-alert-cron.sh plan
+CONFIRM_HEARTBEAT_BURN_ALERT_CRON=I_UNDERSTAND_THIS_ONLY_INSTALLS_READONLY_HEARTBEAT_BURN_ALERT_CRON \
+repo/ops/tom-readonly/install-heartbeat-burn-alert-cron.sh apply
 CONFIRM_LIVE_HEALTHCHECK_RUNNER=I_UNDERSTAND_THIS_RUNS_APPROVED_LIVE_HEALTHCHECK \
 LOCAL_API_TOKEN=<本地令牌> \
 repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh run-approved
@@ -212,6 +220,10 @@ PY
 `install-managed-action-agents-instructions.sh` 用于让 Tom 的 Discord 行为稳定落到上述 inbox。`status/plan` 会读取目标 `AGENTS.md` 并展示受控标记块是否需要更新；`apply` 必须设置 `CONFIRM_MANAGED_ACTION_AGENTS_INSTALL=I_UNDERSTAND_THIS_UPDATES_TOM_AGENTS_INSTRUCTIONS_ONLY`。Tom 上推荐用 `MANAGED_ACTION_AGENTS_TARGET_SOURCE=openclaw-container`，通过 `openclaw-work-openclaw-gateway-1` 容器只更新 `/home/node/.openclaw/workspace/AGENTS.md` 中的 `OPENCLAW_CONTROL_CENTER_MANAGED_ACTIONS` 标记块，并在同目录 `.backup/control-center-agents/` 下备份原文件。它不修改 `openclaw.json`、不重启 OpenClaw、不调用任何 managed action API。
 
 `heartbeat-burn-inspector.sh` 是异常用量线索的命令行复核入口。它从 `runtime/collectors/tom-oracle/history.json` 读取实例 token 增量，识别“每隔几十分钟小额增长”的模式；默认还会通过 `openclaw-control-center-readonly` 容器只读读取 `/instances/<id>/workspace/HEARTBEAT.md` 的大小、非空状态和首个非空行。它只读元数据，不会清空 `HEARTBEAT.md`，不会写 OpenClaw 实例目录，不会调用模型，不会重启实例。`status` 适合人工查看；`check` 发现可疑增长时返回非 0，适合后续接告警。发现 deepseek 这类实例可疑后，先用 `status deepseek` 复核，再由 Anan 人工决定是否清空或关闭对应实例的 `HEARTBEAT.md`。
+
+`heartbeat-burn-alert-runner.sh` 是上述检查器的告警写入层。`run` 会调用 inspector，并把最新结果写入 `runtime/heartbeat-burn-alerts/latest.json`；如果发现可疑增长，会追加 `runtime/heartbeat-burn-alerts/events.ndjson` 并以非 0 退出，方便 cron 或外部监控识别。该 runner 只写 control-center runtime，不写 OpenClaw 实例目录、不清空 `HEARTBEAT.md`、不调用模型、不重启实例。
+
+`install-heartbeat-burn-alert-cron.sh` 用于把异常用量检查安装成当前用户 crontab 中的受控定时任务。`status/plan` 只读取 crontab 并展示将安装的 `OPENCLAW_HEARTBEAT_BURN_ALERT_CRON` 标记块；`apply/remove` 必须设置 `CONFIRM_HEARTBEAT_BURN_ALERT_CRON=I_UNDERSTAND_THIS_ONLY_INSTALLS_READONLY_HEARTBEAT_BURN_ALERT_CRON`。默认每 15 分钟检查全部实例；也可以设置 `HEARTBEAT_BURN_ALERT_INSTANCE_IDS="deepseek"` 只盯某个实例。它安装的 cron 只会执行 `heartbeat-burn-alert-runner.sh run`，不会打开 live gate、不会修改 OpenClaw 实例目录。
 
 当前只有一台 Oracle 时，新增实例优先走本机注册入口：
 

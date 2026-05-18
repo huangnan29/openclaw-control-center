@@ -209,6 +209,19 @@ repo/ops/tom-readonly/heartbeat-burn-inspector.sh check deepseek
 
 `check` 在发现可疑增长时会返回非 0。
 
+Tom 上也可以安装只读告警 cron：
+
+```bash
+cd /srv/openclaw-control-center-readonly
+repo/ops/tom-readonly/heartbeat-burn-alert-runner.sh run
+repo/ops/tom-readonly/install-heartbeat-burn-alert-cron.sh status
+repo/ops/tom-readonly/install-heartbeat-burn-alert-cron.sh plan
+CONFIRM_HEARTBEAT_BURN_ALERT_CRON=I_UNDERSTAND_THIS_ONLY_INSTALLS_READONLY_HEARTBEAT_BURN_ALERT_CRON \
+repo/ops/tom-readonly/install-heartbeat-burn-alert-cron.sh apply
+```
+
+告警 runner 只写 `runtime/heartbeat-burn-alerts/latest.json` 和 `events.ndjson`，不会修改 OpenClaw 实例目录，也不会清空 `HEARTBEAT.md`。
+
 **处理原则：**
 
 先确认 `HEARTBEAT.md` 是否非空，再人工决定是否清空或关闭该实例 heartbeat。不要让控制中心自动改 OpenClaw 实例文件；这一步应由 Anan 明确批准。

@@ -446,6 +446,31 @@ repo/ops/tom-readonly/install-managed-action-inbox-cron.sh apply
 
 `install-managed-action-inbox-cron.sh` 只更新当前用户 crontab 中的 `OPENCLAW_MANAGED_ACTION_INBOX_CRON` 标记块。它安装的命令只会执行 `managed-action-inbox-runner.sh run-pending`，不调用 managed action live API，不修改 OpenClaw 实例目录，不重启实例；如需关闭，使用同一个确认短语执行 `remove`。
 
+### 异常用量告警
+
+用量页的“异常用量线索”可以在 Tom 上用只读脚本复核：
+
+```bash
+repo/ops/tom-readonly/heartbeat-burn-inspector.sh status
+repo/ops/tom-readonly/heartbeat-burn-inspector.sh status deepseek
+repo/ops/tom-readonly/heartbeat-burn-inspector.sh check deepseek
+```
+
+`heartbeat-burn-inspector.sh` 只读取 collector history 和只读挂载中的 `HEARTBEAT.md` 元数据，用于判断实例是否存在周期性小额 token 增长。它不写 OpenClaw 实例目录、不清空 `HEARTBEAT.md`、不调用模型、不重启实例。
+
+如果要把检查结果落到 control-center runtime 并接入 cron，可以先运行：
+
+```bash
+repo/ops/tom-readonly/heartbeat-burn-alert-runner.sh status
+repo/ops/tom-readonly/heartbeat-burn-alert-runner.sh run
+repo/ops/tom-readonly/install-heartbeat-burn-alert-cron.sh status
+repo/ops/tom-readonly/install-heartbeat-burn-alert-cron.sh plan
+CONFIRM_HEARTBEAT_BURN_ALERT_CRON=I_UNDERSTAND_THIS_ONLY_INSTALLS_READONLY_HEARTBEAT_BURN_ALERT_CRON \
+repo/ops/tom-readonly/install-heartbeat-burn-alert-cron.sh apply
+```
+
+`heartbeat-burn-alert-runner.sh run` 只写 `runtime/heartbeat-burn-alerts/latest.json` 与 `events.ndjson`。`install-heartbeat-burn-alert-cron.sh` 只更新当前用户 crontab 中的 `OPENCLAW_HEARTBEAT_BURN_ALERT_CRON` 受控块；默认每 15 分钟检查全部实例，也可通过 `HEARTBEAT_BURN_ALERT_INSTANCE_IDS="deepseek"` 聚焦单个实例。发现 deepseek 这类非空 `HEARTBEAT.md` 后，清空或关闭该文件仍需要 Anan 人工批准，控制中心不会自动修改实例 workspace。
+
 为了让 Tom 在 Discord 中稳定使用 inbox，可以安装一段受控 `AGENTS.md` 规范：
 
 ```bash

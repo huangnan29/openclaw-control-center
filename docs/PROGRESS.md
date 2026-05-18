@@ -1,5 +1,30 @@
 # Progress
 
+## Phase 159 (Readonly heartbeat burn alert cron) — Completed
+- Scope:
+  - Turn the heartbeat burn inspector into an installable Tom-side alert loop.
+  - Keep the loop limited to control-center runtime writes and current-user crontab management.
+- Changed files:
+  - `ops/tom-readonly/heartbeat-burn-alert-runner.sh`
+  - `ops/tom-readonly/install-heartbeat-burn-alert-cron.sh`
+  - `test/heartbeat-burn-alert-cron.test.ts`
+  - `ops/tom-readonly/README.md`
+  - `docs/FAQ.md`
+  - `docs/MULTI_INSTANCE_READONLY.md`
+  - `implementation_plan.md`
+  - `docs/PROGRESS.md`
+- Implementation:
+  - Added `heartbeat-burn-alert-runner.sh status|run`.
+  - `run` calls the readonly inspector, writes `runtime/heartbeat-burn-alerts/latest.json`, and appends `events.ndjson` when suspicious rows are present.
+  - Added `install-heartbeat-burn-alert-cron.sh status|plan|apply|remove` with an explicit confirmation phrase and an `OPENCLAW_HEARTBEAT_BURN_ALERT_CRON` crontab marker block.
+  - The cron calls only the alert runner and can be scoped with `HEARTBEAT_BURN_ALERT_INSTANCE_IDS`.
+  - Safety fields state that the loop does not write OpenClaw instance directories, clear heartbeat files, call model APIs, restart instances, or call live managed actions.
+- Verification:
+  - `bash -n ops/tom-readonly/heartbeat-burn-alert-runner.sh ops/tom-readonly/install-heartbeat-burn-alert-cron.sh`
+  - `npm test -- test/heartbeat-burn-alert-cron.test.ts`
+- Remaining gap:
+  - Tom install/smoke is still pending for this phase. The cron should be installed after deployment and verified with `install-heartbeat-burn-alert-cron.sh status` plus one manual `heartbeat-burn-alert-runner.sh run`.
+
 ## Phase 158 (Readonly heartbeat burn inspector) — Completed
 - Scope:
   - Turn the Usage anomaly clue into a repeatable operator check for Tom.

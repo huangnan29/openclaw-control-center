@@ -1080,3 +1080,19 @@ cron 安装器已完成部署、受控 crontab 已安装，且 Tom workspace inb
 ## 阶段完成后的下一步
 
 当前已确认 deepseek 的异常消耗与非空 `HEARTBEAT.md` 高度相关。下一步有两个分支：如果要先止损，需要 Anan 明确批准后再清空或关闭 deepseek 的 `/srv/openclaw-deepseek/workspace/HEARTBEAT.md`；如果要先完成控制中心最终上线，则审查证据包并显式运行 `approve-and-run`。在获得明确批准前，仍不得修改实例 workspace、不得执行 approval `approve`、不得打开 live gate、不得触发真实 managed action。
+
+## 本轮新增（heartbeat burn 告警 cron）
+
+- 已新增 `ops/tom-readonly/heartbeat-burn-alert-runner.sh`，把只读 inspector 的结果写入 control-center runtime。
+- `heartbeat-burn-alert-runner.sh run` 会生成 `runtime/heartbeat-burn-alerts/latest.json`；发现可疑增长时追加 `runtime/heartbeat-burn-alerts/events.ndjson`，并以非 0 退出，方便 cron 或外部监控识别。
+- 已新增 `ops/tom-readonly/install-heartbeat-burn-alert-cron.sh`，用于安装当前用户 crontab 的 `OPENCLAW_HEARTBEAT_BURN_ALERT_CRON` 受控块。
+- `install-heartbeat-burn-alert-cron.sh status/plan` 只读 crontab；`apply/remove` 必须设置 `CONFIRM_HEARTBEAT_BURN_ALERT_CRON=I_UNDERSTAND_THIS_ONLY_INSTALLS_READONLY_HEARTBEAT_BURN_ALERT_CRON`。
+- 告警 cron 默认每 15 分钟检查全部实例，也可设置 `HEARTBEAT_BURN_ALERT_INSTANCE_IDS="deepseek"` 聚焦单实例。
+- 该链路只写 control-center runtime 与当前用户 crontab，不写 OpenClaw 实例目录、不清空 `HEARTBEAT.md`、不调用模型、不重启实例、不调用 managed action live API、不打开 live gate。
+- 已新增 `test/heartbeat-burn-alert-cron.test.ts`，覆盖 runner 写告警报告、无异常 clear 状态、cron plan 不写 crontab、apply 确认与 remove。
+- 已验证 `bash -n ops/tom-readonly/heartbeat-burn-alert-runner.sh ops/tom-readonly/install-heartbeat-burn-alert-cron.sh`。
+- 已验证 `npm test -- test/heartbeat-burn-alert-cron.test.ts`，4/4 通过。
+
+## 阶段完成后的下一步
+
+下一步部署该告警 cron 到 Tom，并安装 `OPENCLAW_HEARTBEAT_BURN_ALERT_CRON` 受控块；安装后执行一次 `heartbeat-burn-alert-runner.sh run` 做 smoke，预期 deepseek 仍触发 `heartbeat_burn_alert_triggered`。仍不得清空 deepseek `HEARTBEAT.md`，除非 Anan 明确批准。
