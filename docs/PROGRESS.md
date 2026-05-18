@@ -1,5 +1,27 @@
 # Progress
 
+## Phase 158 (Readonly heartbeat burn inspector) — Completed
+- Scope:
+  - Turn the Usage anomaly clue into a repeatable operator check for Tom.
+  - Keep the first response read-only: detect, explain, and point to the relevant `HEARTBEAT.md` without changing OpenClaw instance files.
+- Changed files:
+  - `ops/tom-readonly/heartbeat-burn-inspector.sh`
+  - `test/heartbeat-burn-inspector.test.ts`
+  - `ops/tom-readonly/README.md`
+  - `docs/FAQ.md`
+  - `docs/PROGRESS.md`
+- Implementation:
+  - Added `heartbeat-burn-inspector.sh status|check [instanceId]`.
+  - The script reads `config/instances.json` and `runtime/collectors/tom-oracle/history.json`, computes token growth events, median delta, median interval, rhythm score, and recent spike status.
+  - By default it uses the control-center container to read only `HEARTBEAT.md` metadata from the readonly workspace mount: file status, size, non-empty flag, first content line, and update time.
+  - `status` is for manual review; `check` exits nonzero when suspicious rows are found, so it can later become an alert source.
+  - Safety fields explicitly state that the script does not clear heartbeat files, write OpenClaw instance dirs, call model APIs, restart instances, or call live managed actions.
+- Verification:
+  - `bash -n ops/tom-readonly/heartbeat-burn-inspector.sh`
+  - `npm test -- test/heartbeat-burn-inspector.test.ts`
+- Remaining gap:
+  - The cleanup action remains manual by design. Clearing or disabling `HEARTBEAT.md` should require Anan's explicit approval because it changes an OpenClaw instance workspace.
+
 ## Phase 157 (Usage anomaly clues for heartbeat burn) — Completed
 - Scope:
   - Make periodic token growth visible before it turns into a confusing bill or quota surprise.

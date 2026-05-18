@@ -172,6 +172,49 @@ budget:
 
 ---
 
+### 2.1 某个实例 token 持续上涨，怎么判断是不是 heartbeat 在烧？
+
+**问题：** 用量页看到某个实例一直增加 token，但没有明显任务在跑。
+
+**先看页面：**
+
+打开用量页并筛选实例，例如：
+
+```text
+https://openclaw.ananclaw.com/?section=usage-cost&usage_instance=deepseek&lang=zh
+```
+
+如果页面出现 **异常用量线索**，重点看三项：
+
+- **线索：** `周期性小额增长` 或 `最近突增`
+- **节奏：** 例如 `30 分钟`
+- **中位增量：** 例如每次约 `280 token`
+
+这类模式通常说明某个定时检查、heartbeat poll 或自动轮询在反复触发模型调用。
+
+**再用服务器只读复核：**
+
+```bash
+cd /srv/openclaw-control-center-readonly
+repo/ops/tom-readonly/heartbeat-burn-inspector.sh status deepseek
+```
+
+这个命令只读取 collector history 和只读挂载中的 `HEARTBEAT.md` 元数据，不会清空文件、不调用模型、不重启实例。
+
+如果需要把它接成告警，可以用：
+
+```bash
+repo/ops/tom-readonly/heartbeat-burn-inspector.sh check deepseek
+```
+
+`check` 在发现可疑增长时会返回非 0。
+
+**处理原则：**
+
+先确认 `HEARTBEAT.md` 是否非空，再人工决定是否清空或关闭该实例 heartbeat。不要让控制中心自动改 OpenClaw 实例文件；这一步应由 Anan 明确批准。
+
+---
+
 ### 3. 会话停滞检测 — 怎么判定的？
 
 **问题：** 控制中心显示某个会话"停滞执行"，但找不到是哪个会话，也不确定判定标准。

@@ -52,6 +52,7 @@
 - `managed-action-inbox-runner.sh`：读取 OpenClaw workspace 中的文本请求 inbox，调用文本桥接层，并把结果和处理状态只写入 control-center runtime；`run-pending` 可一次处理多个待处理 dry-run 请求。
 - `install-managed-action-inbox-cron.sh`：安装 dry-run inbox 批处理定时器；`status/plan` 不写 crontab，`apply/remove` 必须显式确认，只更新当前用户 crontab 中的受控标记块。
 - `install-managed-action-agents-instructions.sh`：把 Tom `AGENTS.md` 中的 control-center inbox 使用规范安装为受控标记块；`plan/status` 不写文件，`apply` 必须显式确认并备份原文件。
+- `heartbeat-burn-inspector.sh`：只读分析 collector history 中的 token 增量节奏，并可通过 control-center 容器只读查看对应实例 `HEARTBEAT.md` 元数据；用于定位 deepseek 这类 heartbeat/定时轮询消耗，不会清空文件或修改实例。
 
 ## Tom 上的常用命令
 
@@ -156,6 +157,9 @@ repo/ops/tom-readonly/install-managed-action-inbox-cron.sh status
 repo/ops/tom-readonly/install-managed-action-inbox-cron.sh plan
 CONFIRM_MANAGED_ACTION_INBOX_CRON=I_UNDERSTAND_THIS_ONLY_INSTALLS_DRY_RUN_INBOX_CRON \
 repo/ops/tom-readonly/install-managed-action-inbox-cron.sh apply
+repo/ops/tom-readonly/heartbeat-burn-inspector.sh status
+repo/ops/tom-readonly/heartbeat-burn-inspector.sh status deepseek
+repo/ops/tom-readonly/heartbeat-burn-inspector.sh check deepseek
 CONFIRM_LIVE_HEALTHCHECK_RUNNER=I_UNDERSTAND_THIS_RUNS_APPROVED_LIVE_HEALTHCHECK \
 LOCAL_API_TOKEN=<本地令牌> \
 repo/ops/tom-readonly/live-healthcheck-rollout-runner.sh run-approved
@@ -206,6 +210,8 @@ PY
 `install-managed-action-inbox-cron.sh` 用于把 `run-pending` 安装成当前用户 crontab 中的受控定时任务。`status/plan` 只读取 crontab 并展示将安装的 `OPENCLAW_MANAGED_ACTION_INBOX_CRON` 标记块；`apply/remove` 必须设置 `CONFIRM_MANAGED_ACTION_INBOX_CRON=I_UNDERSTAND_THIS_ONLY_INSTALLS_DRY_RUN_INBOX_CRON`。该 cron 只会执行 `managed-action-inbox-runner.sh run-pending`，不会打开 live gate、不会重启实例、不会修改 OpenClaw workspace 请求文件或实例目录。
 
 `install-managed-action-agents-instructions.sh` 用于让 Tom 的 Discord 行为稳定落到上述 inbox。`status/plan` 会读取目标 `AGENTS.md` 并展示受控标记块是否需要更新；`apply` 必须设置 `CONFIRM_MANAGED_ACTION_AGENTS_INSTALL=I_UNDERSTAND_THIS_UPDATES_TOM_AGENTS_INSTRUCTIONS_ONLY`。Tom 上推荐用 `MANAGED_ACTION_AGENTS_TARGET_SOURCE=openclaw-container`，通过 `openclaw-work-openclaw-gateway-1` 容器只更新 `/home/node/.openclaw/workspace/AGENTS.md` 中的 `OPENCLAW_CONTROL_CENTER_MANAGED_ACTIONS` 标记块，并在同目录 `.backup/control-center-agents/` 下备份原文件。它不修改 `openclaw.json`、不重启 OpenClaw、不调用任何 managed action API。
+
+`heartbeat-burn-inspector.sh` 是异常用量线索的命令行复核入口。它从 `runtime/collectors/tom-oracle/history.json` 读取实例 token 增量，识别“每隔几十分钟小额增长”的模式；默认还会通过 `openclaw-control-center-readonly` 容器只读读取 `/instances/<id>/workspace/HEARTBEAT.md` 的大小、非空状态和首个非空行。它只读元数据，不会清空 `HEARTBEAT.md`，不会写 OpenClaw 实例目录，不会调用模型，不会重启实例。`status` 适合人工查看；`check` 发现可疑增长时返回非 0，适合后续接告警。发现 deepseek 这类实例可疑后，先用 `status deepseek` 复核，再由 Anan 人工决定是否清空或关闭对应实例的 `HEARTBEAT.md`。
 
 当前只有一台 Oracle 时，新增实例优先走本机注册入口：
 
