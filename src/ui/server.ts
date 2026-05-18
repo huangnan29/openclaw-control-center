@@ -6209,6 +6209,15 @@ interface MultiInstanceUiMetrics {
   lastActivityAt?: string;
 }
 
+type MultiInstanceUsageShareRow = UsageCostSnapshot["breakdown"]["byAgent"][number];
+
+interface FleetDistributionRow {
+  label: string;
+  value: number;
+  detail?: string;
+  tone?: string;
+}
+
 function buildInstanceUiMetrics(item: InstanceSnapshot): MultiInstanceUiMetrics {
   const sessions = item.snapshot.sessions;
   const statusBySession = new Map(item.snapshot.statuses.map((status) => [status.sessionKey, status]));
@@ -6241,6 +6250,151 @@ function buildInstanceUiMetrics(item: InstanceSnapshot): MultiInstanceUiMetrics 
 
 function renderFleetMetricChip(label: string, value: number | string, tone = ""): string {
   return `<div class="status-chip${tone ? ` ${escapeHtml(tone)}` : ""}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></div>`;
+}
+
+function toUsageShareRow(input: {
+  key: string;
+  label: string;
+  tokens: number;
+  estimatedCost: number;
+  sessions: number;
+  sourceStatus: InstanceSnapshot["status"];
+}): MultiInstanceUsageShareRow {
+  return {
+    key: input.key,
+    label: input.label,
+    tokens: input.tokens,
+    estimatedCost: input.estimatedCost,
+    requests: input.sessions,
+    sessions: input.sessions,
+    sourceStatus: input.sourceStatus,
+  };
+}
+
+function buildInstanceUsageShareRows(metrics: Array<{ item: InstanceSnapshot; metrics: MultiInstanceUiMetrics }>): MultiInstanceUsageShareRow[] {
+  return metrics
+    .map(({ item, metrics: itemMetrics }) =>
+      toUsageShareRow({
+        key: item.instance.id,
+        label: item.instance.name,
+        tokens: itemMetrics.totalTokens,
+        estimatedCost: itemMetrics.cost,
+        sessions: itemMetrics.sessions,
+        sourceStatus: item.status,
+      }),
+    )
+    .filter((row) => row.tokens > 0)
+    .sort((a, b) => b.tokens - a.tokens);
+}
+
+function buildModelUsageShareRows(items: InstanceSnapshot[]): MultiInstanceUsageShareRow[] {
+  return buildUsageModelRows(items)
+    .map((row) =>
+      toUsageShareRow({
+        key: row.model,
+        label: row.model,
+        tokens: row.tokensIn + row.tokensOut,
+        estimatedCost: row.cost,
+        sessions: row.sessions,
+        sourceStatus: "connected",
+      }),
+    )
+    .filter((row) => row.tokens > 0);
+}
+
+function renderFleetPieCard(
+  title: string,
+  meta: string,
+  rows: MultiInstanceUsageShareRow[],
+  totalTokens: number,
+  centerLabel: string,
+  language: UiLanguage,
+): string {
+  const chart = renderTokenPieChart(rows.slice(0, 8), totalTokens, centerLabel, language);
+  return `<article class="fleet-chart-card">
+    <div class="fleet-chart-title">${escapeHtml(title)}</div>
+    <div class="meta">${escapeHtml(meta)}</div>
+    ${chart || `<div class="empty-state">${escapeHtml(pickUiText(language, "No usage data yet.", "暂无用量数据。"))}</div>`}
+  </article>`;
+}
+
+function renderFleetDistributionChart(title: string, rows: FleetDistributionRow[], language: UiLanguage): string {
+  const total = rows.reduce((sum, row) => sum + Math.max(0, row.value), 0);
+  const body =
+    total <= 0
+      ? `<div class="empty-state">${escapeHtml(pickUiText(language, "No distribution data yet.", "暂无分布数据。"))}</div>`
+      : `<div class="fleet-meter-list">${rows
+          .filter((row) => row.value > 0)
+          .map((row, index) => {
+            const share = total > 0 ? (row.value / total) * 100 : 0;
+            const color = TOKEN_PIE_COLORS[index % TOKEN_PIE_COLORS.length];
+            const toneClass = row.tone ? ` tone-${escapeHtml(row.tone)}` : "";
+            return `<div class="fleet-meter-row${toneClass}">
+              <div class="fleet-meter-head"><span>${escapeHtml(row.label)}</span><strong>${formatInt(row.value)} <small>${formatPercent(share)}</small></strong></div>
+              <div class="fleet-meter-track"><div class="fleet-meter-fill" style="width:${Math.min(100, Math.max(0, share)).toFixed(2)}%; background:${color};"></div></div>
+              ${row.detail ? `<div class="meta">${escapeHtml(row.detail)}</div>` : ""}
+            </div>`;
+          })
+          .join("")}</div>`;
+  return `<article class="fleet-chart-card">
+    <div class="fleet-chart-title">${escapeHtml(title)}</div>
+    ${body}
+  </article>`;
+}
+
+function renderMultiInstanceStatsPanel(items: InstanceSnapshot[], language: UiLanguage): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const metrics = items.map((item) => ({ item, metrics: buildInstanceUiMetrics(item) }));
+  const healthRows: FleetDistributionRow[] = [
+    {
+      label: t("Healthy", "健康"),
+      value: metrics.filter(
+        ({ item, metrics: itemMetrics }) =>
+          item.status === "connected" && itemMetrics.errors === 0 && itemMetrics.blocked === 0 && itemMetrics.pendingApprovals === 0,
+      ).length,
+      tone: "ok",
+    },
+    {
+      label: t("Needs attention", "需关注"),
+      value: metrics.filter(
+        ({ item, metrics: itemMetrics }) =>
+          item.status === "partial" ||
+          (item.status === "connected" && (itemMetrics.errors > 0 || itemMetrics.blocked > 0 || itemMetrics.pendingApprovals > 0)),
+      ).length,
+      tone: "warn",
+    },
+    {
+      label: t("Not connected", "未连接"),
+      value: metrics.filter(({ item }) => item.status === "not_connected").length,
+      tone: "danger",
+    },
+  ];
+  const stateCounts = items.reduce(
+    (acc, item) => {
+      for (const session of item.snapshot.sessions) acc[session.state] += 1;
+      return acc;
+    },
+    { idle: 0, running: 0, blocked: 0, waiting_approval: 0, error: 0 } as Record<AgentRunState, number>,
+  );
+  const stateRows: FleetDistributionRow[] = [
+    { label: t("Idle", "待命"), value: stateCounts.idle, tone: "ok" },
+    { label: t("Running", "运行中"), value: stateCounts.running, tone: "active" },
+    { label: t("Blocked", "阻塞"), value: stateCounts.blocked, tone: "warn" },
+    { label: t("Waiting approval", "待审批"), value: stateCounts.waiting_approval, tone: "warn" },
+    { label: t("Error", "错误"), value: stateCounts.error, tone: "danger" },
+  ];
+
+  return `<section class="panel" id="fleet-stats">
+    <div class="panel-head">
+      <h2>${escapeHtml(t("Statistics", "统计图表"))}</h2>
+      <div class="meta">${escapeHtml(t("Charts are derived from the same readonly instance snapshots.", "图表来自同一份只读实例快照。"))}</div>
+    </div>
+    ${renderDataSourceNote(language, t("Readonly gateway snapshots; no instance mutation.", "只读 gateway 快照，不修改实例"))}
+    <div class="fleet-chart-grid">
+      ${renderFleetDistributionChart(t("Instance health distribution", "实例健康分布"), healthRows, language)}
+      ${renderFleetDistributionChart(t("Session state distribution", "会话状态分布"), stateRows, language)}
+    </div>
+  </section>`;
 }
 
 interface ServerUiSummary {
@@ -6977,6 +7131,30 @@ function renderMultiInstanceUsagePanel(items: InstanceSnapshot[], language: UiLa
         `<tr><td>${escapeHtml(row.model)}</td><td>${formatInt(row.tokensIn + row.tokensOut)}</td><td>${formatInt(row.tokensIn)}</td><td>${formatInt(row.tokensOut)}</td><td>${formatPreciseCost(row.cost)}</td><td>${row.sessions}</td></tr>`,
     )
     .join("");
+  const instanceShareRows = buildInstanceUsageShareRows(metrics);
+  const modelShareRows = buildModelUsageShareRows(items);
+  const modelShareTotal = modelShareRows.reduce((sum, row) => sum + row.tokens, 0);
+  const chartHtml =
+    totals.totalTokens > 0
+      ? `<div class="fleet-chart-grid usage-chart-grid">
+          ${renderFleetPieCard(
+            t("Usage share by instance", "按实例用量占比"),
+            t("Which OpenClaw instance consumed the most tokens in the visible snapshot.", "当前快照中各实例的 token 消耗占比。"),
+            instanceShareRows,
+            totals.totalTokens,
+            t("Instances", "实例"),
+            language,
+          )}
+          ${renderFleetPieCard(
+            t("Usage share by model", "按模型用量占比"),
+            t("Model mix from session status token fields.", "来自 session status token 字段的模型分布。"),
+            modelShareRows,
+            modelShareTotal,
+            t("Models", "模型"),
+            language,
+          )}
+        </div>`
+      : `<div class="empty-state">${escapeHtml(t("No status usage data yet.", "暂无状态用量数据。"))}</div>`;
   const chips = [
     renderFleetMetricChip(t("Tokens In", "输入用量"), formatInt(totals.tokensIn)),
     renderFleetMetricChip(t("Tokens Out", "输出用量"), formatInt(totals.tokensOut)),
@@ -6990,6 +7168,7 @@ function renderMultiInstanceUsagePanel(items: InstanceSnapshot[], language: UiLa
     </div>
     ${renderDataSourceNote(language, t("Session status token fields.", "session status token 字段"))}
     <div class="status-strip">${chips}</div>
+    ${chartHtml}
     ${modelRows ? `<div class="table-wrap"><table><thead><tr><th>Model</th><th>${escapeHtml(t("Total", "合计"))}</th><th>In</th><th>Out</th><th>Cost</th><th>${escapeHtml(t("Sessions", "会话"))}</th></tr></thead><tbody>${modelRows}</tbody></table></div>` : `<div class="empty-state">${escapeHtml(t("No status usage data yet.", "暂无状态用量数据。"))}</div>`}
   </section>`;
 }
@@ -7152,6 +7331,26 @@ function renderMultiInstanceOverview(
     .status-chip.active { border-color: rgba(37, 99, 235, 0.28); background: #eff6ff; }
     .status-chip span { display: block; color: var(--muted); font-size: 12px; }
     .status-chip strong { display: block; margin-top: 5px; font-size: 24px; line-height: 1.08; }
+    .fleet-chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-top: 12px; }
+    .fleet-chart-card { border: 1px solid var(--border); border-radius: 8px; background: rgba(255, 255, 255, 0.76); padding: 12px; min-width: 0; }
+    .fleet-chart-title { font-weight: 700; margin-bottom: 4px; }
+    .fleet-meter-list { display: grid; gap: 10px; margin-top: 10px; }
+    .fleet-meter-row { display: grid; gap: 5px; }
+    .fleet-meter-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; font-size: 13px; }
+    .fleet-meter-head strong { font-size: 13px; font-variant-numeric: tabular-nums; }
+    .fleet-meter-head small { color: var(--muted); font-weight: 500; }
+    .fleet-meter-track { height: 9px; border-radius: 999px; background: rgba(17, 24, 39, 0.08); overflow: hidden; }
+    .fleet-meter-fill { height: 100%; border-radius: inherit; }
+    .pie-wrap { margin-top: 10px; display: grid; grid-template-columns: minmax(150px, 180px) minmax(0, 1fr); gap: 12px; align-items: center; }
+    .pie-chart { width: 100%; aspect-ratio: 1; border-radius: 999px; display: grid; place-items: center; border: 1px solid var(--border); }
+    .pie-hole { width: 62%; aspect-ratio: 1; border-radius: 999px; display: grid; place-items: center; align-content: center; background: #fff; text-align: center; padding: 10px; box-shadow: inset 0 0 0 1px rgba(17, 24, 39, 0.08); }
+    .pie-hole strong { font-size: 15px; }
+    .pie-hole span { margin-top: 2px; font-size: 11px; color: var(--muted); line-height: 1.35; }
+    .pie-legend { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+    .pie-legend li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 7px; align-items: center; color: #344054; font-size: 12px; }
+    .pie-swatch { width: 10px; height: 10px; border-radius: 999px; }
+    .pie-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pie-val { color: var(--muted); font-variant-numeric: tabular-nums; }
     .overview-layout { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(320px, 0.9fr); gap: 12px; align-items: start; margin-top: 14px; }
     .instance-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
     .card, .panel { border: 1px solid var(--border); border-radius: 8px; background: #fff; padding: 14px; }
@@ -7200,6 +7399,7 @@ function renderMultiInstanceOverview(
     .action-result.ok { border-color: rgba(22, 163, 74, 0.28); background: #f0fdf4; color: #05603a; }
     .action-result.error { border-color: rgba(220, 38, 38, 0.28); background: #fef3f2; color: #b42318; }
     @media (max-width: 980px) { .overview-layout { grid-template-columns: 1fr; } }
+    @media (max-width: 760px) { .pie-wrap { grid-template-columns: 1fr; } }
     @media (max-width: 720px) { .metrics { grid-template-columns: 1fr; } .panel-head { display: grid; } }
   </style>
 </head>
@@ -7216,6 +7416,7 @@ function renderMultiInstanceOverview(
     </section>
     ${warningHtml}
     <section class="status-strip">${totalChips}</section>
+    ${renderMultiInstanceStatsPanel(snapshot.instances, language)}
     ${renderServerHealthPanel(snapshot, language, selectedServerId)}
     ${renderCollectorSnapshotPanel(snapshot.instances, language, snapshot.generatedAt)}
     ${renderManagedActionReadinessPanel(managedActionReadiness ?? buildFallbackManagedActionLiveReadiness(), language)}
@@ -7675,6 +7876,19 @@ function renderMultiInstanceDetail(
     .status-chip { padding: 12px; }
     .status-chip span { display: block; color: var(--muted); font-size: 12px; }
     .status-chip strong { display: block; margin-top: 5px; font-size: 24px; line-height: 1.08; }
+    .fleet-chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin: 12px 0; }
+    .fleet-chart-card { border: 1px solid var(--border); border-radius: 8px; background: rgba(255, 255, 255, 0.76); padding: 12px; min-width: 0; }
+    .fleet-chart-title { font-weight: 700; margin-bottom: 4px; }
+    .pie-wrap { margin-top: 10px; display: grid; grid-template-columns: minmax(150px, 180px) minmax(0, 1fr); gap: 12px; align-items: center; }
+    .pie-chart { width: 100%; aspect-ratio: 1; border-radius: 999px; display: grid; place-items: center; border: 1px solid var(--border); }
+    .pie-hole { width: 62%; aspect-ratio: 1; border-radius: 999px; display: grid; place-items: center; align-content: center; background: #fff; text-align: center; padding: 10px; box-shadow: inset 0 0 0 1px rgba(17, 24, 39, 0.08); }
+    .pie-hole strong { font-size: 15px; }
+    .pie-hole span { margin-top: 2px; font-size: 11px; color: var(--muted); line-height: 1.35; }
+    .pie-legend { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+    .pie-legend li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 7px; align-items: center; color: #344054; font-size: 12px; }
+    .pie-swatch { width: 10px; height: 10px; border-radius: 999px; }
+    .pie-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pie-val { color: var(--muted); font-variant-numeric: tabular-nums; }
     .detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; margin-top: 12px; }
     .card, .panel { padding: 14px; margin-top: 12px; }
     .detail-grid .card { margin-top: 0; }
@@ -7703,6 +7917,7 @@ function renderMultiInstanceDetail(
     .state-line div { border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
     .state-line span { display: block; color: var(--muted); font-size: 12px; }
     .state-line strong { display: block; margin-top: 3px; font-size: 18px; }
+    @media (max-width: 760px) { .pie-wrap { grid-template-columns: 1fr; } }
     @media (max-width: 720px) { .state-line { grid-template-columns: 1fr 1fr; } }
   </style>
 </head>
