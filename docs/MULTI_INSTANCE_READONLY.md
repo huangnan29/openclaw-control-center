@@ -471,6 +471,18 @@ repo/ops/tom-readonly/install-heartbeat-burn-alert-cron.sh apply
 
 `heartbeat-burn-alert-runner.sh run` 只写 `runtime/heartbeat-burn-alerts/latest.json` 与 `events.ndjson`。`install-heartbeat-burn-alert-cron.sh` 只更新当前用户 crontab 中的 `OPENCLAW_HEARTBEAT_BURN_ALERT_CRON` 受控块；默认每 15 分钟检查全部实例，也可通过 `HEARTBEAT_BURN_ALERT_INSTANCE_IDS="deepseek"` 聚焦单个实例。发现 deepseek 这类非空 `HEARTBEAT.md` 后，清空或关闭该文件仍需要 Anan 人工批准，控制中心不会自动修改实例 workspace。
 
+### 最终上线人工审查摘要
+
+在执行最终 live healthcheck 人工批准前，可以先从本机运行只读审查摘要：
+
+```bash
+FINAL_GO_LIVE_OUTPUT=summary \
+OPENCLAW_TOPOLOGY_MODE=local-only \
+ops/local/final-go-live-review.sh status
+```
+
+`final-go-live-review.sh` 会只读汇总 Tom commit、readiness、approval packet、approval、dry-run inbox cron、heartbeat burn alert cron 和最新 heartbeat 告警。它不写 Tom runtime、不批准 approval、不打开 live gate、不调用 managed action live API、不修改 OpenClaw 实例目录。若 readiness 与两个 cron 都就绪，但存在 heartbeat/token 告警，它会返回 `ready_for_human_approval_with_usage_alerts`，表示最终 live healthcheck 可以进入人工审查，但仍需要单独决定是否处理相关实例的 `HEARTBEAT.md`。
+
 为了让 Tom 在 Discord 中稳定使用 inbox，可以安装一段受控 `AGENTS.md` 规范：
 
 ```bash

@@ -1116,3 +1116,18 @@ cron 安装器已完成部署、受控 crontab 已安装，且 Tom workspace inb
 ## 阶段完成后的下一步
 
 当前已停在最终 live healthcheck 人工批准前。下一步只有两个人工分支：一是 Anan 审查证据包后显式运行 `approve-and-run` 完成最终 live healthcheck 验收；二是先处理 `deepseek` 与 `spark` 的非空 `HEARTBEAT.md`。在 Anan 明确批准前，仍不得清空这些文件，也不得执行 approval `approve` 或打开 live gate。
+
+## 本轮新增（最终上线人工审查摘要）
+
+- 已新增 `ops/local/final-go-live-review.sh`，作为本机侧最终上线人工批准前的短摘要入口。
+- `final-go-live-review.sh status` 只读 SSH 到 Tom，汇总 Tom commit、live healthcheck readiness、approval packet、approval、dry-run inbox cron、heartbeat burn alert cron 和最新 heartbeat/token 告警。
+- readiness、approval packet、approval 与两个 cron 都就绪，但仍存在 heartbeat/token 告警时，脚本返回 `ready_for_human_approval_with_usage_alerts`，把异常用量作为 warning，而不是自动阻断最终 live healthcheck 审查。
+- 该脚本不写 Tom runtime、不写 approval 文件、不打开 live gate、不调用 managed action live API、不修改 OpenClaw 实例目录、不清空 `HEARTBEAT.md`、不重启实例。
+- 已新增 `test/final-go-live-review.test.ts`，覆盖就绪但有用量告警、dry-run inbox cron 未就绪时阻断两条路径，并断言不调用 approval 与 live API。
+- 已更新 `ops/tom-readonly/README.md`、`docs/MULTI_INSTANCE_READONLY.md`、`docs/FAQ.md`、`implementation_plan.md` 与 `test/oss-readiness.test.ts`。
+- 已验证 `bash -n ops/local/final-go-live-review.sh`。
+- 已验证 `npm test -- test/final-go-live-review.test.ts`，2/2 通过。
+
+## 阶段完成后的下一步
+
+下一步运行完整相关回归与 build，部署到 Tom 后执行 `FINAL_GO_LIVE_OUTPUT=summary OPENCLAW_TOPOLOGY_MODE=local-only ops/local/final-go-live-review.sh status` 做真实只读 smoke，并再次确认最终状态仍停在人工批准前。

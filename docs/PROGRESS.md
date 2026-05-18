@@ -1,5 +1,29 @@
 # Progress
 
+## Phase 160 (Final go-live human review summary) — Completed
+- Scope:
+  - Add a concise read-only pre-approval review entrypoint so Anan does not need to inspect long raw readiness logs before deciding.
+  - Keep the review separate from approval and live execution.
+- Changed files:
+  - `ops/local/final-go-live-review.sh`
+  - `test/final-go-live-review.test.ts`
+  - `ops/tom-readonly/README.md`
+  - `docs/MULTI_INSTANCE_READONLY.md`
+  - `docs/FAQ.md`
+  - `implementation_plan.md`
+  - `test/oss-readiness.test.ts`
+  - `docs/PROGRESS.md`
+- Implementation:
+  - Added `final-go-live-review.sh status`.
+  - The script reads local git status and SSHes to Tom to read Tom commit, live readiness, dry-run inbox cron status, heartbeat burn alert cron status, and latest heartbeat burn alert status.
+  - It reports `ready_for_human_approval_with_usage_alerts` when approval prerequisites are ready but heartbeat/token warnings remain.
+  - Safety fields explicitly state that the script does not write Tom runtime, write approval files, open live gate, call live managed actions, clear heartbeat files, or modify OpenClaw instance directories.
+- Verification:
+  - `bash -n ops/local/final-go-live-review.sh`
+  - `npm test -- test/final-go-live-review.test.ts`
+- Remaining gap:
+  - Tom deployment and live read-only smoke are still pending for this phase.
+
 ## Phase 159 (Readonly heartbeat burn alert cron) — Completed
 - Scope:
   - Turn the heartbeat burn inspector into an installable Tom-side alert loop.

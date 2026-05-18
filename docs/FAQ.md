@@ -228,6 +228,21 @@ repo/ops/tom-readonly/install-heartbeat-burn-alert-cron.sh apply
 
 ---
 
+### 2.2 最终上线前，我应该看哪条短摘要？
+
+在本机仓库运行：
+
+```bash
+cd /Users/anan/openclaw-control-center-git
+FINAL_GO_LIVE_OUTPUT=summary \
+OPENCLAW_TOPOLOGY_MODE=local-only \
+ops/local/final-go-live-review.sh status
+```
+
+如果输出 `ready_for_human_approval_with_usage_alerts`，含义是最终 live healthcheck 的 approval packet、approval 状态和 cron 前置条件都已就绪，但当前仍有 heartbeat/token 用量告警。用量告警不会自动清空实例文件，也不会替你批准 live healthcheck。
+
+---
+
 ### 3. 会话停滞检测 — 怎么判定的？
 
 **问题：** 控制中心显示某个会话"停滞执行"，但找不到是哪个会话，也不确定判定标准。
