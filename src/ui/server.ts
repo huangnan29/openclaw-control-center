@@ -1233,6 +1233,7 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
               managedActionAudit,
               managedActionReadiness,
               historyView,
+              section,
             );
             return writeText(res, 200, html, "text/html; charset=utf-8");
           }
@@ -7484,6 +7485,273 @@ function renderMultiInstanceLogPanel(items: InstanceSnapshot[], language: UiLang
   </section>`;
 }
 
+function renderMultiInstanceApprovalsPanel(items: InstanceSnapshot[], language: UiLanguage, title?: string): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const rows = items
+    .flatMap((item) =>
+      item.snapshot.approvals.map((approval) => ({
+        instanceName: item.instance.name,
+        approval,
+        updatedAt: approval.updatedAt ?? approval.requestedAt,
+      })),
+    )
+    .sort((a, b) => approvalStatusRank(a.approval.status) - approvalStatusRank(b.approval.status) || toSortableMs(b.updatedAt) - toSortableMs(a.updatedAt))
+    .slice(0, 24)
+    .map(({ instanceName, approval, updatedAt }) => {
+      const target = approval.agentId ?? approval.sessionKey ?? "-";
+      const summary = approval.command ?? approval.decision ?? approval.reason ?? approval.approvalId;
+      return `<tr>
+        <td>${escapeHtml(instanceName)}</td>
+        <td><code>${escapeHtml(safeTruncate(approval.approvalId, 44))}</code></td>
+        <td>${badge(approval.status, approval.status)}</td>
+        <td>${escapeHtml(target)}</td>
+        <td>${escapeHtml(safeTruncate(summary, 120))}</td>
+        <td>${escapeHtml(formatUiTimestamp(updatedAt, language))}</td>
+      </tr>`;
+    })
+    .join("");
+  return `<section class="panel">
+    <div class="panel-head">
+      <h2>${escapeHtml(title ?? t("Approvals", "审批"))}</h2>
+      <div class="meta">${escapeHtml(t("Readonly approval queue across visible instances.", "当前范围内的只读审批队列。"))}</div>
+    </div>
+    ${renderDataSourceNote(language, t("Readonly approval store.", "只读审批存储"))}
+    ${rows ? `<div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Instance", "实例"))}</th><th>Approval</th><th>${escapeHtml(t("State", "状态"))}</th><th>${escapeHtml(t("Target", "目标"))}</th><th>${escapeHtml(t("Summary", "摘要"))}</th><th>${escapeHtml(t("Updated", "更新时间"))}</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-state">${escapeHtml(t("No approvals reported.", "暂无审批上报。"))}</div>`}
+  </section>`;
+}
+
+function renderMultiInstanceSessionActivityPanel(items: InstanceSnapshot[], language: UiLanguage): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const rows = items
+    .flatMap((item) => {
+      const statusBySession = new Map(item.snapshot.statuses.map((status) => [status.sessionKey, status]));
+      return item.snapshot.sessions.map((session) => {
+        const status = statusBySession.get(session.sessionKey);
+        return {
+          instanceName: item.instance.name,
+          session,
+          status,
+          lastActivityAt: pickLatestTimestamp([session.lastMessageAt, status?.updatedAt]),
+        };
+      });
+    })
+    .sort((a, b) => toSortableMs(b.lastActivityAt) - toSortableMs(a.lastActivityAt))
+    .slice(0, 24)
+    .map(({ instanceName, session, status, lastActivityAt }) => {
+      const tokens = (status?.tokensIn ?? 0) + (status?.tokensOut ?? 0);
+      return `<tr>
+        <td>${escapeHtml(instanceName)}</td>
+        <td><code>${escapeHtml(safeTruncate(session.sessionKey, 54))}</code><div class="meta">${escapeHtml(session.label ?? session.agentId ?? "-")}</div></td>
+        <td>${badge(session.state, sessionStateLabel(session.state))}</td>
+        <td>${escapeHtml(status?.model ?? "-")}</td>
+        <td>${formatInt(tokens)}</td>
+        <td>${escapeHtml(formatUiTimestamp(lastActivityAt, language))}</td>
+      </tr>`;
+    })
+    .join("");
+  return `<section class="panel">
+    <div class="panel-head">
+      <h2>${escapeHtml(t("Session activity", "会话活动"))}</h2>
+      <div class="meta">${escapeHtml(t("Newest visible sessions, including idle historical sessions.", "最新可见会话，包括 idle 历史会话。"))}</div>
+    </div>
+    ${renderDataSourceNote(language, t("Session registry + status snapshots.", "session registry + status 快照"))}
+    ${rows ? `<div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Instance", "实例"))}</th><th>${escapeHtml(t("Session", "会话"))}</th><th>${escapeHtml(t("State", "状态"))}</th><th>Model</th><th>${escapeHtml(t("Usage", "用量"))}</th><th>${escapeHtml(t("Latest", "最近"))}</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-state">${escapeHtml(t("No sessions reported.", "暂无会话上报。"))}</div>`}
+  </section>`;
+}
+
+function renderMultiInstanceStaffWorkloadPanel(items: InstanceSnapshot[], language: UiLanguage): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const rows = buildMultiInstanceAgentRows(items);
+  const active = rows.filter((row) => row.running > 0);
+  const attention = rows.filter((row) => row.blocked > 0 || row.errors > 0 || row.pendingApprovals > 0);
+  const standby = rows.filter((row) => row.running === 0 && row.blocked === 0 && row.errors === 0 && row.pendingApprovals === 0);
+  const configured = rows.filter((row) => row.fromConfig);
+  const chips = [
+    renderFleetMetricChip(t("Visible agents", "可见 Agent"), rows.length),
+    renderFleetMetricChip(t("Active now", "当前活跃"), active.length, active.length > 0 ? "active" : "ok"),
+    renderFleetMetricChip(t("Needs attention", "需关注"), attention.length, attention.length > 0 ? "warn" : "ok"),
+    renderFleetMetricChip(t("Configured", "已配置"), configured.length),
+  ].join("");
+  const attentionRows = attention
+    .slice(0, 10)
+    .map(
+      (row) =>
+        `<tr><td>${escapeHtml(row.instanceName)}</td><td>${escapeHtml(row.displayName)}<div class="meta"><code>${escapeHtml(row.agentId)}</code></div></td><td>${row.running}</td><td>${row.blocked}</td><td>${row.errors}</td><td>${row.pendingApprovals}</td><td>${escapeHtml(row.lastActivityAt ? formatUiTimestamp(row.lastActivityAt, language) : "-")}</td></tr>`,
+    )
+    .join("");
+  return `<section class="panel">
+    <div class="panel-head">
+      <h2>${escapeHtml(t("Staff workload", "员工工作状态"))}</h2>
+      <div class="meta">${escapeHtml(t("Distinguishes active work from configured or historical visibility.", "区分当前活跃、已配置和历史可见信号。"))}</div>
+    </div>
+    <div class="status-strip">${chips}</div>
+    ${attentionRows ? `<div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Instance", "实例"))}</th><th>Agent</th><th>${escapeHtml(t("Running", "运行中"))}</th><th>${escapeHtml(t("Blocked", "阻塞"))}</th><th>${escapeHtml(t("Errors", "错误"))}</th><th>${escapeHtml(t("Pending", "待审"))}</th><th>${escapeHtml(t("Latest", "最近"))}</th></tr></thead><tbody>${attentionRows}</tbody></table></div>` : `<div class="empty-state">${escapeHtml(t("No agent currently needs attention.", "当前没有需要关注的 Agent。"))} ${escapeHtml(t("Standby agents", "待命 Agent"))}: ${standby.length}</div>`}
+  </section>`;
+}
+
+function renderMultiInstanceUsageByAgentPanel(items: InstanceSnapshot[], language: UiLanguage): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const rows = buildMultiInstanceAgentRows(items)
+    .filter((row) => row.tokensIn + row.tokensOut > 0)
+    .sort((a, b) => b.tokensIn + b.tokensOut - (a.tokensIn + a.tokensOut))
+    .slice(0, 20)
+    .map(
+      (row) =>
+        `<tr><td>${escapeHtml(row.instanceName)}</td><td>${escapeHtml(row.displayName)}<div class="meta"><code>${escapeHtml(row.agentId)}</code></div></td><td>${formatInt(row.tokensIn + row.tokensOut)}</td><td>${formatInt(row.tokensIn)}</td><td>${formatInt(row.tokensOut)}</td><td>${formatPreciseCost(row.cost)}</td><td>${row.sessions}</td><td>${escapeHtml(row.lastActivityAt ? formatUiTimestamp(row.lastActivityAt, language) : "-")}</td></tr>`,
+    )
+    .join("");
+  return `<section class="panel">
+    <div class="panel-head">
+      <h2>${escapeHtml(t("Agent usage", "Agent 用量"))}</h2>
+      <div class="meta">${escapeHtml(t("Top visible agents by token usage.", "按 token 用量排序的可见 Agent。"))}</div>
+    </div>
+    ${renderDataSourceNote(language, t("Session status token fields grouped by agent.", "按 Agent 聚合的 session status token 字段"))}
+    ${rows ? `<div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Instance", "实例"))}</th><th>Agent</th><th>${escapeHtml(t("Total", "合计"))}</th><th>In</th><th>Out</th><th>Cost</th><th>${escapeHtml(t("Sessions", "会话"))}</th><th>${escapeHtml(t("Latest", "最近"))}</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty-state">${escapeHtml(t("No agent usage data yet.", "暂无 Agent 用量数据。"))}</div>`}
+  </section>`;
+}
+
+function multiInstanceSectionLinks(language: UiLanguage): DashboardSectionLink[] {
+  const allowed = new Set<DashboardSection>(["overview", "usage-cost", "team", "projects-tasks"]);
+  return dashboardSectionLinks(language).filter((item) => allowed.has(item.key));
+}
+
+function renderMultiInstanceSectionNav(activeSection: DashboardSection, language: UiLanguage, selectedServerId?: string): string {
+  const links = multiInstanceSectionLinks(language)
+    .map((item) => {
+      const href = buildMultiInstanceSectionHref(item.key, language, selectedServerId);
+      const active = item.key === activeSection;
+      return `<a class="section-nav-link${active ? " active" : ""}" href="${escapeHtml(href)}"${active ? ' aria-current="page"' : ""}><span>${escapeHtml(item.label)}</span><small>${escapeHtml(item.blurb)}</small></a>`;
+    })
+    .join("");
+  return `<nav class="section-nav" aria-label="${escapeHtml(pickUiText(language, "Sections", "页面分区"))}">${links}</nav>`;
+}
+
+function buildMultiInstanceSectionHref(section: DashboardSection, language: UiLanguage, selectedServerId?: string): string {
+  const params = new URLSearchParams();
+  params.set("section", section);
+  params.set("lang", language);
+  if (selectedServerId) params.set("server", selectedServerId);
+  return `/?${params.toString()}`;
+}
+
+function multiInstanceSectionTitle(section: DashboardSection, language: UiLanguage): string {
+  if (section === "usage-cost") return pickUiText(language, "Usage and Cost", "用量与成本");
+  if (section === "team") return pickUiText(language, "Staff and Agents", "员工与 Agent");
+  if (section === "projects-tasks") return pickUiText(language, "Tasks, Approvals, and Logs", "任务、审批与日志");
+  return pickUiText(language, "Readonly multi-instance overview", "多实例只读总览");
+}
+
+function multiInstanceSectionLead(section: DashboardSection, language: UiLanguage): string {
+  if (section === "usage-cost") {
+    return pickUiText(
+      language,
+      "Readonly token, model, instance, agent, and trend visibility across this Oracle.",
+      "只读查看当前 Oracle 上的 token、模型、实例、Agent 与趋势。",
+    );
+  }
+  if (section === "team") {
+    return pickUiText(
+      language,
+      "Separate active work from configured agents and historical session visibility.",
+      "区分当前活跃工作、已配置 Agent 与历史会话可见性。",
+    );
+  }
+  if (section === "projects-tasks") {
+    return pickUiText(
+      language,
+      "A readonly workbench for recent tasks, approvals, sessions, and runtime log-like events.",
+      "集中查看最近任务、审批、会话和运行日志事件的只读工作台。",
+    );
+  }
+  return pickUiText(
+    language,
+    "Readonly monitoring only. No execution, pause, or approval actions are available here.",
+    "仅用于只读监控。这里不提供执行、暂停或审批动作。",
+  );
+}
+
+function renderMultiInstanceSectionBody(input: {
+  snapshot: MultiInstanceSnapshot;
+  language: UiLanguage;
+  activeSection: DashboardSection;
+  cards: string;
+  historyView?: MultiInstanceHistoryView;
+  managedActionAudit?: Awaited<ReturnType<typeof readManagedActionDryRunAudits>>;
+  managedActionReadiness?: ManagedActionLiveReadinessSnapshot;
+}): string {
+  const { snapshot, language, activeSection } = input;
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  if (activeSection === "usage-cost") {
+    return `
+      ${renderMultiInstanceTrendPanel(input.historyView, language)}
+      <section class="overview-layout">
+        <div>
+          ${renderMultiInstanceUsagePanel(snapshot.instances, language, t("Usage overview", "用量总览"))}
+          ${renderMultiInstanceUsageByAgentPanel(snapshot.instances, language)}
+        </div>
+        <div>
+          ${renderMultiInstanceStatsPanel(snapshot.instances, language)}
+          ${renderCollectorSnapshotPanel(snapshot.instances, language, snapshot.generatedAt)}
+        </div>
+      </section>`;
+  }
+
+  if (activeSection === "team") {
+    return `
+      <section class="overview-layout">
+        <div>
+          ${renderMultiInstanceStaffWorkloadPanel(snapshot.instances, language)}
+          ${renderMultiInstanceAgentRosterPanel(snapshot.instances, language, t("Agent roster", "Agent 名录"))}
+        </div>
+        <div>
+          ${renderMultiInstanceHealthPanel(snapshot.instances, language)}
+          ${renderFleetAttention(snapshot, language)}
+          ${renderFleetRecentActivity(snapshot, language)}
+        </div>
+      </section>`;
+  }
+
+  if (activeSection === "projects-tasks") {
+    return `
+      <section class="overview-layout">
+        <div>
+          ${renderMultiInstanceRecentTasksPanel(snapshot.instances, language, t("Recent tasks", "最近任务"))}
+          ${renderMultiInstanceApprovalsPanel(snapshot.instances, language)}
+          ${renderMultiInstanceSessionActivityPanel(snapshot.instances, language)}
+        </div>
+        <div>
+          ${renderMultiInstanceLogPanel(snapshot.instances, language, snapshot.generatedAt)}
+          ${renderManagedActionReadinessPanel(input.managedActionReadiness ?? buildFallbackManagedActionLiveReadiness(), language)}
+          ${renderManagedActionAuditPanel(input.managedActionAudit?.records ?? [], language)}
+        </div>
+      </section>`;
+  }
+
+  return `
+    ${renderMultiInstanceStatsPanel(snapshot.instances, language)}
+    ${renderMultiInstanceTrendPanel(input.historyView, language)}
+    ${renderServerHealthPanel(snapshot, language)}
+    ${renderCollectorSnapshotPanel(snapshot.instances, language, snapshot.generatedAt)}
+    ${renderManagedActionReadinessPanel(input.managedActionReadiness ?? buildFallbackManagedActionLiveReadiness(), language)}
+    ${renderManagedActionDryRunPanel(snapshot.instances, language, snapshot.selectedInstanceId)}
+    ${renderManagedActionAuditPanel(input.managedActionAudit?.records ?? [], language)}
+    <section class="overview-layout">
+      <div>
+        ${renderMultiInstanceHealthPanel(snapshot.instances, language)}
+        <section class="instance-grid">${input.cards || `<div class="card">${escapeHtml(t("No instances configured.", "尚未配置实例。"))}</div>`}</section>
+        ${renderFleetMatrix(snapshot, language)}
+        ${renderMultiInstanceRecentTasksPanel(snapshot.instances, language)}
+      </div>
+      <div>
+        ${renderMultiInstanceUsagePanel(snapshot.instances, language)}
+        ${renderMultiInstanceAgentRosterPanel(snapshot.instances, language)}
+        ${renderFleetAttention(snapshot, language)}
+        ${renderFleetRecentActivity(snapshot, language)}
+        ${renderMultiInstanceLogPanel(snapshot.instances, language, snapshot.generatedAt)}
+      </div>
+    </section>`;
+}
+
 function logSeverityLabel(severity: MultiInstanceLogRow["severity"], language: UiLanguage): string {
   if (severity === "error") return pickUiText(language, "Error", "错误");
   if (severity === "warn") return pickUiText(language, "Warning", "预警");
@@ -7499,6 +7767,7 @@ function renderMultiInstanceOverview(
   managedActionAudit?: Awaited<ReturnType<typeof readManagedActionDryRunAudits>>,
   managedActionReadiness?: ManagedActionLiveReadinessSnapshot,
   historyView?: MultiInstanceHistoryView,
+  activeSection: DashboardSection = "overview",
 ): string {
   const t = (en: string, zh: string): string => pickUiText(language, en, zh);
   const totalChips = [
@@ -7523,13 +7792,22 @@ function renderMultiInstanceOverview(
     ? `${t("Current server", "当前服务器")}${language === "zh" ? "：" : ": "}${selectedServer.name}`
     : `${t("Current server", "当前服务器")}${language === "zh" ? "：" : ": "}${t("All servers", "全部服务器")}`;
   const warningHtml = warning ? `<div class="notice warning">${escapeHtml(warning)}</div>` : "";
+  const sectionBody = renderMultiInstanceSectionBody({
+    snapshot,
+    language,
+    activeSection,
+    cards,
+    historyView,
+    managedActionAudit,
+    managedActionReadiness,
+  });
 
   return `<!doctype html>
 <html lang="${escapeHtml(language)}">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${escapeHtml(t("OpenClaw Multi-instance Overview", "OpenClaw 多实例总览"))}</title>
+  <title>${escapeHtml(multiInstanceSectionTitle(activeSection, language))}</title>
   <style>
     :root { color-scheme: light; --border: rgba(17, 24, 39, 0.12); --muted: #667085; --text: #1d1d1f; --bg: #f5f7fb; }
     * { box-sizing: border-box; }
@@ -7605,6 +7883,11 @@ function renderMultiInstanceOverview(
     .attention-list li { align-items: flex-start; border-bottom: 1px solid rgba(17, 24, 39, 0.08); padding-bottom: 8px; }
     .attention-list li:last-child { border-bottom: 0; padding-bottom: 0; }
     .attention-list a { color: #005cb9; font-weight: 600; text-decoration: none; }
+    .section-nav { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin: 14px 0 4px; }
+    .section-nav-link { border: 1px solid var(--border); border-radius: 8px; padding: 9px 10px; text-decoration: none; color: #344054; background: rgba(255, 255, 255, 0.86); }
+    .section-nav-link span { display: block; font-weight: 700; }
+    .section-nav-link small { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; line-height: 1.35; }
+    .section-nav-link.active { color: #005cb9; border-color: rgba(0, 113, 227, 0.5); background: #eff8ff; }
     .server-filter { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; }
     .server-filter-link { display: inline-flex; align-items: center; border: 1px solid var(--border); border-radius: 999px; padding: 6px 10px; text-decoration: none; color: #344054; background: #fff; font-size: 13px; }
     .server-filter-link.active { color: #005cb9; border-color: rgba(0, 113, 227, 0.5); background: #eff8ff; }
@@ -7633,37 +7916,17 @@ function renderMultiInstanceOverview(
   <main class="shell">
     <section class="hero">
       <div class="meta">OpenClaw Control Center</div>
-      <h1>${escapeHtml(t("Readonly multi-instance overview", "多实例只读总览"))}</h1>
-      <div class="meta">${escapeHtml(t("Readonly monitoring only. No execution, pause, or approval actions are available here.", "仅用于只读监控。这里不提供执行、暂停或审批动作。"))}</div>
+      <h1>${escapeHtml(multiInstanceSectionTitle(activeSection, language))}</h1>
+      <div class="meta">${escapeHtml(multiInstanceSectionLead(activeSection, language))}</div>
       <div class="meta">${escapeHtml(t("Updated", "更新时间"))}${escapeHtml(language === "zh" ? "：" : ": ")}${escapeHtml(formatUiTimestamp(snapshot.generatedAt, language))}</div>
       <div class="meta">${escapeHtml(selectedMessage)}</div>
       <div class="meta">${escapeHtml(selectedServerMessage)}</div>
+      ${renderMultiInstanceSectionNav(activeSection, language, selectedServerId)}
       ${renderServerFilterBar(snapshot, language, selectedServerId)}
     </section>
     ${warningHtml}
     <section class="status-strip">${totalChips}</section>
-    ${renderMultiInstanceStatsPanel(snapshot.instances, language)}
-    ${renderMultiInstanceTrendPanel(historyView, language)}
-    ${renderServerHealthPanel(snapshot, language, selectedServerId)}
-    ${renderCollectorSnapshotPanel(snapshot.instances, language, snapshot.generatedAt)}
-    ${renderManagedActionReadinessPanel(managedActionReadiness ?? buildFallbackManagedActionLiveReadiness(), language)}
-    ${renderManagedActionDryRunPanel(snapshot.instances, language, snapshot.selectedInstanceId)}
-    ${renderManagedActionAuditPanel(managedActionAudit?.records ?? [], language)}
-    <section class="overview-layout">
-      <div>
-        ${renderMultiInstanceHealthPanel(snapshot.instances, language)}
-        <section class="instance-grid">${cards || `<div class="card">${escapeHtml(t("No instances configured.", "尚未配置实例。"))}</div>`}</section>
-        ${renderFleetMatrix(snapshot, language)}
-        ${renderMultiInstanceRecentTasksPanel(snapshot.instances, language)}
-      </div>
-      <div>
-        ${renderMultiInstanceUsagePanel(snapshot.instances, language)}
-        ${renderMultiInstanceAgentRosterPanel(snapshot.instances, language)}
-        ${renderFleetAttention(snapshot, language)}
-        ${renderFleetRecentActivity(snapshot, language)}
-        ${renderMultiInstanceLogPanel(snapshot.instances, language, snapshot.generatedAt)}
-      </div>
-    </section>
+    ${sectionBody}
   </main>
   ${renderManagedActionDryRunScript(language)}
 </body>
