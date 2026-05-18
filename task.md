@@ -1058,3 +1058,25 @@ cron 安装器已完成部署、受控 crontab 已安装，且 Tom workspace inb
 ## 阶段完成后的下一步
 
 若要完成最终 live healthcheck 验收，需要 Anan 审查当前证据包后显式运行 `approve-and-run`。若暂不进入 live 演练，则下一步优先处理 deepseek heartbeat 根因，避免继续周期性消耗 token。
+
+## 本轮新增（heartbeat burn 只读复核入口）
+
+- 已新增 `ops/tom-readonly/heartbeat-burn-inspector.sh`，用于把页面上的“异常用量线索”变成 Tom 侧可重复执行的命令行复核入口。
+- 支持 `status [instanceId]` 和 `check [instanceId]`；`status` 适合人工查看，`check` 发现可疑用量时返回非 0，后续可接告警。
+- 脚本只读取 `runtime/collectors/tom-oracle/history.json` 与只读挂载中的 `HEARTBEAT.md` 元数据，不调用模型、不清空 heartbeat、不写 OpenClaw 实例目录、不重启实例、不调用 managed action live API。
+- 已新增 `test/heartbeat-burn-inspector.test.ts`，覆盖周期性小额 token 增长识别、`check` 非 0 退出码和跳过 heartbeat 元数据读取三种路径。
+- 已更新 `ops/tom-readonly/README.md` 和 `docs/FAQ.md`，记录 deepseek 这类 heartbeat/定时轮询消耗的排查命令与处理原则。
+- 已验证 `bash -n ops/tom-readonly/heartbeat-burn-inspector.sh`。
+- 已验证 `npm test -- test/heartbeat-burn-inspector.test.ts`，3/3 通过。
+- 已验证 `npm test -- test/heartbeat-burn-inspector.test.ts test/oss-readiness.test.ts`，10/10 通过。
+- 已验证 `npm run build`。
+- 已提交并推送 `2eeda20 ops: add heartbeat burn inspector`。
+- 已部署到 Tom，`update.sh` 通过，5 个 OpenClaw gateway 健康端口、总览页、实例详情页、只读写接口拦截、容器安全边界和 collector 快照均通过。
+- 已在 Tom 执行 `repo/ops/tom-readonly/heartbeat-burn-inspector.sh status deepseek`，返回 `suspicious_usage_detected`，`deepseek` 信号为 `periodic_small_growth`。
+- Tom 实测 deepseek 窗口 token 增量为 `13683`，最近增量为 `174`，中位增量为 `281`，中位间隔约 `30` 分钟。
+- Tom 实测 deepseek heartbeat 元数据：`/instances/deepseek/workspace/HEARTBEAT.md`，大小 `226` bytes，`nonEmpty=true`，首个非空行为 markdown 代码块标记，更新时间 `2026-05-08T16:03:52.414Z`。
+- 本轮没有清空 `/srv/openclaw-deepseek/workspace/HEARTBEAT.md`，没有修改或重启任何 OpenClaw 实例。
+
+## 阶段完成后的下一步
+
+当前已确认 deepseek 的异常消耗与非空 `HEARTBEAT.md` 高度相关。下一步有两个分支：如果要先止损，需要 Anan 明确批准后再清空或关闭 deepseek 的 `/srv/openclaw-deepseek/workspace/HEARTBEAT.md`；如果要先完成控制中心最终上线，则审查证据包并显式运行 `approve-and-run`。在获得明确批准前，仍不得修改实例 workspace、不得执行 approval `approve`、不得打开 live gate、不得触发真实 managed action。

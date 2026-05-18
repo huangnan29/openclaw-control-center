@@ -19,6 +19,11 @@
 - Verification:
   - `bash -n ops/tom-readonly/heartbeat-burn-inspector.sh`
   - `npm test -- test/heartbeat-burn-inspector.test.ts`
+  - `npm test -- test/heartbeat-burn-inspector.test.ts test/oss-readiness.test.ts`
+  - `npm run build`
+  - Deployed commit `2eeda20` to Tom with `repo/ops/tom-readonly/update.sh`; readonly healthcheck passed for all five local OpenClaw gateways and collector snapshot.
+  - Tom live readonly check for `deepseek` returned `suspicious_usage_detected`: `periodic_small_growth`, total delta `13683`, median delta `281`, median interval about `30` minutes.
+  - Tom heartbeat metadata confirmed `/instances/deepseek/workspace/HEARTBEAT.md` is non-empty, `226` bytes, updated at `2026-05-08T16:03:52.414Z`.
 - Remaining gap:
   - The cleanup action remains manual by design. Clearing or disabling `HEARTBEAT.md` should require Anan's explicit approval because it changes an OpenClaw instance workspace.
 
