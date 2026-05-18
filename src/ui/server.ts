@@ -7610,8 +7610,120 @@ function renderMultiInstanceUsageByAgentPanel(items: InstanceSnapshot[], languag
   </section>`;
 }
 
+function renderMultiInstanceSettingsSummaryPanel(
+  snapshot: MultiInstanceSnapshot,
+  language: UiLanguage,
+  managedActionReadiness?: ManagedActionLiveReadinessSnapshot,
+): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const collectorStates = snapshot.instances.map((item) => buildCollectorSnapshotUiState(item, language, snapshot.generatedAt));
+  const freshCollectors = collectorStates.filter((item) => item.tone === "connected").length;
+  const attentionCollectors = collectorStates.filter((item) => item.tone !== "connected").length;
+  const chips = [
+    renderFleetMetricChip(t("Instances", "实例数"), snapshot.totals.instances),
+    renderFleetMetricChip(t("Connected", "已连接"), `${snapshot.totals.connected}/${snapshot.totals.instances}`, snapshot.totals.notConnected > 0 ? "warn" : "ok"),
+    renderFleetMetricChip(t("Fresh data sources", "新鲜数据源"), `${freshCollectors}/${collectorStates.length}`, attentionCollectors > 0 ? "warn" : "ok"),
+    renderFleetMetricChip(t("Readonly mode", "只读模式"), READONLY_MODE ? t("On", "开启") : t("Off", "关闭"), READONLY_MODE ? "ok" : "danger"),
+    renderFleetMetricChip(t("Local token", "本地令牌"), LOCAL_API_TOKEN ? t("Configured", "已配置") : t("Missing", "缺失"), LOCAL_API_TOKEN ? "ok" : "warn"),
+    renderFleetMetricChip(t("Live actions", "Live 动作"), managedActionReadiness?.liveExecutionAvailable ? t("Available", "可用") : t("Blocked", "阻断"), managedActionReadiness?.liveExecutionAvailable ? "warn" : "ok"),
+  ].join("");
+  return `<section class="panel">
+    <div class="panel-head">
+      <h2>${escapeHtml(t("Settings summary", "设置总览"))}</h2>
+      <div class="meta">${escapeHtml(t("Safety and connection posture for the readonly control center.", "只读控制中心的安全与接入状态。"))}</div>
+    </div>
+    <div class="status-strip">${chips}</div>
+  </section>`;
+}
+
+function renderMultiInstanceSafetyPanel(language: UiLanguage): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const rows = [
+    {
+      label: "READONLY_MODE",
+      value: String(READONLY_MODE),
+      status: READONLY_MODE ? "connected" : "error",
+      detail: READONLY_MODE
+        ? t("Mutation routes stay blocked by default.", "默认阻断写入类路由。")
+        : t("Readonly protection is off; review before exposing publicly.", "只读保护已关闭，公网暴露前需要复核。"),
+    },
+    {
+      label: "LOCAL_TOKEN_AUTH_REQUIRED",
+      value: String(LOCAL_TOKEN_AUTH_REQUIRED),
+      status: LOCAL_TOKEN_AUTH_REQUIRED ? "connected" : "partial",
+      detail: LOCAL_TOKEN_AUTH_REQUIRED
+        ? t("Sensitive local API routes require a local token.", "敏感本地 API 路由需要本地令牌。")
+        : t("Local token auth is disabled.", "本地令牌鉴权未开启。"),
+    },
+    {
+      label: "LOCAL_API_TOKEN",
+      value: LOCAL_API_TOKEN ? t("Configured", "已配置") : t("Missing", "缺失"),
+      status: LOCAL_API_TOKEN ? "connected" : "partial",
+      detail: t("The value is intentionally not displayed.", "令牌值不会在页面展示。"),
+    },
+    {
+      label: "APPROVAL_ACTIONS_ENABLED",
+      value: String(APPROVAL_ACTIONS_ENABLED),
+      status: APPROVAL_ACTIONS_ENABLED && !APPROVAL_ACTIONS_DRY_RUN && !READONLY_MODE ? "partial" : "connected",
+      detail: APPROVAL_ACTIONS_ENABLED
+        ? t("Approval actions remain constrained by readonly and dry-run gates.", "审批动作仍受只读和 dry-run 闸门约束。")
+        : t("Approval live actions are disabled.", "审批 live 动作未开启。"),
+    },
+    {
+      label: "IMPORT_MUTATION_ENABLED",
+      value: String(IMPORT_MUTATION_ENABLED),
+      status: IMPORT_MUTATION_ENABLED && !IMPORT_MUTATION_DRY_RUN && !READONLY_MODE ? "partial" : "connected",
+      detail: IMPORT_MUTATION_ENABLED
+        ? t("Import mutation is still guarded by readonly/dry-run settings.", "导入写入仍受只读/dry-run 设置保护。")
+        : t("Import mutation endpoint is disabled.", "导入写入端点未开启。"),
+    },
+    {
+      label: "MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED",
+      value: String(MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED),
+      status: MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED && !READONLY_MODE ? "partial" : "connected",
+      detail: MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED
+        ? t("Production executor toggle is on; live gate readiness still decides availability.", "生产执行器开关已开；是否可用仍由 live readiness 决定。")
+        : t("Production managed-action executor is disabled.", "生产 managed-action 执行器未开启。"),
+    },
+  ];
+  return `<section class="panel">
+    <div class="panel-head">
+      <h2>${escapeHtml(t("Safety gates", "安全闸门"))}</h2>
+      <div class="meta">${escapeHtml(t("Environment gates that protect write-capable surfaces.", "保护写入能力的环境闸门。"))}</div>
+    </div>
+    <div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Gate", "闸门"))}</th><th>${escapeHtml(t("State", "状态"))}</th><th>${escapeHtml(t("Value", "值"))}</th><th>${escapeHtml(t("Detail", "说明"))}</th></tr></thead><tbody>${rows
+      .map(
+        (row) =>
+          `<tr><td><code>${escapeHtml(row.label)}</code></td><td>${badge(row.status, row.status === "connected" ? t("Safe", "安全") : row.status === "error" ? t("Risk", "风险") : t("Review", "复核"))}</td><td>${escapeHtml(row.value)}</td><td>${escapeHtml(row.detail)}</td></tr>`,
+      )
+      .join("")}</tbody></table></div>
+  </section>`;
+}
+
+function renderMultiInstanceRuntimePanel(snapshot: MultiInstanceSnapshot, language: UiLanguage): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const readonlyInstances = snapshot.instances.filter((item) => item.instance.readonly).length;
+  const rows = [
+    { label: t("Node runtime", "Node 运行时"), value: process.version, detail: t("Control-center process runtime.", "control-center 进程运行时。") },
+    { label: t("UI timezone", "UI 时区"), value: UI_TIMEZONE, detail: t("Timestamp rendering timezone.", "页面时间渲染时区。") },
+    { label: t("Local token header", "本地令牌 Header"), value: LOCAL_TOKEN_HEADER, detail: t("Header accepted by protected local routes.", "受保护本地路由接受的 Header。") },
+    { label: t("Instance registry", "实例注册表"), value: `${snapshot.totals.instances}`, detail: t("Configured OpenClaw instances visible to this control center.", "当前控制中心可见的 OpenClaw 实例数量。") },
+    { label: t("Readonly instance entries", "只读实例项"), value: `${readonlyInstances}/${snapshot.totals.instances}`, detail: t("Registry entries marked readonly.", "registry 中标记为只读的实例项。") },
+    { label: t("Snapshot generated", "快照生成时间"), value: formatUiTimestamp(snapshot.generatedAt, language), detail: t("Latest multi-instance snapshot render input.", "本次多实例页面使用的最新快照。") },
+  ];
+  return `<section class="panel">
+    <div class="panel-head">
+      <h2>${escapeHtml(t("Runtime and registry", "运行时与注册表"))}</h2>
+      <div class="meta">${escapeHtml(t("Deployment facts visible from inside the control-center process.", "control-center 进程内可见的部署事实。"))}</div>
+    </div>
+    <div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Item", "项目"))}</th><th>${escapeHtml(t("Value", "值"))}</th><th>${escapeHtml(t("Detail", "说明"))}</th></tr></thead><tbody>${rows
+      .map((row) => `<tr><td>${escapeHtml(row.label)}</td><td><code>${escapeHtml(row.value)}</code></td><td>${escapeHtml(row.detail)}</td></tr>`)
+      .join("")}</tbody></table></div>
+  </section>`;
+}
+
 function multiInstanceSectionLinks(language: UiLanguage): DashboardSectionLink[] {
-  const allowed = new Set<DashboardSection>(["overview", "usage-cost", "team", "projects-tasks"]);
+  const allowed = new Set<DashboardSection>(["overview", "usage-cost", "team", "projects-tasks", "settings"]);
   return dashboardSectionLinks(language).filter((item) => allowed.has(item.key));
 }
 
@@ -7638,6 +7750,7 @@ function multiInstanceSectionTitle(section: DashboardSection, language: UiLangua
   if (section === "usage-cost") return pickUiText(language, "Usage and Cost", "用量与成本");
   if (section === "team") return pickUiText(language, "Staff and Agents", "员工与 Agent");
   if (section === "projects-tasks") return pickUiText(language, "Tasks, Approvals, and Logs", "任务、审批与日志");
+  if (section === "settings") return pickUiText(language, "Settings and Safety", "设置与安全");
   return pickUiText(language, "Readonly multi-instance overview", "多实例只读总览");
 }
 
@@ -7661,6 +7774,13 @@ function multiInstanceSectionLead(section: DashboardSection, language: UiLanguag
       language,
       "A readonly workbench for recent tasks, approvals, sessions, and runtime log-like events.",
       "集中查看最近任务、审批、会话和运行日志事件的只读工作台。",
+    );
+  }
+  if (section === "settings") {
+    return pickUiText(
+      language,
+      "Connection health, data freshness, safety gates, and deployment facts for this readonly service.",
+      "查看这个只读服务的连接健康、数据新鲜度、安全闸门和部署事实。",
     );
   }
   return pickUiText(
@@ -7721,6 +7841,23 @@ function renderMultiInstanceSectionBody(input: {
         </div>
         <div>
           ${renderMultiInstanceLogPanel(snapshot.instances, language, snapshot.generatedAt)}
+          ${renderManagedActionReadinessPanel(input.managedActionReadiness ?? buildFallbackManagedActionLiveReadiness(), language)}
+          ${renderManagedActionAuditPanel(input.managedActionAudit?.records ?? [], language)}
+        </div>
+      </section>`;
+  }
+
+  if (activeSection === "settings") {
+    return `
+      ${renderMultiInstanceSettingsSummaryPanel(snapshot, language, input.managedActionReadiness)}
+      <section class="overview-layout">
+        <div>
+          ${renderServerHealthPanel(snapshot, language)}
+          ${renderCollectorSnapshotPanel(snapshot.instances, language, snapshot.generatedAt)}
+          ${renderMultiInstanceRuntimePanel(snapshot, language)}
+        </div>
+        <div>
+          ${renderMultiInstanceSafetyPanel(language)}
           ${renderManagedActionReadinessPanel(input.managedActionReadiness ?? buildFallbackManagedActionLiveReadiness(), language)}
           ${renderManagedActionAuditPanel(input.managedActionAudit?.records ?? [], language)}
         </div>
