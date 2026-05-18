@@ -1150,7 +1150,16 @@ cron 安装器已完成部署、受控 crontab 已安装，且 Tom workspace inb
 - 已新增 `test/final-go-live-completion-audit.test.ts`，覆盖人工 approval 为唯一硬阻塞、Tom healthcheck 失败时阻断两条路径，并断言不调用 approval 或 live API。
 - 已验证 `bash -n ops/local/final-go-live-completion-audit.sh`。
 - 已验证 `npm test -- test/final-go-live-completion-audit.test.ts`，2/2 通过。
+- 已验证 `npm test -- test/final-go-live-completion-audit.test.ts test/final-go-live-review.test.ts test/final-go-live-runner.test.ts test/oss-readiness.test.ts`，24/24 通过。
+- 已验证 `npm run build`。
+- 已提交并推送 `f14aa9d ops: add final go-live completion audit`。
+- 已部署到 Tom，`update.sh` 通过，5 个 OpenClaw gateway 健康端口、总览页、实例详情页、只读写接口拦截、容器安全边界和 collector 快照均通过。
+- 部署后第一次并行 audit smoke 正确发现 approval packet commit mismatch 并阻断；随后执行 `final-go-live-runner.sh prepare` 刷新证据包到当前 Tom commit。
+- 刷新后真实只读 completion audit smoke 返回 `blocked_human_approval_required`：5/7 pass，2 pending，0 failed。
+- 已通过 completion audit 确认：Tom 只读健康、dry-run 管理链路、监控告警、approval packet、运维文档均为 pass；`usage_alerts_review` 与 `final_live_healthcheck` 为 pending。
+- 当前唯一硬阻塞是 `最终 live healthcheck 一次性验收: 需要 Anan 显式 approve-and-run`；heartbeat/token 告警仍作为 warning/pending 人工复核项存在。
+- audit smoke 安全字段确认 `writesTomRuntime=false`、`writesApprovalFile=false`、`writesOpenClawInstanceDirs=false`、`clearsHeartbeatFiles=false`、`opensLiveGate=false`、`callsManagedActionsLiveApi=false`、`callsModelApis=false`。
 
 ## 阶段完成后的下一步
 
-下一步运行相关回归与 build，部署该审计脚本到 Tom 同步目录后执行真实只读 smoke：`FINAL_GO_LIVE_OUTPUT=summary OPENCLAW_TOPOLOGY_MODE=local-only ops/local/final-go-live-completion-audit.sh status`。
+当前可自动推进的部分已经再次收口到人工边界。下一步只能由 Anan 选择：运行 `approve-and-run` 完成最终 live healthcheck，或先处理 heartbeat/token 告警中的可疑实例。

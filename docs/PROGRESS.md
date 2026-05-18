@@ -21,8 +21,14 @@
 - Verification:
   - `bash -n ops/local/final-go-live-completion-audit.sh`
   - `npm test -- test/final-go-live-completion-audit.test.ts`
+  - `npm test -- test/final-go-live-completion-audit.test.ts test/final-go-live-review.test.ts test/final-go-live-runner.test.ts test/oss-readiness.test.ts`
+  - `npm run build`
+  - Deployed commit `f14aa9d` to Tom with `repo/ops/tom-readonly/update.sh`; readonly healthcheck passed for all five local OpenClaw gateways and collector snapshot.
+  - Re-ran final go-live `prepare` after deployment to refresh the approval packet for commit `f14aa9d`.
+  - Real completion audit smoke returned `blocked_human_approval_required`: 5/7 requirements passed, 2 pending, 0 failed.
+  - The only hard blocker is the final live healthcheck one-time verification, which still requires Anan to run `approve-and-run`.
 - Remaining gap:
-  - Tom deployment and live read-only smoke are still pending for this phase.
+  - Final live healthcheck remains intentionally paused until Anan explicitly approves it. Heartbeat/token alert review also remains manual.
 
 ## Phase 160 (Final go-live human review summary) — Completed
 - Scope:
