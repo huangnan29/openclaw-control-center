@@ -30,6 +30,8 @@
   - The alert smoke wrote `/srv/openclaw-control-center-readonly/runtime/heartbeat-burn-alerts/latest.json` and appended `events.ndjson`; safety fields confirmed no OpenClaw instance writes, no heartbeat clearing, no model API calls, no restarts, and no live managed action calls.
   - Fixed the cron installers so multiple OpenClaw managed crontab blocks can coexist without each installer reporting `needsUpdate=true` just because another block exists.
   - Added regression coverage that each installer compares only its own marker block and removes only its own marker block.
+  - Deployed commit `3af80ea` to Tom; both the dry-run inbox cron and heartbeat burn alert cron now report installed with `needsUpdate=false`.
+  - Re-ran final go-live `prepare`; it returned `prepared_waiting_human_approval` with `approvalPacket=ready`, `approval=needs_manual_approval`, and no live gate or OpenClaw instance mutation.
 - Remaining gap:
   - The cleanup action remains manual by design. Both `deepseek` and `spark` should be reviewed before Anan decides whether to clear or disable their `HEARTBEAT.md` files.
 

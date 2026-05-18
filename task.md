@@ -1105,7 +1105,14 @@ cron 安装器已完成部署、受控 crontab 已安装，且 Tom workspace inb
 - 已修复 `install-managed-action-inbox-cron.sh` 与 `install-heartbeat-burn-alert-cron.sh`：`status/plan` 现在只比较各自的受控块内容，不会因为另一个受控 cron 块存在而互相误报。
 - 已补回归测试，覆盖 managed-action inbox cron 与 heartbeat burn alert cron 共存时各自 `needsUpdate=false`，且 remove 只移除自己的受控块。
 - 已验证 `npm test -- test/managed-action-inbox-cron.test.ts test/heartbeat-burn-alert-cron.test.ts test/oss-readiness.test.ts`，15/15 通过。
+- 已验证 `npm run build`。
+- 已提交并推送 `3af80ea fix: keep managed cron blocks independent`。
+- 已部署到 Tom，`update.sh` 通过，5 个 OpenClaw gateway 健康端口、总览页、实例详情页、只读写接口拦截、容器安全边界和 collector 快照均通过。
+- Tom 当前 `install-managed-action-inbox-cron.sh status` 返回 `inbox_cron_installed`、`needsUpdate=false`。
+- Tom 当前 `install-heartbeat-burn-alert-cron.sh status` 返回 `heartbeat_burn_alert_cron_installed`、`needsUpdate=false`。
+- 已重新执行 `FINAL_GO_LIVE_OUTPUT=summary OPENCLAW_TOPOLOGY_MODE=local-only ops/local/final-go-live-runner.sh prepare`，返回 `prepared_waiting_human_approval`。
+- 当前最终上线边界：`readiness=waiting_human_approval`、`approvalPacket=ready`、`approval=needs_manual_approval`、`inboxPendingCount=0`，安全字段仍为 `opensLiveGate=false`、`callsManagedActionsLiveApi=false`、`writesOpenClawInstanceDirs=false`、`restartsOpenClawInstances=false`。
 
 ## 阶段完成后的下一步
 
-下一步部署 cron 共存修复到 Tom，然后重新执行 `ops/local/final-go-live-runner.sh prepare`，让 approval packet 与最新 Tom commit 对齐，并继续停在人工批准前。另一个人工分支是处理 `deepseek` 与 `spark` 的非空 `HEARTBEAT.md`；在 Anan 明确批准前，仍不得清空这些文件。
+当前已停在最终 live healthcheck 人工批准前。下一步只有两个人工分支：一是 Anan 审查证据包后显式运行 `approve-and-run` 完成最终 live healthcheck 验收；二是先处理 `deepseek` 与 `spark` 的非空 `HEARTBEAT.md`。在 Anan 明确批准前，仍不得清空这些文件，也不得执行 approval `approve` 或打开 live gate。
