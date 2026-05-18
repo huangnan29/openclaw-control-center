@@ -293,9 +293,39 @@ function nextCommandsFrom(report) {
   return Array.isArray(report?.nextCommands) ? report.nextCommands : [];
 }
 
+function finalApprovalWrapperCommands() {
+  return [
+    "ops/local/final-go-live-approve-and-run-from-tom-token.sh status",
+    "CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK APPROVED_BY=Anan FINAL_GO_LIVE_OUTPUT=summary ops/local/final-go-live-approve-and-run-from-tom-token.sh approve-and-run",
+  ];
+}
+
+function normalizeNextCommands(commands) {
+  const normalized = [];
+  let insertedFinalApprovalWrapper = false;
+  function pushUnique(command) {
+    if (!normalized.includes(command)) normalized.push(command);
+  }
+  for (const command of commands) {
+    const text = String(command || "");
+    const isFinalApprovalCommand =
+      text.includes("final-go-live-runner.sh approve-and-run") ||
+      text.includes("live-healthcheck-approval.sh approve runtime/live-healthcheck-approval.json");
+    if (isFinalApprovalCommand) {
+      if (!insertedFinalApprovalWrapper) {
+        for (const wrapperCommand of finalApprovalWrapperCommands()) pushUnique(wrapperCommand);
+        insertedFinalApprovalWrapper = true;
+      }
+      continue;
+    }
+    pushUnique(text);
+  }
+  return normalized;
+}
+
 function reviewNextCommandsOrFallback(approvalReview, fallback) {
   const reviewCommands = nextCommandsFrom(approvalReview?.report);
-  return reviewCommands.length > 0 ? reviewCommands : fallback;
+  return normalizeNextCommands(reviewCommands.length > 0 ? reviewCommands : fallback);
 }
 
 function preparedHumanApprovalReport({ stages, writesTomRuntime, safetyExtra = {}, fallbackNextCommands = [] }) {
@@ -538,7 +568,7 @@ function runApproved() {
       ? afterNextCommands
       : completed
         ? ["ops/local/final-go-live-runner.sh verify-completed"]
-        : tomNextCommands,
+        : normalizeNextCommands(tomNextCommands),
     safety: baseSafety({
       connectsTomSsh: true,
       writesTomRuntime: completed,
@@ -592,9 +622,7 @@ function approveAndRun() {
       topologyMode,
       generatedAt: new Date().toISOString(),
       issues: ["必须设置 CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK"],
-      nextCommands: [
-        "CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK APPROVED_BY=Anan LOCAL_API_TOKEN=<本地令牌> ops/local/final-go-live-runner.sh approve-and-run",
-      ],
+      nextCommands: finalApprovalWrapperCommands(),
       safety: baseSafety({
         connectsTomSsh: false,
         writesTomRuntime: false,
@@ -617,9 +645,7 @@ function approveAndRun() {
       topologyMode,
       generatedAt: new Date().toISOString(),
       issues: ["必须设置 APPROVED_BY=<批准人>"],
-      nextCommands: [
-        "CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK APPROVED_BY=Anan LOCAL_API_TOKEN=<本地令牌> ops/local/final-go-live-runner.sh approve-and-run",
-      ],
+      nextCommands: finalApprovalWrapperCommands(),
       safety: baseSafety({
         connectsTomSsh: false,
         writesTomRuntime: false,
@@ -642,9 +668,7 @@ function approveAndRun() {
       topologyMode,
       generatedAt: new Date().toISOString(),
       issues: ["必须通过 LOCAL_API_TOKEN 提供本地令牌"],
-      nextCommands: [
-        "CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK APPROVED_BY=Anan LOCAL_API_TOKEN=<本地令牌> ops/local/final-go-live-runner.sh approve-and-run",
-      ],
+      nextCommands: finalApprovalWrapperCommands(),
       safety: baseSafety({
         connectsTomSsh: false,
         writesTomRuntime: false,
@@ -672,7 +696,7 @@ function approveAndRun() {
       generatedAt: new Date().toISOString(),
       stages: { approvalReview },
       issues: [`approval review 未到 ready_for_human_approval：${reviewStatus}`],
-      nextCommands: reviewNextCommands.length > 0 ? reviewNextCommands : ["ops/local/final-go-live-runner.sh prepare"],
+      nextCommands: normalizeNextCommands(reviewNextCommands.length > 0 ? reviewNextCommands : ["ops/local/final-go-live-runner.sh prepare"]),
       safety: baseSafety({
         connectsTomSsh: true,
         writesTomRuntime: false,

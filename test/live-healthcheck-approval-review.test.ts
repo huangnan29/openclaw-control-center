@@ -151,8 +151,9 @@ test("approval review 在等待人工批准时给出 approve 下一步且不写�
     assert.equal(report.summary.approval, "needs_manual_approval");
     assert.equal(report.summary.inboxCron, "inbox_cron_installed");
     assert.equal(report.summary.inboxPendingCount, 0);
-    assert(report.nextCommands.some((command: string) => command.includes("final-go-live-runner.sh approve-and-run")));
-    assert(report.nextCommands.some((command: string) => command.includes("live-healthcheck-approval.sh approve")));
+    assert(report.nextCommands.some((command: string) => command.includes("final-go-live-approve-and-run-from-tom-token.sh status")));
+    assert(report.nextCommands.some((command: string) => command.includes("final-go-live-approve-and-run-from-tom-token.sh approve-and-run")));
+    assert(!report.nextCommands.some((command: string) => command.includes("LOCAL_API_TOKEN=<本地令牌>")));
     assert.match(log, /readiness status/);
     assert.match(log, /cron status/);
     assert.match(log, /inbox status/);

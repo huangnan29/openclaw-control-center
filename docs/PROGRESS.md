@@ -1,5 +1,25 @@
 # Progress
 
+## Phase 166 (Prepare and approval review command convergence) — Completed
+- Scope:
+  - Finish converging the common final-approval entrypoints onto the token-wrapper flow.
+- Changed files:
+  - `ops/local/final-go-live-runner.sh`
+  - `ops/tom-readonly/live-healthcheck-approval-review.sh`
+  - `test/final-go-live-runner.test.ts`
+  - `test/live-healthcheck-approval-review.test.ts`
+  - `task.md`
+- Implementation:
+  - Normalized final approval next commands returned by local `prepare`, direct `run-approved` blocked states, and approval-review blocked states.
+  - Tom `live-healthcheck-approval-review.sh` now recommends the wrapper preflight and wrapper `approve-and-run` for the waiting-human-approval state.
+  - The manual Tom approval command remains as a low-level fallback in dedicated approval tooling, but the primary final path now avoids manual token handling.
+- Verification:
+  - `bash -n ops/local/final-go-live-runner.sh ops/tom-readonly/live-healthcheck-approval-review.sh`
+  - `npm test -- test/final-go-live-runner.test.ts test/live-healthcheck-approval-review.test.ts test/final-go-live-review.test.ts test/final-go-live-completion-audit.test.ts test/oss-readiness.test.ts`
+  - `npm run build`
+- Remaining gap:
+  - Final live healthcheck still requires Anan to explicitly run the confirmed wrapper `approve-and-run` command.
+
 ## Phase 165 (Final next-command convergence) — Completed
 - Scope:
   - Make the final human-approval path less error-prone by removing manual token handling from the primary review/audit next commands.

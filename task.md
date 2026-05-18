@@ -44,8 +44,9 @@ Tom 单 Oracle 上线下一步：
   该 runner 会检查 dry-run、准备 approval 模板、生成并校验证据包、刷新 readiness，然后停在人工批准前；不会批准 approval、不会打开 live gate。
 - 人工批准命令：
   `CONFIRM_APPROVAL_RECORD=I_APPROVE_LIVE_HEALTHCHECK_RECORD APPROVED_BY=Anan repo/ops/tom-readonly/live-healthcheck-approval.sh approve runtime/live-healthcheck-approval.json`
-- 人工审查后也可以走本机单命令入口，它会先只读运行 approval review，只有 review 是 `ready_for_human_approval` 时才记录 approval，然后执行一次性演练：
-  `CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK APPROVED_BY=Anan LOCAL_API_TOKEN=<本地令牌> ops/local/final-go-live-runner.sh approve-and-run`
+- 人工审查后优先走本机包装器单命令入口，它会先只读运行 approval review，只有 review 是 `ready_for_human_approval` 时才记录 approval，然后执行一次性演练：
+  `ops/local/final-go-live-approve-and-run-from-tom-token.sh status`
+  `CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK APPROVED_BY=Anan FINAL_GO_LIVE_OUTPUT=summary ops/local/final-go-live-approve-and-run-from-tom-token.sh approve-and-run`
 - 如果不想手工导出 `LOCAL_API_TOKEN`，可用本机包装器从 Tom control-center 容器环境读取令牌到子进程，不打印、不落盘，然后委托既有 `approve-and-run`：
   `ops/local/final-go-live-approve-and-run-from-tom-token.sh status`
   `CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK APPROVED_BY=Anan FINAL_GO_LIVE_OUTPUT=summary ops/local/final-go-live-approve-and-run-from-tom-token.sh approve-and-run`
@@ -64,13 +65,16 @@ Tom 单 Oracle 上线下一步：
 - 已新增 `ops/local/final-go-live-approve-and-run-from-tom-token.sh`。
 - 该包装器用于最终人工批准时减少手工读取 `LOCAL_API_TOKEN` 的出错概率。
 - 已扩展 `status` 模式：只读检查 Tom 容器 token 长度和 approval review 状态，不要求确认短语，不打印 token，不执行 approval。
-- 已把 `final-go-live-review.sh status` 与 `final-go-live-completion-audit.sh status` 的下一步命令收敛到包装器：先运行 `ops/local/final-go-live-approve-and-run-from-tom-token.sh status`，再显式确认执行包装器 `approve-and-run`。
+- 已把 `final-go-live-review.sh status`、`final-go-live-completion-audit.sh status`、`final-go-live-runner.sh prepare`、Tom `live-healthcheck-approval-review.sh status/check` 的下一步命令收敛到包装器：先运行 `ops/local/final-go-live-approve-and-run-from-tom-token.sh status`，再显式确认执行包装器 `approve-and-run`。
 - 新的 review/audit nextCommands 不再要求人工手写 `LOCAL_API_TOKEN=<本地令牌>`。
+- `final-go-live-runner.sh run-approved` 在发现 Tom 尚未批准时，也会把下一步规范化为包装器流程，而不是提示手工 `LOCAL_API_TOKEN`。
+- Tom `live-healthcheck-approval-review.sh` 在 `ready_for_human_approval` 时已直接输出包装器 `status` 和 `approve-and-run`。
 - 缺少 `CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK` 或 `APPROVED_BY` 时，脚本在连接 Tom 前阻断。
 - `approve-and-run` 确认齐全后，它只读 SSH 到 Tom，通过 `docker inspect openclaw-control-center-readonly` 从容器环境读取 `LOCAL_API_TOKEN`，不打印、不落盘，然后作为子进程环境传给 `ops/local/final-go-live-runner.sh approve-and-run`。
 - 最终是否写 approval、打开一次性 live healthcheck 窗口、调用 live API，仍完全由既有 runner 的 review/readiness/approval 闸门决定。
 - 已新增 `test/final-go-live-approve-and-run-from-tom-token.test.ts`，覆盖 status 只读 preflight、缺确认不连接 Tom、成功委托时不打印 token、token 为空时不委托 runner。
 - 已更新 `test/final-go-live-review.test.ts` 与 `test/final-go-live-completion-audit.test.ts`，断言 review/audit 输出包装器命令且不再输出 `LOCAL_API_TOKEN=<本地令牌>`。
+- 已更新 `test/final-go-live-runner.test.ts` 与 `test/live-healthcheck-approval-review.test.ts`，断言 prepare/approval review 等常见入口输出包装器命令。
 - 真实 Tom `status` preflight 已返回 `preflight_ready_for_human_approval`，token length 为 28，review 为 `ready_for_human_approval_with_usage_alerts`，未委托 final runner。
 
 ## 本轮新增（approve-and-run 最终入口）
@@ -98,7 +102,7 @@ Tom 单 Oracle 上线下一步：
 ## 本轮新增（prepare 下一步收敛到 approve-and-run）
 
 - 已增强 `ops/local/final-go-live-runner.sh prepare`：到达 `prepared_waiting_human_approval` 后，会只读执行 Tom `live-healthcheck-approval-review.sh check`。
-- `prepare` 现在会优先返回 approval review 的下一步，因此 OpenClaw 调度侧可直接看到 `final-go-live-runner.sh approve-and-run` 单命令。
+- `prepare` 现在会优先返回 approval review 的下一步，因此 OpenClaw 调度侧可直接看到 token 包装器 `status` 与 `approve-and-run` 单命令。
 - 如果 approval review 未到 `ready_for_human_approval`，`prepare` 返回 `blocked_approval_review`，不会批准 approval、不会打开 live gate、不会调用 managed action live API。
 - 已补测试覆盖：`prepare` 返回 `approve-and-run` 下一步、重复 prepare 仍幂等、approval review 未 ready 时阻断且不批准。
 
@@ -1069,7 +1073,7 @@ cron 安装器已完成部署、受控 crontab 已安装，且 Tom workspace inb
 - 已部署到 Tom，`update.sh` 通过，5 个 OpenClaw gateway 健康端口、总览页、实例详情页、只读写接口拦截、容器安全边界和 collector 快照均通过。
 - 已重新执行 `FINAL_GO_LIVE_OUTPUT=summary OPENCLAW_TOPOLOGY_MODE=local-only ops/local/final-go-live-runner.sh prepare`，返回 `prepared_waiting_human_approval`。
 - 当前边界状态：`readiness=waiting_human_approval`、`approvalPacket=ready`、`approval=needs_manual_approval`、`inboxPendingCount=0`。
-- 当前下一步只剩人工批准命令：`CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK APPROVED_BY=Anan LOCAL_API_TOKEN=<本地令牌> ops/local/final-go-live-runner.sh approve-and-run`。
+- 当前下一步只剩人工批准命令：`CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK APPROVED_BY=Anan FINAL_GO_LIVE_OUTPUT=summary ops/local/final-go-live-approve-and-run-from-tom-token.sh approve-and-run`。
 - 本轮仍未执行 approval `approve`、未打开 live gate、未调用 managed action live API、未修改或重启任何 OpenClaw 实例。
 
 ## 阶段完成后的下一步

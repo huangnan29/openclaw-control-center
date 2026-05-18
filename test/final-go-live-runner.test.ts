@@ -382,8 +382,9 @@ test("final go-live runner prepare 自动推进到人工批准前", async () => 
     assert.equal(report.status, "prepared_waiting_human_approval");
     assert.equal(report.safety.opensLiveGate, false);
     assert.equal(report.safety.callsManagedActionsLiveApi, false);
-    assert(report.nextCommands.some((command: string) => command.includes("final-go-live-runner.sh approve-and-run")));
-    assert(report.nextCommands.some((command: string) => command.includes("live-healthcheck-approval.sh approve")));
+    assert(report.nextCommands.some((command: string) => command.includes("final-go-live-approve-and-run-from-tom-token.sh status")));
+    assert(report.nextCommands.some((command: string) => command.includes("final-go-live-approve-and-run-from-tom-token.sh approve-and-run")));
+    assert(!report.nextCommands.some((command: string) => command.includes("LOCAL_API_TOKEN=<本地令牌>")));
     assert.equal(report.nextCommands.some((command: string) => command.includes("live-healthcheck-rollout-runner.sh prepare")), false);
     assert.match(sshLog, /live-healthcheck-rollout-runner\.sh prepare/);
     assert.match(sshLog, /live-healthcheck-approval-review\.sh check/);
@@ -428,8 +429,9 @@ test("final go-live runner prepare 已在人工批准边界时幂等返回", asy
     assert.equal(second.report.safety.opensLiveGate, false);
     assert.equal(second.report.safety.callsManagedActionsLiveApi, false);
     assert.equal(second.report.safety.alreadyAtHumanApprovalBoundary, true);
-    assert(second.report.nextCommands.some((command: string) => command.includes("final-go-live-runner.sh approve-and-run")));
-    assert(second.report.nextCommands.some((command: string) => command.includes("live-healthcheck-approval.sh approve")));
+    assert(second.report.nextCommands.some((command: string) => command.includes("final-go-live-approve-and-run-from-tom-token.sh status")));
+    assert(second.report.nextCommands.some((command: string) => command.includes("final-go-live-approve-and-run-from-tom-token.sh approve-and-run")));
+    assert(!second.report.nextCommands.some((command: string) => command.includes("LOCAL_API_TOKEN=<本地令牌>")));
     assert.equal(prepareCalls.length, 1);
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -504,7 +506,9 @@ test("final go-live runner run-approved 透传 Tom 阻断并返回非零", async
     assert.equal(report.safety.writesControlCenterRuntimeOnly, false);
     assert.equal(report.safety.opensLiveGate, false);
     assert.equal(report.safety.callsManagedActionsLiveApi, false);
-    assert(report.nextCommands.some((command: string) => command.includes("live-healthcheck-approval.sh approve")));
+    assert(report.nextCommands.some((command: string) => command.includes("final-go-live-approve-and-run-from-tom-token.sh status")));
+    assert(report.nextCommands.some((command: string) => command.includes("final-go-live-approve-and-run-from-tom-token.sh approve-and-run")));
+    assert(!report.nextCommands.some((command: string) => command.includes("LOCAL_API_TOKEN=<本地令牌>")));
     assert.equal(report.nextCommands.some((command: string) => command.includes("live-healthcheck-rollout-runner.sh prepare")), false);
     assert.match(sshLog, /live-healthcheck-rollout-runner\.sh run-approved/);
     assert.doesNotMatch(JSON.stringify(report), /test-token/);
