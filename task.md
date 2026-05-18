@@ -1038,3 +1038,23 @@ cron 安装器已完成部署、受控 crontab 已安装，且 Tom workspace inb
 ## 阶段完成后的下一步
 
 下一步执行一次只读 `ops/local/final-go-live-status.sh check` 或 `final-go-live-runner.sh prepare`，把最新提交重新推进到人工批准边界；如果 Anan 暂时不想进入 live healthcheck 人工批准流程，则先处理 deepseek heartbeat 根因：清空或关闭 `/srv/openclaw-deepseek/workspace/HEARTBEAT.md`。仍不得执行 approval `approve`、不得打开 live gate、不得触发真实 managed action。
+
+## 本轮新增（consumed approval prepare 幂等修复）
+
+- 发现最终上线 `prepare` 在 Tom 上被旧的 `runtime/live-healthcheck-approval.json` 阻塞：该 approval 已于 `2026-05-17T18:24:39.181Z` 被消费，状态为 `consumed`。
+- 已修复 `ops/tom-readonly/live-healthcheck-approval.sh prepare`：当现有 approval 文件 `consumed=true` 时，先备份到 `runtime/.backup/live-healthcheck-approval/`，再生成新的未批准模板。
+- 该修复只写 control-center runtime 的 approval 文件和备份，不批准、不打开 live gate、不调用 managed action live API、不修改 OpenClaw 实例目录、不重启实例。
+- 已新增 `test/live-healthcheck-approval.test.ts` 回归测试，覆盖 consumed approval 被归档并生成 fresh template。
+- 已验证 `bash -n ops/tom-readonly/live-healthcheck-approval.sh ops/tom-readonly/live-healthcheck-rollout-runner.sh`。
+- 已验证 `npm test -- test/live-healthcheck-approval.test.ts test/live-healthcheck-rollout-runner.test.ts test/final-go-live-runner.test.ts`，26/26 通过。
+- 已验证 `npm run build`。
+- 已提交并推送 `9b9063f fix: refresh consumed live approval drafts`。
+- 已部署到 Tom，`update.sh` 通过，5 个 OpenClaw gateway 健康端口、总览页、实例详情页、只读写接口拦截、容器安全边界和 collector 快照均通过。
+- 已重新执行 `FINAL_GO_LIVE_OUTPUT=summary OPENCLAW_TOPOLOGY_MODE=local-only ops/local/final-go-live-runner.sh prepare`，返回 `prepared_waiting_human_approval`。
+- 当前边界状态：`readiness=waiting_human_approval`、`approvalPacket=ready`、`approval=needs_manual_approval`、`inboxPendingCount=0`。
+- 当前下一步只剩人工批准命令：`CONFIRM_FINAL_GO_LIVE_APPROVE_AND_RUN=I_APPROVE_AND_RUN_FINAL_LIVE_HEALTHCHECK APPROVED_BY=Anan LOCAL_API_TOKEN=<本地令牌> ops/local/final-go-live-runner.sh approve-and-run`。
+- 本轮仍未执行 approval `approve`、未打开 live gate、未调用 managed action live API、未修改或重启任何 OpenClaw 实例。
+
+## 阶段完成后的下一步
+
+若要完成最终 live healthcheck 验收，需要 Anan 审查当前证据包后显式运行 `approve-and-run`。若暂不进入 live 演练，则下一步优先处理 deepseek heartbeat 根因，避免继续周期性消耗 token。
