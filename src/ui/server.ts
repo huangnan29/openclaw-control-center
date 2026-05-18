@@ -138,8 +138,10 @@ import {
   type UsageCostSnapshot,
 } from "../runtime/usage-cost";
 import {
+  buildUsageBudgetPolicyUpdate,
   evaluateUsageBudget,
   loadUsageBudgetPolicy,
+  writeUsageBudgetPolicy,
   type UsageBudgetPolicyLoadResult,
   type UsageBudgetStatus,
 } from "../runtime/usage-budget-policy";
@@ -1157,6 +1159,21 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
       explicitToken,
     );
   };
+  const assertControlCenterRuntimeMutationAuthorized = (
+    req: IncomingMessage,
+    routeLabel: string,
+    explicitToken?: string | null,
+  ): void => {
+    assertMutationAuthorizedWithConfig(
+      req,
+      routeLabel,
+      {
+        gateRequired: localTokenGateRequired,
+        configuredToken: localApiToken,
+      },
+      explicitToken,
+    );
+  };
   const assertCollaborationMutationAuthorized = (
     req: IncomingMessage,
     routeLabel: string,
@@ -1982,6 +1999,42 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
         return writeJson(res, 200, {
           ok: true,
           usage,
+        });
+      }
+
+      if (method === "GET" && path === "/api/usage-budget-policy") {
+        assertAllowedQueryParams(url.searchParams, [], true);
+        const policy = await loadUsageBudgetPolicy();
+        return writeJson(res, 200, {
+          ok: true,
+          ...policy,
+        });
+      }
+
+      if (method === "POST" && path === "/api/usage-budget-policy") {
+        assertAllowedQueryParams(url.searchParams, [], true);
+        const contentType = readHeaderValue(req, "content-type")?.toLowerCase() ?? "";
+        const isJson = contentType.includes("application/json");
+        const rawPayload = isJson
+          ? expectObject(await readJsonBody(req), "usage budget policy payload")
+          : Object.fromEntries((await readFormBody(req)).entries());
+        assertControlCenterRuntimeMutationAuthorized(
+          req,
+          "/api/usage-budget-policy",
+          typeof rawPayload.localToken === "string" ? rawPayload.localToken : undefined,
+        );
+        const update = buildUsageBudgetPolicyUpdate(rawPayload);
+        if (update.issues.length > 0) {
+          throw new RequestValidationError("usage budget policy is invalid.", 400, update.issues);
+        }
+        const saved = await writeUsageBudgetPolicy(update.policy);
+        if (!isJson) {
+          const language = rawPayload.lang === "en" ? "en" : "zh";
+          return redirect(res, 303, `/?section=usage-cost&lang=${language}`);
+        }
+        return writeJson(res, 200, {
+          ok: true,
+          ...saved,
         });
       }
 
@@ -7508,6 +7561,47 @@ function budgetMessageForUi(status: UsageBudgetStatus, language: UiLanguage): st
   return pickUiText(language, "Add runtime/usage-budget-policy.json to enable budget alerts.", "添加 runtime/usage-budget-policy.json 后可启用预算告警。");
 }
 
+function renderUsageBudgetAlertRecords(
+  evaluation: ReturnType<typeof evaluateUsageBudget>,
+  language: UiLanguage,
+  currency: string,
+): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  if (evaluation.status !== "warn" && evaluation.status !== "over") {
+    return `<div class="usage-budget-records">
+      <h3>${escapeHtml(t("Recent alert records", "最近告警记录"))}</h3>
+      <div class="empty-state">${escapeHtml(t("No budget alert records in the current scope.", "当前范围暂无预算告警记录。"))}</div>
+    </div>`;
+  }
+
+  const row = `<tr><td>${badge(budgetBadgeClass(evaluation.status), budgetStatusLabel(evaluation.status, language))}</td><td>${escapeHtml(t("Current scope", "当前范围"))}</td><td>${escapeHtml(formatBudgetCost(evaluation.usedCost, currency))}</td><td>${escapeHtml(formatBudgetCost(evaluation.limitCost, currency))}</td><td>${escapeHtml(new Date().toISOString())}</td></tr>`;
+  return `<div class="usage-budget-records">
+    <h3>${escapeHtml(t("Recent alert records", "最近告警记录"))}</h3>
+    <div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("State", "状态"))}</th><th>${escapeHtml(t("Scope", "范围"))}</th><th>${escapeHtml(t("Estimated spend", "本期估算"))}</th><th>${escapeHtml(t("Budget limit", "预算上限"))}</th><th>${escapeHtml(t("Checked at", "检查时间"))}</th></tr></thead><tbody>${row}</tbody></table></div>
+  </div>`;
+}
+
+function renderUsageBudgetPolicyForm(
+  policyLoad: UsageBudgetPolicyLoadResult | undefined,
+  language: UiLanguage,
+): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const policy = policyLoad?.policy ?? { currency: "USD", warnRatio: 0.8 };
+  const monthlyLimitValue = typeof policy.monthlyLimitCost === "number" ? String(policy.monthlyLimitCost) : "";
+  return `<div class="usage-budget-config">
+    <h3>${escapeHtml(t("Adjust budget thresholds", "调整预算阈值"))}</h3>
+    <form class="usage-filter-form" method="post" action="/api/usage-budget-policy">
+      <input type="hidden" name="lang" value="${escapeHtml(language)}" />
+      <label><span>${escapeHtml(t("Currency", "币种"))}</span><input name="currency" value="${escapeHtml(policy.currency || "USD")}" maxlength="12" /></label>
+      <label><span>${escapeHtml(t("Monthly limit", "月度上限"))}</span><input name="monthlyLimitCost" type="number" min="0.0001" step="0.0001" value="${escapeHtml(monthlyLimitValue)}" /></label>
+      <label><span>${escapeHtml(t("Warn ratio", "预警比例"))}</span><input name="warnRatio" type="number" min="0.01" max="0.99" step="0.01" value="${escapeHtml(String(policy.warnRatio))}" /></label>
+      <label><span>${escapeHtml(t("Local token", "本地令牌"))}</span><input name="localToken" type="password" autocomplete="current-password" /></label>
+      <div class="usage-filter-actions"><button type="submit">${escapeHtml(t("Save threshold", "保存阈值"))}</button></div>
+    </form>
+    <div class="meta">${escapeHtml(t("Writes only to control-center runtime policy.", "只写入 control-center runtime 策略。"))}</div>
+  </div>`;
+}
+
 function renderMultiInstanceHealthPanel(items: InstanceSnapshot[], language: UiLanguage, title?: string): string {
   const t = (en: string, zh: string): string => pickUiText(language, en, zh);
   const rows = items
@@ -7598,6 +7692,8 @@ function renderMultiInstanceUsageBudgetPanel(
     ${renderDataSourceNote(language, `${sourceLabel}; ${t("cost is estimated from model pricing catalog", "费用来自模型价格表估算")}`)}
     <div class="meta">${escapeHtml(budgetMessageForUi(evaluation.status, language))}</div>
     <div class="status-strip">${chips}</div>
+    ${renderUsageBudgetAlertRecords(evaluation, language, currency)}
+    ${renderUsageBudgetPolicyForm(policyLoad, language)}
     ${issueText}
   </section>`;
 }
@@ -8475,10 +8571,12 @@ function renderMultiInstanceOverview(
     .usage-filter-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; align-items: end; }
     .usage-filter-form label { display: grid; gap: 5px; min-width: 0; }
     .usage-filter-form label span { color: var(--muted); font-size: 12px; }
-    .usage-filter-form select { width: 100%; border: 1px solid var(--border); border-radius: 8px; background: #fff; color: var(--text); padding: 9px 10px; font: inherit; }
+    .usage-filter-form select, .usage-filter-form input { width: 100%; border: 1px solid var(--border); border-radius: 8px; background: #fff; color: var(--text); padding: 9px 10px; font: inherit; }
     .usage-filter-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
     .usage-filter-actions button, .usage-filter-actions a { border: 1px solid rgba(78, 121, 167, 0.28); border-radius: 8px; padding: 9px 12px; background: #4e79a7; color: #fff; font-weight: 700; text-decoration: none; font: inherit; cursor: pointer; }
     .usage-filter-actions a { background: rgba(78, 121, 167, 0.08); color: #315f8d; }
+    .usage-budget-records, .usage-budget-config { margin-top: 12px; }
+    .usage-budget-records h3, .usage-budget-config h3 { margin: 0 0 8px; font-size: 14px; letter-spacing: 0; }
     .overview-context-row { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; color: var(--muted); font-size: 12px; }
     .overview-context-row span { border: 1px solid rgba(17, 24, 39, 0.1); border-radius: 999px; background: rgba(255, 255, 255, 0.7); padding: 5px 9px; }
     .overview-chart-wall { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }

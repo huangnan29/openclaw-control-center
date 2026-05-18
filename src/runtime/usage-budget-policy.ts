@@ -1,4 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import { resolveRuntimePath } from "./runtime-path";
 
 const DEFAULT_WARN_RATIO = 0.8;
@@ -30,6 +31,11 @@ export interface UsageBudgetEvaluation {
   message: string;
 }
 
+export interface UsageBudgetPolicyUpdateResult {
+  policy: UsageBudgetPolicy;
+  issues: string[];
+}
+
 export const DEFAULT_USAGE_BUDGET_POLICY: UsageBudgetPolicy = {
   currency: "USD",
   warnRatio: DEFAULT_WARN_RATIO,
@@ -58,6 +64,39 @@ export async function loadUsageBudgetPolicy(): Promise<UsageBudgetPolicyLoadResu
       issues,
     };
   }
+}
+
+export function buildUsageBudgetPolicyUpdate(input: unknown): UsageBudgetPolicyUpdateResult {
+  const issues: string[] = [];
+  return {
+    policy: normalizeUsageBudgetPolicy(input, issues),
+    issues,
+  };
+}
+
+export async function writeUsageBudgetPolicy(policy: UsageBudgetPolicy): Promise<UsageBudgetPolicyLoadResult> {
+  const update = buildUsageBudgetPolicyUpdate(policy);
+  if (update.issues.length > 0) {
+    return {
+      policy: update.policy,
+      path: USAGE_BUDGET_POLICY_PATH,
+      loadedFromFile: false,
+      issues: update.issues,
+    };
+  }
+
+  const body = `${JSON.stringify(update.policy, null, 2)}\n`;
+  const tempPath = `${USAGE_BUDGET_POLICY_PATH}.tmp-${process.pid}-${Date.now()}`;
+  await mkdir(dirname(USAGE_BUDGET_POLICY_PATH), { recursive: true });
+  await writeFile(tempPath, body, "utf8");
+  await rename(tempPath, USAGE_BUDGET_POLICY_PATH);
+
+  return {
+    policy: update.policy,
+    path: USAGE_BUDGET_POLICY_PATH,
+    loadedFromFile: true,
+    issues: [],
+  };
 }
 
 export function evaluateUsageBudget(input: {
@@ -123,15 +162,14 @@ function normalizeUsageBudgetPolicy(input: unknown, issues: string[]): UsageBudg
     return { ...DEFAULT_USAGE_BUDGET_POLICY };
   }
 
-  const monthlyLimitCost = normalizePositiveNumber(
-    readNumberAlias(obj, ["monthlyLimitCost", "monthlyCostLimit", "costLimit"]),
-  );
+  const monthlyLimitCostRaw = readNumberAlias(obj, ["monthlyLimitCost", "monthlyCostLimit", "costLimit"]);
+  const monthlyLimitCost = normalizePositiveNumber(monthlyLimitCostRaw);
   const warnRatioRaw = readNumberAlias(obj, ["warnRatio"]);
   const warnRatio = normalizeWarnRatio(warnRatioRaw);
   if (warnRatioRaw !== undefined && warnRatioRaw !== warnRatio) {
     issues.push("warnRatio must be a finite number > 0 and < 1");
   }
-  if (readNumberAlias(obj, ["monthlyLimitCost", "monthlyCostLimit", "costLimit"]) !== undefined && monthlyLimitCost === undefined) {
+  if (monthlyLimitCostRaw !== undefined && monthlyLimitCost === undefined) {
     issues.push("monthlyLimitCost must be a finite number > 0");
   }
 
@@ -148,7 +186,9 @@ function readNumberAlias(obj: Record<string, unknown>, keys: string[]): number |
   for (const key of keys) {
     const value = obj[key];
     if (value === undefined) continue;
-    return typeof value === "number" ? value : Number.NaN;
+    if (typeof value === "number") return value;
+    if (typeof value === "string" && value.trim() !== "") return Number(value.trim());
+    return Number.NaN;
   }
   return undefined;
 }

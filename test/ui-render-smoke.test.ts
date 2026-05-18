@@ -357,6 +357,72 @@ test("multi-instance usage page renders budget alerts from policy", async () => 
   assert(html.includes("预算告警"));
   assert(html.includes("预算上限"));
   assert(html.includes("超额"));
+  assert(html.includes("调整预算阈值"));
+  assert(html.includes('action="/api/usage-budget-policy"'));
+  assert(html.includes('name="localToken"'));
+  assert(html.includes("最近告警记录"));
+});
+
+test("usage budget policy API saves control-center runtime policy in readonly multi-instance mode", async () => {
+  const { startUiServer } = await import("../src/ui/server");
+  const previousInstancesJson = process.env.OPENCLAW_INSTANCES_JSON;
+  const previousInstancesFile = process.env.OPENCLAW_INSTANCES_FILE;
+  process.env.OPENCLAW_INSTANCES_JSON = JSON.stringify({
+    instances: [smokeInstance("tom", "Tom")],
+  });
+  delete process.env.OPENCLAW_INSTANCES_FILE;
+
+  const server = startUiServer(0, new ReadonlyToolClient(), {
+    localTokenAuthRequired: true,
+    localApiToken: "budget-token",
+    readonlyMode: true,
+    async createMultiInstanceSnapshot(instances, selectedInstanceId) {
+      return routeSmokeMultiSnapshot(instances, selectedInstanceId ?? "tom");
+    },
+  });
+
+  try {
+    if (!server.listening) {
+      await new Promise<void>((resolve, reject) => {
+        server.once("listening", resolve);
+        server.once("error", reject);
+      });
+    }
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Failed to bind ephemeral UI port.");
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+
+    const blocked = await fetch(`${baseUrl}/api/usage-budget-policy`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ monthlyLimitCost: 20, warnRatio: 0.7 }),
+    });
+    assert.equal(blocked.status, 401);
+
+    const saved = await fetch(`${baseUrl}/api/usage-budget-policy`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-local-token": "budget-token",
+      },
+      body: JSON.stringify({ monthlyLimitCost: 20, warnRatio: 0.7, currency: "usd" }),
+    });
+    assert.equal(saved.status, 200);
+    const savedBody = await saved.json() as { policy?: { monthlyLimitCost?: number; warnRatio?: number; currency?: string } };
+    assert.equal(savedBody.policy?.monthlyLimitCost, 20);
+    assert.equal(savedBody.policy?.warnRatio, 0.7);
+    assert.equal(savedBody.policy?.currency, "USD");
+  } finally {
+    process.env.OPENCLAW_INSTANCES_JSON = previousInstancesJson;
+    if (previousInstancesFile === undefined) {
+      delete process.env.OPENCLAW_INSTANCES_FILE;
+    } else {
+      process.env.OPENCLAW_INSTANCES_FILE = previousInstancesFile;
+    }
+    if (server.listening) {
+      await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+    }
+  }
 });
 
 test("multi-instance routes render overview detail and invalid-instance fallback", async () => {
