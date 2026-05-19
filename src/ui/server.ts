@@ -406,6 +406,8 @@ const DASHBOARD_SECTION_LINKS_EN: DashboardSectionLink[] = [
   { key: "memory", label: "Memory", blurb: "Daily and long-term memories" },
   { key: "docs", label: "Documents", blurb: "Main and active agent core docs" },
   { key: "projects-tasks", label: "Tasks", blurb: "Board, schedule and activity" },
+  { key: "alerts", label: "Alerts", blurb: "Warnings and decisions" },
+  { key: "replay-audit", label: "Replay", blurb: "Audit and replay trail" },
   { key: "settings", label: "Settings", blurb: "Safety and data links" },
 ] as const;
 const ANIMAL_CATALOG = [
@@ -4213,6 +4215,12 @@ function dashboardSectionLinks(language: UiLanguage): DashboardSectionLink[] {
     }
     if (item.key === "projects-tasks") {
       return { ...item, label: "任务", blurb: "任务、排程与活动" };
+    }
+    if (item.key === "alerts") {
+      return { ...item, label: "告警", blurb: "预警与待决策" };
+    }
+    if (item.key === "replay-audit") {
+      return { ...item, label: "回放", blurb: "审计与回放轨迹" };
     }
     return { ...item, label: "设置", blurb: "安全与数据连接" };
   });
@@ -8399,8 +8407,378 @@ function renderMultiInstanceRuntimePanel(snapshot: MultiInstanceSnapshot, langua
   </section>`;
 }
 
+function buildMultiInstanceRiskRows(items: InstanceSnapshot[], generatedAt: string): MultiInstanceLogRow[] {
+  const rows: MultiInstanceLogRow[] = [];
+  for (const item of items) {
+    const metrics = buildInstanceUiMetrics(item);
+    if (item.status !== "connected") {
+      rows.push({
+        instanceId: item.instance.id,
+        instanceName: item.instance.name,
+        timestamp: item.collector?.generatedAt ?? item.snapshot.generatedAt ?? generatedAt,
+        severity: item.status === "not_connected" ? "error" : "warn",
+        source: "connection",
+        message: `${multiInstanceStatusLabel(item.status, "zh")} · ${item.detail}`,
+        real: false,
+      });
+    }
+    if (metrics.errors > 0 || metrics.blocked > 0 || metrics.pendingApprovals > 0) {
+      rows.push({
+        instanceId: item.instance.id,
+        instanceName: item.instance.name,
+        timestamp: metrics.lastActivityAt ?? item.snapshot.generatedAt ?? generatedAt,
+        severity: metrics.errors > 0 ? "error" : metrics.pendingApprovals > 0 ? "action-required" : "warn",
+        source: "runtime-risk",
+        message: `running=${metrics.running} blocked=${metrics.blocked} errors=${metrics.errors} pendingApprovals=${metrics.pendingApprovals}`,
+        real: false,
+      });
+    }
+    for (const budget of item.snapshot.budgetSummary.evaluations ?? []) {
+      if (budget.status === "ok") continue;
+      rows.push({
+        instanceId: item.instance.id,
+        instanceName: item.instance.name,
+        timestamp: item.snapshot.generatedAt ?? generatedAt,
+        severity: budget.status === "over" ? "action-required" : "warn",
+        source: "budget",
+        message: `${budget.status} · ${budget.scope}:${budget.label}`,
+        real: false,
+      });
+    }
+  }
+  return rows.sort((a, b) => toSortableMs(b.timestamp) - toSortableMs(a.timestamp));
+}
+
+function renderMultiInstanceAlertsPanel(
+  snapshot: MultiInstanceSnapshot,
+  language: UiLanguage,
+  generatedAt: string,
+): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const riskRows = buildMultiInstanceRiskRows(snapshot.instances, generatedAt);
+  const logWarningRows = buildMultiInstanceLogRows(snapshot.instances, generatedAt).filter(
+    (row) => row.severity === "warn" || row.severity === "error" || row.severity === "action-required",
+  );
+  const budgetRiskCount = snapshot.instances.reduce(
+    (sum, item) => sum + (item.snapshot.budgetSummary.evaluations ?? []).filter((entry) => entry.status !== "ok").length,
+    0,
+  );
+  const chips = [
+    renderFleetMetricChip(t("Disconnected", "连接异常"), snapshot.totals.notConnected, snapshot.totals.notConnected > 0 ? "danger" : "ok"),
+    renderFleetMetricChip(t("Runtime risks", "运行风险"), riskRows.length, riskRows.length > 0 ? "warn" : "ok"),
+    renderFleetMetricChip(t("Pending approvals", "待审批"), snapshot.totals.pendingApprovals, snapshot.totals.pendingApprovals > 0 ? "warn" : "ok"),
+    renderFleetMetricChip(t("Budget risks", "预算风险"), budgetRiskCount, budgetRiskCount > 0 ? "warn" : "ok"),
+    renderFleetMetricChip(t("Warning logs", "预警日志"), logWarningRows.length, logWarningRows.length > 0 ? "warn" : "ok"),
+  ].join("");
+  const riskTableRows = [...riskRows, ...logWarningRows]
+    .sort((a, b) => toSortableMs(b.timestamp) - toSortableMs(a.timestamp))
+    .slice(0, 40)
+    .map(
+      (row) =>
+        `<tr><td>${escapeHtml(row.timestamp ? formatUiTimestamp(row.timestamp, language) : "-")}</td><td>${escapeHtml(row.instanceName)}</td><td>${badge(row.severity, logSeverityLabel(row.severity, language))}</td><td>${escapeHtml(row.source)}</td><td>${escapeHtml(safeTruncate(row.message, 160))}</td></tr>`,
+    )
+    .join("");
+
+  return `
+    <section class="panel">
+      <div class="panel-head">
+        <h2>${escapeHtml(t("Alert command board", "告警指挥板"))}</h2>
+        <div class="meta">${escapeHtml(t("Aggregates connection, session, approval, budget, and runtime-log warning signals.", "聚合连接、会话、审批、预算和运行日志中的预警信号。"))}</div>
+      </div>
+      <div class="status-strip">${chips}</div>
+      ${riskTableRows ? `<div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Time", "时间"))}</th><th>${escapeHtml(t("Instance", "实例"))}</th><th>${escapeHtml(t("Level", "级别"))}</th><th>${escapeHtml(t("Source", "来源"))}</th><th>${escapeHtml(t("Message", "消息"))}</th></tr></thead><tbody>${riskTableRows}</tbody></table></div>` : `<div class="empty-state">${escapeHtml(t("No active alert signals in the visible scope.", "当前可见范围没有活跃告警信号。"))}</div>`}
+    </section>
+    <section class="overview-layout">
+      <div>
+        ${renderMultiInstanceHealthPanel(snapshot.instances, language, t("Health by instance", "按实例健康"))}
+        ${renderMultiInstanceApprovalsPanel(snapshot.instances, language, t("Approval queue", "审批队列"))}
+      </div>
+      <div>
+        ${renderMultiInstanceLogPanel(snapshot.instances, language, generatedAt, t("Warning and runtime logs", "预警与运行日志"))}
+        ${renderFleetAttention(snapshot, language)}
+      </div>
+    </section>`;
+}
+
+function renderMultiInstanceReplayAuditPanel(
+  snapshot: MultiInstanceSnapshot,
+  language: UiLanguage,
+  historyView?: MultiInstanceHistoryView,
+  managedActionAudit?: ManagedActionAuditSnapshot,
+): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const eventRows = buildMultiInstanceLogRows(snapshot.instances, snapshot.generatedAt).slice(0, 36);
+  const collectorSamples = historyView?.samples ?? [];
+  const dryRunRecords = managedActionAudit?.records ?? [];
+  const latestSample = collectorSamples[collectorSamples.length - 1];
+  const chips = [
+    renderFleetMetricChip(t("Replay events", "回放事件"), eventRows.length),
+    renderFleetMetricChip(t("Dry-run audits", "dry-run 审计"), dryRunRecords.length),
+    renderFleetMetricChip(t("Collector samples", "采集样本"), collectorSamples.length),
+    renderFleetMetricChip(t("Latest sessions", "最新会话数"), latestSample?.totals.sessions ?? snapshot.totals.sessions),
+    renderFleetMetricChip(t("Live gates", "Live 闸门"), READONLY_MODE ? t("Closed", "关闭") : t("Review", "复核"), READONLY_MODE ? "ok" : "warn"),
+  ].join("");
+  const eventTableRows = eventRows
+    .map(
+      (row) =>
+        `<tr><td>${escapeHtml(row.timestamp ? formatUiTimestamp(row.timestamp, language) : "-")}</td><td>${escapeHtml(row.instanceName)}</td><td>${badge(row.severity, logSeverityLabel(row.severity, language))}</td><td>${escapeHtml(row.source)}</td><td>${escapeHtml(safeTruncate(row.message, 150))}</td></tr>`,
+    )
+    .join("");
+  const dryRunRows = dryRunRecords
+    .slice(0, 20)
+    .map(
+      (record) =>
+        `<tr><td>${escapeHtml(formatUiTimestamp(record.timestamp, language))}</td><td>${badge(record.ok ? "connected" : "error", record.ok ? t("OK", "通过") : t("Failed", "失败"))}</td><td>${escapeHtml(record.action ?? "-")}</td><td>${escapeHtml(record.targetInstanceName ?? record.targetInstanceId ?? "-")}</td><td><code>${escapeHtml(record.operationRequestId ?? record.requestId ?? "-")}</code></td><td>${escapeHtml(safeTruncate(record.detail, 130))}</td></tr>`,
+    )
+    .join("");
+  const historyRows = collectorSamples
+    .slice(-18)
+    .reverse()
+    .map(
+      (sample) =>
+        `<tr><td>${escapeHtml(formatUiTimestamp(sample.generatedAt, language))}</td><td>${escapeHtml(sample.serverName ?? sample.serverId)}</td><td>${sample.totals.connected}/${sample.totals.instances}</td><td>${sample.totals.sessions}</td><td>${sample.totals.running}</td><td>${sample.totals.blocked}</td><td>${sample.totals.errors}</td><td>${formatInt(sample.totals.totalTokens)}</td></tr>`,
+    )
+    .join("");
+
+  return `
+    <section class="panel">
+      <div class="panel-head">
+        <h2>${escapeHtml(t("Replay and audit trail", "回放与审计轨迹"))}</h2>
+        <div class="meta">${escapeHtml(t("Readonly replay combines snapshot-derived events, dry-run management audits, and collector history.", "只读回放合并快照事件、dry-run 管理审计和采集历史。"))}</div>
+      </div>
+      <div class="status-strip">${chips}</div>
+      ${renderDataSourceNote(language, t("No live execution gate is opened by this page.", "本页面不会打开 live 执行闸门。"))}
+    </section>
+    <section class="overview-layout">
+      <div>
+        <section class="panel">
+          <div class="panel-head">
+            <h2>${escapeHtml(t("Recent replay events", "最近回放事件"))}</h2>
+            <div class="meta">${escapeHtml(t("Newest event-like records across visible instances.", "当前可见实例中的最新事件流。"))}</div>
+          </div>
+          ${eventTableRows ? `<div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Time", "时间"))}</th><th>${escapeHtml(t("Instance", "实例"))}</th><th>${escapeHtml(t("Level", "级别"))}</th><th>${escapeHtml(t("Source", "来源"))}</th><th>${escapeHtml(t("Message", "消息"))}</th></tr></thead><tbody>${eventTableRows}</tbody></table></div>` : `<div class="empty-state">${escapeHtml(t("No replay events yet.", "暂无回放事件。"))}</div>`}
+        </section>
+        <section class="panel">
+          <div class="panel-head">
+            <h2>${escapeHtml(t("Collector history", "采集历史"))}</h2>
+            <div class="meta">${escapeHtml(historyView?.detail ?? t("Collector history is not connected yet.", "采集历史暂未接入。"))}</div>
+          </div>
+          ${historyRows ? `<div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Time", "时间"))}</th><th>${escapeHtml(t("Server", "服务器"))}</th><th>${escapeHtml(t("Connected", "已连接"))}</th><th>${escapeHtml(t("Sessions", "会话"))}</th><th>${escapeHtml(t("Running", "运行中"))}</th><th>${escapeHtml(t("Blocked", "阻塞"))}</th><th>${escapeHtml(t("Errors", "错误"))}</th><th>${escapeHtml(t("Usage", "用量"))}</th></tr></thead><tbody>${historyRows}</tbody></table></div>` : `<div class="empty-state">${escapeHtml(t("No collector history samples yet.", "暂无采集历史样本。"))}</div>`}
+        </section>
+      </div>
+      <div>
+        <section class="panel">
+          <div class="panel-head">
+            <h2>${escapeHtml(t("Dry-run audit", "dry-run 审计"))}</h2>
+            <div class="meta">${escapeHtml(t("Management commands remain preview-only unless a separate live gate is opened.", "管理命令默认停留在预演，除非另行打开 live 闸门。"))}</div>
+          </div>
+          ${dryRunRows ? `<div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Time", "时间"))}</th><th>${escapeHtml(t("Result", "结果"))}</th><th>${escapeHtml(t("Action", "动作"))}</th><th>${escapeHtml(t("Target", "目标"))}</th><th>Request</th><th>${escapeHtml(t("Detail", "说明"))}</th></tr></thead><tbody>${dryRunRows}</tbody></table></div>` : `<div class="empty-state">${escapeHtml(t("No dry-run management audit records yet.", "暂无 dry-run 管理审计记录。"))}</div>`}
+        </section>
+        ${renderManagedActionAuditPanel(dryRunRecords, language)}
+      </div>
+    </section>`;
+}
+
+function renderMultiInstanceMemoryPanel(snapshot: MultiInstanceSnapshot, language: UiLanguage): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const rows = snapshot.instances
+    .map((item) => {
+      const metrics = buildInstanceUiMetrics(item);
+      const agentCount = item.snapshot.agentRoster?.entries.length ?? metrics.agents;
+      const runtimeSignals = metrics.sessions + metrics.tasks + (item.snapshot.runtimeLogs?.entries.length ?? 0);
+      return `<tr>
+        <td>${escapeHtml(item.instance.name)}<div class="meta"><code>${escapeHtml(item.instance.id)}</code></div></td>
+        <td>${badge(item.status, multiInstanceStatusLabel(item.status, language))}</td>
+        <td>${agentCount}</td>
+        <td>${metrics.sessions}</td>
+        <td>${metrics.tasks}</td>
+        <td>${runtimeSignals}</td>
+        <td><code>${escapeHtml(item.instance.openclawHome)}</code></td>
+        <td>${escapeHtml(metrics.lastActivityAt ? formatUiTimestamp(metrics.lastActivityAt, language) : "-")}</td>
+      </tr>`;
+    })
+    .join("");
+  const totalAgents = snapshot.instances.reduce(
+    (sum, item) => sum + (item.snapshot.agentRoster?.entries.length ?? collectAgentIdsForInstance(item).size),
+    0,
+  );
+  const totalMemorySignals = snapshot.instances.reduce((sum, item) => {
+    const metrics = buildInstanceUiMetrics(item);
+    return sum + metrics.sessions + metrics.tasks + (item.snapshot.runtimeLogs?.entries.length ?? 0);
+  }, 0);
+  const chips = [
+    renderFleetMetricChip(t("Instances", "实例数"), snapshot.totals.instances),
+    renderFleetMetricChip(t("Visible agents", "可见 Agent"), totalAgents),
+    renderFleetMetricChip(t("Runtime memory signals", "记忆刷新信号"), totalMemorySignals),
+    renderFleetMetricChip(t("Readonly writes", "只读写入"), READONLY_MODE ? t("Blocked", "阻断") : t("Review", "复核"), READONLY_MODE ? "ok" : "warn"),
+  ].join("");
+
+  return `
+    <section class="panel">
+      <div class="panel-head">
+        <h2>${escapeHtml(t("Memory registry", "记忆名录"))}</h2>
+        <div class="meta">${escapeHtml(t("Shows where each instance's memory would be maintained and which readonly signals can refresh memory summaries.", "展示每个实例的记忆维护位置，以及哪些只读信号可用于刷新记忆摘要。"))}</div>
+      </div>
+      <div class="status-strip">${chips}</div>
+      ${renderDataSourceNote(language, t("This page does not edit memory files in multi-instance readonly mode.", "多实例只读模式下，本页面不编辑记忆文件。"))}
+      <div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Instance", "实例"))}</th><th>${escapeHtml(t("State", "状态"))}</th><th>Agent</th><th>${escapeHtml(t("Sessions", "会话"))}</th><th>${escapeHtml(t("Tasks", "任务"))}</th><th>${escapeHtml(t("Signals", "信号"))}</th><th>OpenClaw Home</th><th>${escapeHtml(t("Latest", "最近"))}</th></tr></thead><tbody>${rows}</tbody></table></div>
+    </section>
+    <section class="overview-layout">
+      <div>
+        ${renderMultiInstanceAgentRosterPanel(snapshot.instances, language, t("Memory owners", "记忆负责人"))}
+      </div>
+      <div>
+        ${renderMultiInstanceRecentTasksPanel(snapshot.instances, language, t("Memory-worthy recent tasks", "适合沉淀的最近任务"))}
+        ${renderMultiInstanceLogPanel(snapshot.instances, language, snapshot.generatedAt, t("Memory source signals", "记忆来源信号"))}
+      </div>
+    </section>`;
+}
+
+function renderMultiInstanceDocsPanel(snapshot: MultiInstanceSnapshot, language: UiLanguage): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const rows = snapshot.instances
+    .map((item) => {
+      const rosterSource = item.snapshot.agentRoster?.sourcePath || "-";
+      const logSources = item.snapshot.runtimeLogs?.sourcePaths.length ?? 0;
+      return `<tr>
+        <td>${escapeHtml(item.instance.name)}<div class="meta"><code>${escapeHtml(item.instance.id)}</code></div></td>
+        <td>${badge(item.status, multiInstanceStatusLabel(item.status, language))}</td>
+        <td><code>${escapeHtml(item.instance.openclawConfigPath)}</code></td>
+        <td><code>${escapeHtml(item.instance.workspaceRoot ?? "-")}</code></td>
+        <td><code>${escapeHtml(rosterSource)}</code></td>
+        <td>${logSources}</td>
+      </tr>`;
+    })
+    .join("");
+  const docPathRows = snapshot.instances
+    .flatMap((item) => [
+      { instance: item.instance.name, label: "openclaw.json", path: item.instance.openclawConfigPath },
+      { instance: item.instance.name, label: "workspaceRoot", path: item.instance.workspaceRoot ?? "-" },
+      { instance: item.instance.name, label: "openclawHome", path: item.instance.openclawHome },
+    ])
+    .map(
+      (item) =>
+        `<tr><td>${escapeHtml(item.instance)}</td><td>${escapeHtml(item.label)}</td><td><code>${escapeHtml(item.path)}</code></td></tr>`,
+    )
+    .join("");
+  const chips = [
+    renderFleetMetricChip(t("Instances", "实例数"), snapshot.totals.instances),
+    renderFleetMetricChip(t("Config files", "配置文件"), snapshot.instances.length),
+    renderFleetMetricChip(t("Workspace roots", "工作区根目录"), snapshot.instances.filter((item) => item.instance.workspaceRoot).length),
+    renderFleetMetricChip(t("Write mode", "写入模式"), READONLY_MODE ? t("Readonly", "只读") : t("Review", "复核"), READONLY_MODE ? "ok" : "warn"),
+  ].join("");
+
+  return `
+    <section class="panel">
+      <div class="panel-head">
+        <h2>${escapeHtml(t("Document registry", "文档名录"))}</h2>
+        <div class="meta">${escapeHtml(t("Readonly inventory of instance configs, workspace roots, roster sources, and log sources.", "只读列出实例配置、工作区根目录、名录来源和日志来源。"))}</div>
+      </div>
+      <div class="status-strip">${chips}</div>
+      ${renderDataSourceNote(language, t("Multi-instance public service lists document sources; editing stays disabled here.", "多实例公网服务只列出文档来源；这里保持禁用编辑。"))}
+      <div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Instance", "实例"))}</th><th>${escapeHtml(t("State", "状态"))}</th><th>Config</th><th>Workspace</th><th>Roster source</th><th>${escapeHtml(t("Log sources", "日志源"))}</th></tr></thead><tbody>${rows}</tbody></table></div>
+    </section>
+    <section class="overview-layout">
+      <div>
+        <section class="panel">
+          <div class="panel-head">
+            <h2>${escapeHtml(t("Core document paths", "核心文档路径"))}</h2>
+            <div class="meta">${escapeHtml(t("These are the paths the control center can use as anchors for future document workbench upgrades.", "这些路径可作为后续文档工作台升级的锚点。"))}</div>
+          </div>
+          <div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Instance", "实例"))}</th><th>${escapeHtml(t("Kind", "类型"))}</th><th>${escapeHtml(t("Path", "路径"))}</th></tr></thead><tbody>${docPathRows}</tbody></table></div>
+        </section>
+      </div>
+      <div>
+        ${renderMultiInstanceAgentRosterPanel(snapshot.instances, language, t("Document owners", "文档负责人"))}
+      </div>
+    </section>`;
+}
+
+function renderMultiInstanceCollaborationPanel(
+  snapshot: MultiInstanceSnapshot,
+  language: UiLanguage,
+  section: DashboardSection,
+): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const taskRows = buildMultiInstanceTaskRows(snapshot.instances);
+  const multiSessionTasks = taskRows.filter((task) => task.sessionCount > 1);
+  const activeAgents = buildMultiInstanceAgentRows(snapshot.instances).filter((row) => row.running > 0 || row.tasks > 0);
+  const handoffLikeRows = buildMultiInstanceLogRows(snapshot.instances, snapshot.generatedAt).filter((row) =>
+    /(handoff|spawn|dispatch|assign|review|交接|派发|分配|复核)/i.test(row.message),
+  );
+  const chips = [
+    renderFleetMetricChip(t("Active agents", "活跃 Agent"), activeAgents.length),
+    renderFleetMetricChip(t("Multi-session tasks", "多会话任务"), multiSessionTasks.length),
+    renderFleetMetricChip(t("Pending approvals", "待审批"), snapshot.totals.pendingApprovals, snapshot.totals.pendingApprovals > 0 ? "warn" : "ok"),
+    renderFleetMetricChip(t("Handoff signals", "交接信号"), handoffLikeRows.length),
+    renderFleetMetricChip(t("Hall runtime", "群聊运行时"), section === "hall-chat" && READONLY_MODE ? t("Readonly", "只读") : t("Observed", "观测"), "ok"),
+  ].join("");
+  const taskTableRows = multiSessionTasks
+    .slice(0, 24)
+    .map(
+      (task) =>
+        `<tr><td>${escapeHtml(task.instanceName)}</td><td>${escapeHtml(safeTruncate(task.title, 110))}</td><td>${badge(task.status, task.status)}</td><td>${escapeHtml(task.owner)}</td><td>${task.sessionCount}</td><td>${escapeHtml(formatUiTimestamp(task.updatedAt, language))}</td></tr>`,
+    )
+    .join("");
+  const handoffRows = handoffLikeRows
+    .slice(0, 24)
+    .map(
+      (row) =>
+        `<tr><td>${escapeHtml(row.timestamp ? formatUiTimestamp(row.timestamp, language) : "-")}</td><td>${escapeHtml(row.instanceName)}</td><td>${badge(row.severity, logSeverityLabel(row.severity, language))}</td><td>${escapeHtml(row.source)}</td><td>${escapeHtml(safeTruncate(row.message, 140))}</td></tr>`,
+    )
+    .join("");
+  const title = section === "hall-chat" ? t("Hall chat readonly signals", "群聊只读信号") : t("Collaboration signals", "协作信号");
+  const detail = section === "hall-chat"
+    ? t("Hall dispatch is intentionally closed on the public readonly service; this page shows observable group-work traces only.", "公网只读服务刻意关闭群聊派发；本页只显示可观测的群体工作痕迹。")
+    : t("Derived from task/session/log signals so you can see whether multiple agents are converging on the same work.", "从任务、会话和日志信号推导，用来观察多个 Agent 是否围绕同一任务协同。");
+
+  return `
+    <section class="panel">
+      <div class="panel-head">
+        <h2>${escapeHtml(title)}</h2>
+        <div class="meta">${escapeHtml(detail)}</div>
+      </div>
+      <div class="status-strip">${chips}</div>
+      ${renderDataSourceNote(language, t("Readonly derived signals; no hall dispatch or direct stream is enabled here.", "只读推导信号；这里不启用群聊派发或直接流式运行。"))}
+    </section>
+    <section class="overview-layout">
+      <div>
+        <section class="panel">
+          <div class="panel-head">
+            <h2>${escapeHtml(t("Multi-session work", "多会话工作"))}</h2>
+            <div class="meta">${escapeHtml(t("Tasks linked to more than one session are likely collaboration or handoff work.", "关联多条会话的任务通常意味着协作或交接。"))}</div>
+          </div>
+          ${taskTableRows ? `<div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Instance", "实例"))}</th><th>${escapeHtml(t("Task", "任务"))}</th><th>${escapeHtml(t("State", "状态"))}</th><th>${escapeHtml(t("Owner", "负责人"))}</th><th>${escapeHtml(t("Sessions", "会话"))}</th><th>${escapeHtml(t("Updated", "更新时间"))}</th></tr></thead><tbody>${taskTableRows}</tbody></table></div>` : `<div class="empty-state">${escapeHtml(t("No multi-session task signals yet.", "暂无多会话任务信号。"))}</div>`}
+        </section>
+        ${renderMultiInstanceSessionActivityPanel(snapshot.instances, language)}
+      </div>
+      <div>
+        <section class="panel">
+          <div class="panel-head">
+            <h2>${escapeHtml(t("Handoff-like events", "类似交接的事件"))}</h2>
+            <div class="meta">${escapeHtml(t("Matches dispatch, assign, spawn, review, and handoff-like words in visible event streams.", "匹配可见事件流中的派发、分配、spawn、复核、交接等信号。"))}</div>
+          </div>
+          ${handoffRows ? `<div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Time", "时间"))}</th><th>${escapeHtml(t("Instance", "实例"))}</th><th>${escapeHtml(t("Level", "级别"))}</th><th>${escapeHtml(t("Source", "来源"))}</th><th>${escapeHtml(t("Message", "消息"))}</th></tr></thead><tbody>${handoffRows}</tbody></table></div>` : `<div class="empty-state">${escapeHtml(t("No handoff-like events yet.", "暂无类似交接的事件。"))}</div>`}
+        </section>
+        ${renderMultiInstanceApprovalsPanel(snapshot.instances, language, t("Review and approval signals", "复核与审批信号"))}
+      </div>
+    </section>`;
+}
+
 function multiInstanceSectionLinks(language: UiLanguage): DashboardSectionLink[] {
-  const allowed = new Set<DashboardSection>(["overview", "usage-cost", "team", "projects-tasks", "settings"]);
+  const allowed = new Set<DashboardSection>([
+    "overview",
+    "usage-cost",
+    "team",
+    "collaboration",
+    "hall-chat",
+    "memory",
+    "docs",
+    "projects-tasks",
+    "alerts",
+    "replay-audit",
+    "settings",
+  ]);
   return dashboardSectionLinks(language).filter((item) => allowed.has(item.key));
 }
 
@@ -8439,7 +8817,13 @@ function buildMultiInstanceOverviewWindowHref(
 function multiInstanceSectionTitle(section: DashboardSection, language: UiLanguage): string {
   if (section === "usage-cost") return pickUiText(language, "Usage and Cost", "用量与成本");
   if (section === "team") return pickUiText(language, "Staff and Agents", "员工与 Agent");
+  if (section === "collaboration") return pickUiText(language, "Collaboration Signals", "协作信号");
+  if (section === "hall-chat") return pickUiText(language, "Hall Chat Readonly", "群聊只读视图");
+  if (section === "memory") return pickUiText(language, "Memory Registry", "记忆名录");
+  if (section === "docs") return pickUiText(language, "Document Registry", "文档名录");
   if (section === "projects-tasks") return pickUiText(language, "Tasks, Approvals, and Logs", "任务、审批与日志");
+  if (section === "alerts") return pickUiText(language, "Alerts and Decisions", "告警与决策");
+  if (section === "replay-audit") return pickUiText(language, "Replay and Audit", "回放与审计");
   if (section === "settings") return pickUiText(language, "Settings and Safety", "设置与安全");
   return pickUiText(language, "Readonly multi-instance overview", "多实例只读总览");
 }
@@ -8459,11 +8843,53 @@ function multiInstanceSectionLead(section: DashboardSection, language: UiLanguag
       "区分当前活跃工作、已配置 Agent 与历史会话可见性。",
     );
   }
+  if (section === "collaboration") {
+    return pickUiText(
+      language,
+      "Readonly signals for cross-agent work, multi-session tasks, handoffs, and blocked collaboration.",
+      "只读查看跨智能体工作、多会话任务、交接和协作阻塞信号。",
+    );
+  }
+  if (section === "hall-chat") {
+    return pickUiText(
+      language,
+      "Public readonly mode keeps Hall runtime dispatch closed, but still shows the visible group-work signals.",
+      "公网只读模式下群聊运行派发保持关闭，但仍展示可见的群体协作信号。",
+    );
+  }
+  if (section === "memory") {
+    return pickUiText(
+      language,
+      "Track where long-term memory would live for each instance and what runtime signals can refresh it.",
+      "查看每个实例的长期记忆位置，以及哪些运行信号可以刷新记忆。",
+    );
+  }
+  if (section === "docs") {
+    return pickUiText(
+      language,
+      "Readonly document inventory for Main and instance-level OpenClaw workspaces.",
+      "按 Main 与实例工作区查看只读文档名录。",
+    );
+  }
   if (section === "projects-tasks") {
     return pickUiText(
       language,
       "A readonly workbench for recent tasks, approvals, sessions, and runtime log-like events.",
       "集中查看最近任务、审批、会话和运行日志事件的只读工作台。",
+    );
+  }
+  if (section === "alerts") {
+    return pickUiText(
+      language,
+      "Warnings, failed sessions, pending approvals, budget risks, and unhandled runtime signals.",
+      "集中查看预警、失败会话、待审批、预算风险和未处理运行信号。",
+    );
+  }
+  if (section === "replay-audit") {
+    return pickUiText(
+      language,
+      "Replay recent readonly events and dry-run audit records without opening any live execution gate.",
+      "回放最近只读事件和 dry-run 审计记录，不打开任何 live 执行闸门。",
     );
   }
   if (section === "settings") {
@@ -8530,6 +8956,18 @@ function renderMultiInstanceSectionBody(input: {
       </section>`;
   }
 
+  if (activeSection === "collaboration" || activeSection === "hall-chat") {
+    return renderMultiInstanceCollaborationPanel(snapshot, language, activeSection);
+  }
+
+  if (activeSection === "memory") {
+    return renderMultiInstanceMemoryPanel(snapshot, language);
+  }
+
+  if (activeSection === "docs") {
+    return renderMultiInstanceDocsPanel(snapshot, language);
+  }
+
   if (activeSection === "projects-tasks") {
     return `
       <section class="overview-layout">
@@ -8544,6 +8982,14 @@ function renderMultiInstanceSectionBody(input: {
           ${renderManagedActionAuditPanel(input.managedActionAudit?.records ?? [], language)}
         </div>
       </section>`;
+  }
+
+  if (activeSection === "alerts") {
+    return renderMultiInstanceAlertsPanel(snapshot, language, snapshot.generatedAt);
+  }
+
+  if (activeSection === "replay-audit") {
+    return renderMultiInstanceReplayAuditPanel(snapshot, language, input.historyView, input.managedActionAudit);
   }
 
   if (activeSection === "settings") {
