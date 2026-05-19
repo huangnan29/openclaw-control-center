@@ -1454,7 +1454,8 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
         assertAllowedQueryParams(url.searchParams, [], true);
         return writeJson(res, 200, {
           ok: true,
-          dryRunOnly: true,
+          dryRunOnly: readonlyMode || !managedActionProductionExecutorEnabled,
+          liveAvailable: !readonlyMode && managedActionProductionExecutorEnabled,
           actions: listManagedActions(),
         });
       }
