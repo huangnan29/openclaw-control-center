@@ -18,6 +18,7 @@ import {
   UI_TIMEZONE,
 } from "../config";
 import type { ToolClient } from "../clients/tool-client";
+import type { AgentRunThinkingLevel } from "../contracts/openclaw-tools";
 import { mapSessionsListToSummaries } from "../mappers/openclaw-mappers";
 import { MultiInstanceReadonlyAdapter } from "../adapters/multi-instance-readonly";
 import { buildApiDocs } from "../runtime/api-docs";
@@ -1506,6 +1507,14 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
         const operator = requiredBoundedString(payload.operator, "operator", 120);
         const reason = requiredBoundedString(payload.reason, "reason", 240);
         const confirmedText = requiredBoundedString(payload.confirmedText, "confirmedText", 80);
+        const skillName = optionalBoundedString(payload.skillName, "skillName", 120);
+        const agentId = optionalBoundedString(payload.agentId, "agentId", 160);
+        const sessionKey = optionalBoundedString(payload.sessionKey, "sessionKey", 220);
+        const sessionId = optionalBoundedString(payload.sessionId, "sessionId", 160);
+        const message = optionalBoundedString(payload.message, "message", 4000);
+        const thinking = optionalThinkingField(payload.thinking, "thinking");
+        const timeoutSeconds = optionalIntegerField(payload.timeoutSeconds, "timeoutSeconds", 1, 7200);
+        const deliver = optionalBooleanField(payload.deliver, "deliver");
         if (confirmedText !== MANAGED_ACTION_DRY_RUN_CONFIRMATION) {
           throw new RequestValidationError(
             `confirmedText must equal ${MANAGED_ACTION_DRY_RUN_CONFIRMATION}.`,
@@ -1520,7 +1529,14 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
           operator,
           reason,
           confirmedText,
-          skillName: optionalBoundedString(payload.skillName, "skillName", 120),
+          skillName,
+          agentId,
+          sessionKey,
+          sessionId,
+          message,
+          thinking,
+          timeoutSeconds,
+          deliver,
         });
 
         await appendOperationAudit({
@@ -1536,6 +1552,14 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
             operationRequestId: result.review.operationRequestId,
             operator: result.review.operator,
             reason: result.review.reason,
+            skillName,
+            agentId,
+            sessionKey,
+            sessionId,
+            messagePreview: message ? safeTruncate(message, 240) : undefined,
+            thinking,
+            timeoutSeconds,
+            deliver,
             confirmationTextMatched: result.review.confirmationTextMatched,
             targetConfigSnapshot: result.review.targetConfigSnapshot,
             mutatesOpenClawInstance: result.safety.mutatesOpenClawInstance,
@@ -1574,11 +1598,38 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
         const reason = requiredBoundedString(payload.reason, "reason", 240);
         const operationRequestId = requiredBoundedString(payload.operationRequestId, "operationRequestId", 120);
         const confirmedText = requiredBoundedString(payload.confirmedText, "confirmedText", 80);
+        const skillName = optionalBoundedString(payload.skillName, "skillName", 120);
+        const agentId = optionalBoundedString(payload.agentId, "agentId", 160);
+        const sessionKey = optionalBoundedString(payload.sessionKey, "sessionKey", 220);
+        const sessionId = optionalBoundedString(payload.sessionId, "sessionId", 160);
+        const message = optionalBoundedString(payload.message, "message", 4000);
+        const thinking = optionalThinkingField(payload.thinking, "thinking");
+        const timeoutSeconds = optionalIntegerField(payload.timeoutSeconds, "timeoutSeconds", 1, 7200);
+        const deliver = optionalBooleanField(payload.deliver, "deliver");
         const dryRunReference = await validateManagedActionDryRunReference({
           operationRequestId,
           instanceId,
           action,
         });
+        const liveCommandPreview = buildManagedActionDryRun({
+          action,
+          instance,
+          operationRequestId: "live-command-preview",
+          operator,
+          reason,
+          confirmedText: MANAGED_ACTION_DRY_RUN_CONFIRMATION,
+          skillName,
+          agentId,
+          sessionKey,
+          sessionId,
+          message,
+          thinking,
+          timeoutSeconds,
+          deliver,
+        }).commandPreview;
+        const dryRunCommandPreviewMatches = dryRunReference.record
+          ? JSON.stringify(dryRunReference.record.commandPreview) === JSON.stringify(liveCommandPreview)
+          : dryRunReference.valid;
         const rolloutConfig = await resolveManagedActionLiveRolloutConfig();
         const rollout = evaluateManagedActionLiveRollout({
           config: rolloutConfig,
@@ -1591,7 +1642,7 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
           gate,
           action,
           operationRequestId,
-          dryRunReferenceValid: dryRunReference.valid,
+          dryRunReferenceValid: dryRunReference.valid && dryRunCommandPreviewMatches,
           rolloutAllowed: rollout.allowed,
           executorWired: managedActionProductionExecutorEnabled,
           confirmedText,
@@ -1616,6 +1667,16 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
               operationRequestId,
               operator,
               reason,
+              skillName,
+              agentId,
+              sessionKey,
+              sessionId,
+              messagePreview: message ? safeTruncate(message, 240) : undefined,
+              thinking,
+              timeoutSeconds,
+              deliver,
+              liveCommandPreview,
+              dryRunCommandPreviewMatches,
               dryRunReference: managedActionDryRunReferenceSummary(dryRunReference),
               rollout: managedActionRolloutSummary(rollout),
               executor: managedActionExecutorSummary(managedActionProductionExecutorEnabled),
@@ -1634,6 +1695,8 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
             message: decision.message,
             liveExecution: false,
             dryRunReference: managedActionDryRunReferenceSummary(dryRunReference),
+            dryRunCommandPreviewMatches,
+            liveCommandPreview,
             rollout: managedActionRolloutSummary(rollout),
             executor: managedActionExecutorSummary(managedActionProductionExecutorEnabled),
             gate: {
@@ -1654,6 +1717,14 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
             operator,
             reason,
             gateReady: decision.ok,
+            skillName,
+            agentId,
+            sessionKey,
+            sessionId,
+            message,
+            thinking,
+            timeoutSeconds,
+            deliver,
           },
           managedActionExecutor,
         );
@@ -1676,7 +1747,7 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
           startedAt,
           finishedAt,
           gate,
-          commandPreview: dryRunReference.record?.commandPreview,
+          commandPreview: liveCommandPreview,
           mutatesOpenClawInstance: execution.mutatesOpenClawInstance,
           result: {
             message: execution.detail,
@@ -1698,6 +1769,8 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
             mutatesOpenClawInstance: execution.mutatesOpenClawInstance,
           },
           dryRunReference: managedActionDryRunReferenceSummary(dryRunReference),
+          dryRunCommandPreviewMatches,
+          liveCommandPreview,
           rollout: managedActionRolloutSummary(rollout),
           executor: managedActionExecutorSummary(managedActionProductionExecutorEnabled),
           gate: {
@@ -23898,6 +23971,34 @@ function optionalIntegerField(
     throw new RequestValidationError(`${label} must be in range ${min}..${max}.`, 400);
   }
   return input;
+}
+
+function optionalBooleanField(input: unknown, label: string): boolean | undefined {
+  if (input === undefined || input === null || input === "") return undefined;
+  if (typeof input !== "boolean") {
+    throw new RequestValidationError(`${label} must be a boolean.`, 400);
+  }
+  return input;
+}
+
+function optionalThinkingField(input: unknown, label: string): AgentRunThinkingLevel | undefined {
+  if (input === undefined || input === null || input === "") return undefined;
+  if (typeof input !== "string") {
+    throw new RequestValidationError(`${label} must be a string.`, 400);
+  }
+  const value = input.trim();
+  if (!value) return undefined;
+  switch (value) {
+    case "off":
+    case "minimal":
+    case "low":
+    case "medium":
+    case "high":
+    case "xhigh":
+      return value;
+    default:
+      throw new RequestValidationError(`${label} must be one of: off, minimal, low, medium, high, xhigh.`, 400);
+  }
 }
 
 function optionalIsoTimestampField(input: unknown, label: string): string | undefined {

@@ -1,4 +1,5 @@
 import type { OpenClawInstanceConfig } from "../types";
+import type { AgentRunThinkingLevel } from "../contracts/openclaw-tools";
 import type { ManagedActionName } from "./managed-actions";
 
 export interface ManagedActionExecutionInput {
@@ -8,11 +9,29 @@ export interface ManagedActionExecutionInput {
   operator: string;
   reason: string;
   gateReady: boolean;
+  skillName?: string;
+  agentId?: string;
+  sessionKey?: string;
+  sessionId?: string;
+  message?: string;
+  thinking?: AgentRunThinkingLevel;
+  timeoutSeconds?: number;
+  deliver?: boolean;
 }
 
 export interface ManagedActionExecutionResult {
   ok: boolean;
-  status: "executed_mock" | "executed_readonly_healthcheck" | "blocked_by_gate" | "executor_missing";
+  status:
+    | "executed_mock"
+    | "executed_readonly_healthcheck"
+    | "executed_collector_refresh"
+    | "executed_skill_run"
+    | "failed_healthcheck"
+    | "failed_collector_refresh"
+    | "failed_skill_run"
+    | "blocked_invalid_payload"
+    | "blocked_by_gate"
+    | "executor_missing";
   liveExecution: boolean;
   mutatesOpenClawInstance: boolean;
   action: ManagedActionName;

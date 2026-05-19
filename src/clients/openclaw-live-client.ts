@@ -1,7 +1,7 @@
 import { exec, execFile, spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, lstatSync, symlinkSync } from "node:fs";
 import { open, readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import type {
   AgentRunRequest,
@@ -538,7 +538,12 @@ export class OpenClawLiveClient implements ToolClient {
   private buildScopedCommandEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
     const scopedEnv: NodeJS.ProcessEnv = { ...env };
     const openclawHome = this.scope.openclawHome?.trim();
-    if (openclawHome) scopedEnv.OPENCLAW_HOME = openclawHome;
+    if (openclawHome) {
+      const cliHome = resolveOpenClawCliHome(openclawHome);
+      ensureOpenClawCliHomeSymlink(cliHome, openclawHome);
+      scopedEnv.OPENCLAW_HOME = cliHome;
+      scopedEnv.HOME = cliHome;
+    }
     const openclawConfigPath = this.scope.openclawConfigPath?.trim();
     if (openclawConfigPath) scopedEnv.OPENCLAW_CONFIG_PATH = openclawConfigPath;
     const workspaceRoot = this.scope.workspaceRoot?.trim();
@@ -594,6 +599,29 @@ export class OpenClawLiveClient implements ToolClient {
 async function runJson<T>(args: string[], options?: { timeoutMs?: number; maxBuffer?: number; cwd?: string; env?: NodeJS.ProcessEnv }): Promise<T> {
   const stdout = await runText(args, options);
   return JSON.parse(stdout) as T;
+}
+
+function resolveOpenClawCliHome(openclawHome: string): string {
+  const trimmed = openclawHome.trim();
+  const leaf = basename(trimmed);
+  if (leaf === ".openclaw" || leaf === "config") return dirname(trimmed);
+  return trimmed;
+}
+
+function ensureOpenClawCliHomeSymlink(cliHome: string, openclawHome: string): void {
+  if (basename(openclawHome) !== "config") return;
+  const linkPath = join(cliHome, ".openclaw");
+  try {
+    const stat = lstatSync(linkPath);
+    if (stat.isSymbolicLink() || stat.isDirectory()) return;
+  } catch {
+    // 只在缺少 .openclaw 入口时创建兼容 symlink。
+  }
+  try {
+    symlinkSync(openclawHome, linkPath, "dir");
+  } catch {
+    // 只读挂载或权限不足时保留只读回退路径，调用方会拿到清晰的 CLI 错误。
+  }
 }
 
 async function runText(

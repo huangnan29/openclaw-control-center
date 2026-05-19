@@ -1,4 +1,5 @@
 import type { OpenClawInstanceConfig } from "../types";
+import type { AgentRunThinkingLevel } from "../contracts/openclaw-tools";
 
 export type ManagedActionName = "healthcheck" | "collector_refresh" | "skill_run";
 export const MANAGED_ACTION_DRY_RUN_CONFIRMATION = "DRY-RUN-ONLY";
@@ -18,6 +19,13 @@ export interface ManagedActionDryRunInput {
   reason: string;
   confirmedText: string;
   skillName?: string;
+  agentId?: string;
+  sessionKey?: string;
+  sessionId?: string;
+  message?: string;
+  thinking?: AgentRunThinkingLevel;
+  timeoutSeconds?: number;
+  deliver?: boolean;
 }
 
 export interface ManagedActionDryRunResult {
@@ -142,5 +150,24 @@ function buildCommandPreview(input: ManagedActionDryRunInput): string[] {
   }
 
   const skillName = input.skillName?.trim() || "<skill-name>";
-  return [`openclaw skill dry-run for instance ${input.instance.id}: ${skillName}`];
+  const target = input.agentId?.trim()
+    ? `agent=${input.agentId.trim()}`
+    : input.sessionKey?.trim()
+      ? `sessionKey=${input.sessionKey.trim()}`
+      : input.sessionId?.trim()
+        ? `sessionId=${input.sessionId.trim()}`
+        : "agent=<agent-id>";
+  const timeout = input.timeoutSeconds && Number.isFinite(input.timeoutSeconds)
+    ? ` timeout=${Math.trunc(input.timeoutSeconds)}s`
+    : "";
+  const thinking = input.thinking ? ` thinking=${input.thinking}` : "";
+  const deliver = input.deliver ? " deliver=true" : "";
+  const message = input.message?.trim()
+    ? ` message="${truncatePreview(input.message.trim(), 120)}"`
+    : ' message="<message>"';
+  return [`openclaw agent run for instance ${input.instance.id}: skill=${skillName} ${target}${thinking}${timeout}${deliver}${message}`];
+}
+
+function truncatePreview(value: string, maxLength: number): string {
+  return value.length <= maxLength ? value : `${value.slice(0, Math.max(0, maxLength - 3))}...`;
 }

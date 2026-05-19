@@ -6,16 +6,27 @@ set +x
 # plan 只校验命令并输出将要提交的 dry-run payload，不联网、不写审计。
 # parse-text/plan-text 只解析自然语言文本并输出 dry-run payload，不联网、不写审计。
 # dry-run 必须显式确认并提供 LOCAL_API_TOKEN，只调用 dry-run API 写审计，不执行实例命令。
+# live 必须显式确认并提供 LOCAL_API_TOKEN，只调用 live API，且必须引用已存在 dry-run operationRequestId。
 # status 只读取控制中心管理动作和 readiness 状态。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_DIR="${DEPLOY_DIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 CONTROL_CENTER_BASE_URL="${CONTROL_CENTER_BASE_URL:-http://127.0.0.1:4311}"
 CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN="${CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN:-}"
+CONFIRM_MANAGED_ACTION_COMMAND_LIVE="${CONFIRM_MANAGED_ACTION_COMMAND_LIVE:-}"
 LOCAL_API_TOKEN="${LOCAL_API_TOKEN:-}"
 MANAGED_ACTION_COMMAND_TOKEN_SOURCE="${MANAGED_ACTION_COMMAND_TOKEN_SOURCE:-env}"
 RESOLVED_LOCAL_API_TOKEN_SOURCE="${LOCAL_API_TOKEN:+env}"
 COMMAND_FILE="${2:-${MANAGED_ACTION_COMMAND_FILE:-}}"
+STDIN_COMMAND_TMP=""
+
+cleanup() {
+  if [ -n "$STDIN_COMMAND_TMP" ]; then
+    rm -f "$STDIN_COMMAND_TMP"
+  fi
+}
+
+trap cleanup EXIT
 
 fail() {
   printf '[失败] %s\n' "$*" >&2
@@ -26,12 +37,22 @@ require_command() {
   command -v "$1" >/dev/null 2>&1 || fail "缺少命令：$1"
 }
 
+materialize_stdin_command_file() {
+  if [ "$COMMAND_FILE" != "-" ]; then
+    return
+  fi
+  STDIN_COMMAND_TMP="$(mktemp "${TMPDIR:-/tmp}/managed-action-command.XXXXXX")"
+  cat > "$STDIN_COMMAND_TMP"
+  COMMAND_FILE="$STDIN_COMMAND_TMP"
+}
+
 usage() {
   cat <<'TEXT'
 用法：
   managed-action-command-runner.sh status
   managed-action-command-runner.sh plan <command.json|-> 
   managed-action-command-runner.sh dry-run <command.json|->
+  managed-action-command-runner.sh live <command.json|->
   managed-action-command-runner.sh parse-text <command.txt|->
   managed-action-command-runner.sh plan-text <command.txt|->
   managed-action-command-runner.sh dry-run-text <command.txt|->
@@ -42,7 +63,23 @@ command.json 示例：
     "action": "skill_run",
     "operator": "Anan",
     "reason": "通过 OpenClaw 指令预览 skill 调用",
-    "skillName": "zhihu-human-ops-writing"
+    "skillName": "zhihu-human-ops-writing",
+    "agentId": "main",
+    "message": "请使用 zhihu-human-ops-writing skill 执行一次安全测试，不要发布。"
+  }
+
+live command.json 还必须带 dry-run 返回的 operationRequestId：
+  {
+    "instanceId": "tom",
+    "action": "skill_run",
+    "operator": "Anan",
+    "reason": "通过 OpenClaw 指令真实调用 skill",
+    "operationRequestId": "<dry-run operationRequestId>",
+    "skillName": "zhihu-human-ops-writing",
+    "agentId": "main",
+    "message": "请使用 zhihu-human-ops-writing skill 执行一次安全测试，不要发布。",
+    "timeoutSeconds": 600,
+    "thinking": "minimal"
   }
 
 文本指令示例：
@@ -55,11 +92,16 @@ dry-run 必须设置：
   # 如果令牌只在 control-center 容器环境中，可以显式使用：
   MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container
 
+live 必须设置：
+  CONFIRM_MANAGED_ACTION_COMMAND_LIVE=I_UNDERSTAND_THIS_CALLS_MANAGED_ACTION_LIVE_API
+  LOCAL_API_TOKEN=<本地令牌>
+
 安全边界：
   - plan 不联网、不写文件。
   - parse-text/plan-text 不联网、不写文件。
   - dry-run 只调用 /api/managed-actions/dry-run，不执行 OpenClaw 实例命令。
-  - 不打开 live gate，不修改 OpenClaw 实例目录，不重启实例。
+  - live 只在 control-center live 闸门、白名单、灰度规则、dry-run 引用都通过时执行。
+  - 不打开 live gate，不重启实例；是否修改 OpenClaw 实例由 live API 返回的 safety 决定。
 TEXT
 }
 
@@ -90,6 +132,7 @@ run_node() {
     DEPLOY_DIR="$DEPLOY_DIR" \
     CONTROL_CENTER_BASE_URL="$CONTROL_CENTER_BASE_URL" \
     CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN="$CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN" \
+    CONFIRM_MANAGED_ACTION_COMMAND_LIVE="$CONFIRM_MANAGED_ACTION_COMMAND_LIVE" \
     LOCAL_API_TOKEN="$LOCAL_API_TOKEN" \
     RESOLVED_LOCAL_API_TOKEN_SOURCE="$RESOLVED_LOCAL_API_TOKEN_SOURCE" \
     COMMAND_FILE="$COMMAND_FILE" \
@@ -100,10 +143,13 @@ const mode = process.env.MODE || "status";
 const commandFile = process.env.COMMAND_FILE || "";
 const baseUrl = normalizeBaseUrl(process.env.CONTROL_CENTER_BASE_URL || "http://127.0.0.1:4311");
 const confirmDryRun = process.env.CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN || "";
+const confirmLive = process.env.CONFIRM_MANAGED_ACTION_COMMAND_LIVE || "";
 const localApiToken = process.env.LOCAL_API_TOKEN || "";
 const localApiTokenSource = process.env.RESOLVED_LOCAL_API_TOKEN_SOURCE || "missing";
 const dryRunConfirmation = "DRY-RUN-ONLY";
+const liveConfirmation = "LIVE-ACTION-APPROVED";
 const allowedActions = new Set(["healthcheck", "collector_refresh", "skill_run"]);
+const thinkingLevels = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
 
 function normalizeBaseUrl(value) {
   const parsed = new URL(value);
@@ -251,6 +297,26 @@ function readOptionalString(obj, key, limit) {
   return value;
 }
 
+function readOptionalInteger(obj, key, min, max) {
+  if (obj[key] === undefined || obj[key] === null || obj[key] === "") return undefined;
+  if (!Number.isInteger(obj[key])) throw new Error(`${key} 必须是整数。`);
+  if (obj[key] < min || obj[key] > max) throw new Error(`${key} 必须在 ${min}..${max} 之间。`);
+  return obj[key];
+}
+
+function readOptionalBoolean(obj, key) {
+  if (obj[key] === undefined || obj[key] === null || obj[key] === "") return undefined;
+  if (typeof obj[key] !== "boolean") throw new Error(`${key} 必须是 boolean。`);
+  return obj[key];
+}
+
+function readOptionalThinking(obj, key) {
+  const value = readOptionalString(obj, key, 16);
+  if (!value) return undefined;
+  if (!thinkingLevels.has(value)) throw new Error(`${key} must be one of: off, minimal, low, medium, high, xhigh.`);
+  return value;
+}
+
 function buildPayload(command) {
   const instanceId = readRequiredString(command, "instanceId", 120);
   const action = readRequiredString(command, "action", 80);
@@ -258,6 +324,13 @@ function buildPayload(command) {
   const operator = readRequiredString(command, "operator", 120);
   const reason = readRequiredString(command, "reason", 240);
   const skillName = readOptionalString(command, "skillName", 120);
+  const agentId = readOptionalString(command, "agentId", 160);
+  const sessionKey = readOptionalString(command, "sessionKey", 220);
+  const sessionId = readOptionalString(command, "sessionId", 160);
+  const message = readOptionalString(command, "message", 4000);
+  const thinking = readOptionalThinking(command, "thinking");
+  const timeoutSeconds = readOptionalInteger(command, "timeoutSeconds", 1, 7200);
+  const deliver = readOptionalBoolean(command, "deliver");
   if (action === "skill_run" && !skillName) throw new Error("action=skill_run 时必须提供 skillName。");
   const confirmedText = readOptionalString(command, "confirmedText", 80) || dryRunConfirmation;
   if (confirmedText !== dryRunConfirmation) throw new Error(`confirmedText must equal ${dryRunConfirmation}.`);
@@ -268,6 +341,29 @@ function buildPayload(command) {
     reason,
     confirmedText,
     ...(skillName ? { skillName } : {}),
+    ...(agentId ? { agentId } : {}),
+    ...(sessionKey ? { sessionKey } : {}),
+    ...(sessionId ? { sessionId } : {}),
+    ...(message ? { message } : {}),
+    ...(thinking ? { thinking } : {}),
+    ...(timeoutSeconds ? { timeoutSeconds } : {}),
+    ...(deliver !== undefined ? { deliver } : {}),
+  };
+}
+
+function buildLivePayload(command) {
+  const payload = buildPayload({ ...command, confirmedText: dryRunConfirmation });
+  const operationRequestId = readRequiredString(command, "operationRequestId", 120);
+  if (payload.action === "skill_run") {
+    if (!payload.message) throw new Error("live skill_run 必须提供 message。");
+    if (!payload.agentId && !payload.sessionKey && !payload.sessionId) {
+      throw new Error("live skill_run 必须提供 agentId、sessionKey 或 sessionId。");
+    }
+  }
+  return {
+    ...payload,
+    operationRequestId,
+    confirmedText: liveConfirmation,
   };
 }
 
@@ -312,6 +408,10 @@ function nextDryRunCommand(inputKind = "json") {
   return `CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN=I_UNDERSTAND_THIS_ONLY_CALLS_MANAGED_ACTION_DRY_RUN_API LOCAL_API_TOKEN=<本地令牌> repo/ops/tom-readonly/managed-action-command-runner.sh ${modeName} ${label}`;
 }
 
+function nextLiveCommand() {
+  return "CONFIRM_MANAGED_ACTION_COMMAND_LIVE=I_UNDERSTAND_THIS_CALLS_MANAGED_ACTION_LIVE_API LOCAL_API_TOKEN=<本地令牌> repo/ops/tom-readonly/managed-action-command-runner.sh live <command.json>";
+}
+
 function plannedReport(payload, inputKind = "json") {
   return {
     schemaVersion: 1,
@@ -324,6 +424,9 @@ function plannedReport(payload, inputKind = "json") {
       action: payload.action,
       operator: payload.operator,
       ...(payload.skillName ? { skillName: payload.skillName } : {}),
+      ...(payload.agentId ? { agentId: payload.agentId } : {}),
+      ...(payload.sessionKey ? { sessionKey: payload.sessionKey } : {}),
+      ...(payload.sessionId ? { sessionId: payload.sessionId } : {}),
     },
     payload: safePayloadForOutput(payload),
     nextCommands: [nextDryRunCommand(inputKind)],
@@ -424,6 +527,9 @@ async function dryRunReport(payload, inputKind = "json") {
       action: payload.action,
       operator: payload.operator,
       ...(payload.skillName ? { skillName: payload.skillName } : {}),
+      ...(payload.agentId ? { agentId: payload.agentId } : {}),
+      ...(payload.sessionKey ? { sessionKey: payload.sessionKey } : {}),
+      ...(payload.sessionId ? { sessionId: payload.sessionId } : {}),
     },
     dryRunApi: {
       statusCode: result.statusCode,
@@ -432,6 +538,7 @@ async function dryRunReport(payload, inputKind = "json") {
     nextCommands: ok
       ? [
         "repo/ops/tom-readonly/managed-action-command-runner.sh status",
+        nextLiveCommand(),
         "repo/ops/tom-readonly/live-healthcheck-readiness.sh status",
       ]
       : [nextDryRunCommand(inputKind)],
@@ -441,6 +548,78 @@ async function dryRunReport(payload, inputKind = "json") {
       requiresDryRunConfirmation: true,
       requiresLocalApiToken: true,
       localApiTokenSource,
+    }),
+  };
+}
+
+async function liveReport(payload) {
+  if (confirmLive !== "I_UNDERSTAND_THIS_CALLS_MANAGED_ACTION_LIVE_API") {
+    return {
+      schemaVersion: 1,
+      status: "blocked_confirmation_required",
+      mode,
+      generatedAt: new Date().toISOString(),
+      issues: ["必须设置 CONFIRM_MANAGED_ACTION_COMMAND_LIVE=I_UNDERSTAND_THIS_CALLS_MANAGED_ACTION_LIVE_API。"],
+      nextCommands: [nextLiveCommand()],
+      safety: baseSafety({
+        blockedBeforeApi: true,
+        requiresLiveConfirmation: true,
+      }),
+    };
+  }
+  if (!localApiToken.trim()) {
+    return {
+      schemaVersion: 1,
+      status: "blocked_local_token_required",
+      mode,
+      generatedAt: new Date().toISOString(),
+      issues: ["必须通过 LOCAL_API_TOKEN 提供本地令牌。"],
+      nextCommands: [nextLiveCommand()],
+      safety: baseSafety({
+        blockedBeforeApi: true,
+        requiresLocalApiToken: true,
+        localApiTokenSource,
+      }),
+    };
+  }
+
+  const result = await requestJson("/api/managed-actions/live", {
+    method: "POST",
+    token: localApiToken,
+    body: payload,
+  });
+  const ok = result.ok && result.body?.ok === true && result.body?.liveExecution === true;
+  return {
+    schemaVersion: 1,
+    status: ok ? "live_completed" : "blocked_live_api",
+    mode,
+    generatedAt: new Date().toISOString(),
+    target: {
+      instanceId: payload.instanceId,
+      action: payload.action,
+      operator: payload.operator,
+      operationRequestId: payload.operationRequestId,
+      ...(payload.skillName ? { skillName: payload.skillName } : {}),
+      ...(payload.agentId ? { agentId: payload.agentId } : {}),
+      ...(payload.sessionKey ? { sessionKey: payload.sessionKey } : {}),
+      ...(payload.sessionId ? { sessionId: payload.sessionId } : {}),
+    },
+    liveApi: {
+      statusCode: result.statusCode,
+      body: result.body,
+    },
+    nextCommands: ok
+      ? [
+        "repo/ops/tom-readonly/managed-action-command-runner.sh status",
+        "repo/ops/tom-readonly/healthcheck.sh",
+      ]
+      : [nextLiveCommand()],
+    safety: baseSafety({
+      callsManagedActionsLiveApi: true,
+      requiresLiveConfirmation: true,
+      requiresLocalApiToken: true,
+      localApiTokenSource,
+      mutatesOpenClawInstance: result.body?.safety?.mutatesOpenClawInstance === true,
     }),
   };
 }
@@ -456,8 +635,10 @@ async function main() {
     if (mode === "plan-text") return plannedReport(payload, "text");
     return dryRunReport(payload, "text");
   }
-  if (mode !== "plan" && mode !== "dry-run") throw new Error(`未知模式：${mode}`);
-  const payload = buildPayload(readCommand());
+  if (mode !== "plan" && mode !== "dry-run" && mode !== "live") throw new Error(`未知模式：${mode}`);
+  const command = readCommand();
+  if (mode === "live") return liveReport(buildLivePayload(command));
+  const payload = buildPayload(command);
   if (mode === "plan") return plannedReport(payload, "json");
   return dryRunReport(payload, "json");
 }
@@ -492,23 +673,34 @@ main() {
       ;;
     plan)
       [ -n "$COMMAND_FILE" ] || fail "plan 必须提供 command.json 路径"
+      materialize_stdin_command_file
       run_node "plan"
       ;;
     parse-text)
       [ -n "$COMMAND_FILE" ] || fail "parse-text 必须提供 command.txt 路径"
+      materialize_stdin_command_file
       run_node "parse-text"
       ;;
     plan-text)
       [ -n "$COMMAND_FILE" ] || fail "plan-text 必须提供 command.txt 路径"
+      materialize_stdin_command_file
       run_node "plan-text"
       ;;
     dry-run)
       [ -n "$COMMAND_FILE" ] || fail "dry-run 必须提供 command.json 路径"
+      materialize_stdin_command_file
       resolve_local_api_token_for_dry_run
       run_node "dry-run"
       ;;
+    live)
+      [ -n "$COMMAND_FILE" ] || fail "live 必须提供 command.json 路径"
+      materialize_stdin_command_file
+      resolve_local_api_token_for_dry_run
+      run_node "live"
+      ;;
     dry-run-text)
       [ -n "$COMMAND_FILE" ] || fail "dry-run-text 必须提供 command.txt 路径"
+      materialize_stdin_command_file
       resolve_local_api_token_for_dry_run
       run_node "dry-run-text"
       ;;

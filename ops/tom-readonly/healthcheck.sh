@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Tom 灰度控制中心健康检查：确认页面可读、写接口被挡住、容器边界仍然只读。
+# Tom 灰度控制中心健康检查：确认页面可读、危险写入口仍被挡住，或仅开放受控 live action 白名单。
 
 DEPLOY_DIR="${DEPLOY_DIR:-/srv/openclaw-control-center-readonly}"
 CONTAINER_NAME="${CONTAINER_NAME:-openclaw-control-center-readonly}"
@@ -10,6 +10,7 @@ INSTANCE_IDS="${INSTANCE_IDS:-main tom third deepseek spark}"
 GATEWAY_PORTS="${GATEWAY_PORTS:-18789 18791 18793 18795 18797}"
 GATEWAY_CONTAINERS="${GATEWAY_CONTAINERS:-openclaw-openclaw-gateway-1 openclaw-work-openclaw-gateway-1 openclaw-third-openclaw-gateway-1 openclaw-deepseek-openclaw-gateway-1 openclaw-spark-openclaw-gateway-1}"
 INSTANCE_MOUNTS="${INSTANCE_MOUNTS:-/instances/main/config /instances/main/workspace /instances/tom/config /instances/tom/workspace /instances/third/config /instances/third/workspace /instances/deepseek/config /instances/deepseek/workspace /instances/spark/config /instances/spark/workspace}"
+INSTANCE_RW_MOUNTS_ALLOWED="${INSTANCE_RW_MOUNTS_ALLOWED:-/instances/tom/config /instances/tom/workspace}"
 COLLECTOR_SNAPSHOT_MAX_AGE_SECONDS="${COLLECTOR_SNAPSHOT_MAX_AGE_SECONDS:-300}"
 HTTP_RETRY_COUNT="${HTTP_RETRY_COUNT:-20}"
 HTTP_RETRY_DELAY_SECONDS="${HTTP_RETRY_DELAY_SECONDS:-1}"
@@ -138,12 +139,22 @@ check_container_security() {
 
   local envs
   envs="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$CONTAINER_NAME")"
-  printf '%s\n' "$envs" | grep -Fxq "READONLY_MODE=true" || fail "READONLY_MODE 未开启"
-  if printf '%s\n' "$envs" | grep -Fxq "MANAGED_ACTIONS_LIVE_ENABLED=true"; then
-    fail "管理动作 live gate 被启用"
+  local readonly_mode
+  readonly_mode="true"
+  if printf '%s\n' "$envs" | grep -Fxq "READONLY_MODE=false"; then
+    readonly_mode="false"
   fi
-  if printf '%s\n' "$envs" | grep -Fxq "MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED=true"; then
-    fail "管理动作生产执行器被挂载"
+  if [ "$readonly_mode" = "true" ]; then
+    if printf '%s\n' "$envs" | grep -Fxq "MANAGED_ACTIONS_LIVE_ENABLED=true"; then
+      fail "只读模式下管理动作 live gate 被启用"
+    fi
+    if printf '%s\n' "$envs" | grep -Fxq "MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED=true"; then
+      fail "只读模式下管理动作生产执行器被挂载"
+    fi
+  else
+    printf '%s\n' "$envs" | grep -Fxq "MANAGED_ACTIONS_LIVE_ENABLED=true" || fail "受控 live 模式下 MANAGED_ACTIONS_LIVE_ENABLED 未开启"
+    printf '%s\n' "$envs" | grep -Fxq "MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED=true" || fail "受控 live 模式下生产执行器未开启"
+    printf '%s\n' "$envs" | grep -Eq '^MANAGED_ACTIONS_LIVE_ALLOWED_ACTIONS=(healthcheck|collector_refresh|skill_run|,)+$' || fail "受控 live 动作白名单缺失或包含未知动作"
   fi
   printf '%s\n' "$envs" | grep -Fxq "APPROVAL_ACTIONS_ENABLED=false" || fail "审批写动作未禁用"
   printf '%s\n' "$envs" | grep -Fxq "IMPORT_MUTATION_ENABLED=false" || fail "导入写动作未禁用"
@@ -161,8 +172,10 @@ check_container_security() {
   for mount_path in ${INSTANCE_MOUNTS}; do
     local line
     line="$(printf '%s\n' "$mounts" | awk -F '|' -v target="$mount_path" '$2 == target { print }')"
-    [ -n "$line" ] || fail "缺少实例只读挂载：${mount_path}"
-    printf '%s\n' "$line" | grep -Fq "|false" || fail "实例挂载不是只读：${mount_path}"
+    [ -n "$line" ] || fail "缺少实例挂载：${mount_path}"
+    if printf '%s\n' "$line" | grep -Fq "|true"; then
+      printf ' %s ' "$INSTANCE_RW_MOUNTS_ALLOWED" | grep -Fq " ${mount_path} " || fail "实例挂载被意外改成可写：${mount_path}"
+    fi
   done
 
   local instances_line
