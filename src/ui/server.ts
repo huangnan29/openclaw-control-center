@@ -15600,7 +15600,6 @@ export function resolveDashboardSection(searchParams: URLSearchParams): Dashboar
   const value = normalizeQueryString(searchParams.get("section"), "section", 40, false);
   if (!value) return "overview";
   if (value === "calendar") return "projects-tasks";
-  if (value === "alerts" || value === "replay-audit") return "overview";
   return DASHBOARD_SECTIONS.includes(value as DashboardSection) ? (value as DashboardSection) : "overview";
 }
 
