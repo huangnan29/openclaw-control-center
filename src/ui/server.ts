@@ -8449,6 +8449,52 @@ function buildMultiInstanceRiskRows(items: InstanceSnapshot[], generatedAt: stri
   return rows.sort((a, b) => toSortableMs(b.timestamp) - toSortableMs(a.timestamp));
 }
 
+function buildDistributionRowsFromLogRows(
+  rows: MultiInstanceLogRow[],
+  keyFor: (row: MultiInstanceLogRow) => string,
+  labelFor: (key: string) => string,
+): FleetDistributionRow[] {
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    const key = keyFor(row).trim() || "unknown";
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([key, value]) => ({ label: labelFor(key), value }))
+    .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
+}
+
+function buildDistributionRowsFromAuditRecords(
+  rows: ManagedActionAuditRecord[],
+  keyFor: (row: ManagedActionAuditRecord) => string,
+  labelFor: (key: string) => string,
+): FleetDistributionRow[] {
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    const key = keyFor(row).trim() || "unknown";
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([key, value]) => ({ label: labelFor(key), value }))
+    .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
+}
+
+function buildCollectorHistoryDistributionRows(
+  samples: CollectorHistorySample[],
+  valueFor: (sample: CollectorHistorySample) => number,
+  language: UiLanguage,
+): FleetDistributionRow[] {
+  return samples
+    .slice(-10)
+    .map((sample) => ({
+      label: formatUiTimestamp(sample.generatedAt, language),
+      value: Math.max(0, Math.round(valueFor(sample))),
+      detail: `${sample.totals.connected}/${sample.totals.instances} connected`,
+    }))
+    .filter((row) => row.value > 0)
+    .reverse();
+}
+
 function renderMultiInstanceAlertsPanel(
   snapshot: MultiInstanceSnapshot,
   language: UiLanguage,
@@ -8478,6 +8524,24 @@ function renderMultiInstanceAlertsPanel(
         `<tr><td>${escapeHtml(row.timestamp ? formatUiTimestamp(row.timestamp, language) : "-")}</td><td>${escapeHtml(row.instanceName)}</td><td>${badge(row.severity, logSeverityLabel(row.severity, language))}</td><td>${escapeHtml(row.source)}</td><td>${escapeHtml(safeTruncate(row.message, 160))}</td></tr>`,
     )
     .join("");
+  const alertRows = [...riskRows, ...logWarningRows].sort((a, b) => toSortableMs(b.timestamp) - toSortableMs(a.timestamp));
+  const alertChartGrid = `<div class="fleet-chart-grid">
+    ${renderFleetDistributionChart(
+      t("Severity distribution", "告警等级分布"),
+      buildDistributionRowsFromLogRows(alertRows, (row) => row.severity, (key) => logSeverityLabel(key as MultiInstanceLogRow["severity"], language)),
+      language,
+    )}
+    ${renderFleetDistributionChart(
+      t("Source distribution", "告警来源分布"),
+      buildDistributionRowsFromLogRows(alertRows, (row) => row.source, (key) => key),
+      language,
+    )}
+    ${renderFleetDistributionChart(
+      t("Instance distribution", "实例分布"),
+      buildDistributionRowsFromLogRows(alertRows, (row) => row.instanceName, (key) => key),
+      language,
+    )}
+  </div>`;
 
   return `
     <section class="panel">
@@ -8486,6 +8550,7 @@ function renderMultiInstanceAlertsPanel(
         <div class="meta">${escapeHtml(t("Aggregates connection, session, approval, budget, and runtime-log warning signals.", "聚合连接、会话、审批、预算和运行日志中的预警信号。"))}</div>
       </div>
       <div class="status-strip">${chips}</div>
+      ${alertChartGrid}
       ${riskTableRows ? `<div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Time", "时间"))}</th><th>${escapeHtml(t("Instance", "实例"))}</th><th>${escapeHtml(t("Level", "级别"))}</th><th>${escapeHtml(t("Source", "来源"))}</th><th>${escapeHtml(t("Message", "消息"))}</th></tr></thead><tbody>${riskTableRows}</tbody></table></div>` : `<div class="empty-state">${escapeHtml(t("No active alert signals in the visible scope.", "当前可见范围没有活跃告警信号。"))}</div>`}
     </section>
     <section class="overview-layout">
@@ -8539,6 +8604,28 @@ function renderMultiInstanceReplayAuditPanel(
         `<tr><td>${escapeHtml(formatUiTimestamp(sample.generatedAt, language))}</td><td>${escapeHtml(sample.serverName ?? sample.serverId)}</td><td>${sample.totals.connected}/${sample.totals.instances}</td><td>${sample.totals.sessions}</td><td>${sample.totals.running}</td><td>${sample.totals.blocked}</td><td>${sample.totals.errors}</td><td>${formatInt(sample.totals.totalTokens)}</td></tr>`,
     )
     .join("");
+  const replayChartGrid = `<div class="fleet-chart-grid">
+    ${renderFleetDistributionChart(
+      t("Event sources", "事件来源"),
+      buildDistributionRowsFromLogRows(eventRows, (row) => row.source, (key) => key),
+      language,
+    )}
+    ${renderFleetDistributionChart(
+      t("Event severity", "事件等级"),
+      buildDistributionRowsFromLogRows(eventRows, (row) => row.severity, (key) => logSeverityLabel(key as MultiInstanceLogRow["severity"], language)),
+      language,
+    )}
+    ${renderFleetDistributionChart(
+      t("Dry-run actions", "dry-run 动作"),
+      buildDistributionRowsFromAuditRecords(dryRunRecords, (record) => record.action ?? "unknown", (key) => key),
+      language,
+    )}
+    ${renderFleetDistributionChart(
+      t("Recent collector usage", "近期采集用量"),
+      buildCollectorHistoryDistributionRows(collectorSamples, (sample) => sample.totals.totalTokens, language),
+      language,
+    )}
+  </div>`;
 
   return `
     <section class="panel">
@@ -8548,6 +8635,7 @@ function renderMultiInstanceReplayAuditPanel(
       </div>
       <div class="status-strip">${chips}</div>
       ${renderDataSourceNote(language, t("No live execution gate is opened by this page.", "本页面不会打开 live 执行闸门。"))}
+      ${replayChartGrid}
     </section>
     <section class="overview-layout">
       <div>
