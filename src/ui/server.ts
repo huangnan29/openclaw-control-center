@@ -498,6 +498,18 @@ const ANIMAL_CATALOG = [
   },
 ] as const;
 const FALLBACK_ANIMAL_CATALOG = ANIMAL_CATALOG.filter((item) => item.key !== "robot");
+const INSTANCE_AVATAR_ANIMAL_BY_ID: Record<string, (typeof ANIMAL_CATALOG)[number]["key"]> = {
+  main: "lion",
+  tom: "robot",
+  deepseek: "owl",
+  qwen: "panda",
+  spark: "tiger",
+  claude: "bear",
+  kimi: "fox",
+  gemini: "dolphin",
+  builder: "monkey",
+  monitor: "eagle",
+};
 
 type DashboardSearchScope = (typeof DASHBOARD_SEARCH_SCOPES)[number];
 export type DashboardSection = (typeof DASHBOARD_SECTIONS)[number];
@@ -9337,12 +9349,19 @@ function renderMultiInstanceOverview(
     .overview-context-row span { border: 1px solid rgba(17, 24, 39, 0.1); border-radius: 999px; background: rgba(255, 255, 255, 0.7); padding: 5px 9px; }
     .overview-chart-wall { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
     .overview-mini-trends { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-top: 12px; }
-    .overview-layout { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(320px, 0.9fr); gap: 12px; align-items: start; margin-top: 14px; }
-    .instance-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
-    .card, .panel { border: 1px solid var(--border); border-radius: 8px; background: #fff; padding: 14px; }
-    .card.active { border-color: rgba(0, 113, 227, 0.5); box-shadow: 0 8px 24px rgba(0, 113, 227, 0.08); }
-    .card-head { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
-    .card h2, .panel h2 { margin: 0; font-size: 17px; letter-spacing: 0; }
+	    .overview-layout { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(320px, 0.9fr); gap: 12px; align-items: start; margin-top: 14px; }
+	    .instance-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+	    .card, .panel { border: 1px solid var(--border); border-radius: 8px; background: #fff; padding: 14px; }
+	    .card.active { border-color: rgba(0, 113, 227, 0.5); box-shadow: 0 8px 24px rgba(0, 113, 227, 0.08); }
+	    .card-head { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+	    .instance-card { display: grid; gap: 12px; }
+	    .instance-card-top { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 12px; align-items: center; }
+	    .instance-card-title { min-width: 0; }
+	    .instance-card-title h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	    .instance-avatar { position: relative; display: grid; place-items: center; width: 96px; aspect-ratio: 1; padding: 7px; border: 1px solid rgba(17, 24, 39, 0.12); border-radius: 8px; background-color: var(--agent-accent, #4e79a7); background-image: radial-gradient(circle at 34% 22%, rgba(255,255,255,0.92), rgba(255,255,255,0.28) 42%, rgba(255,255,255,0.58) 100%); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.7); overflow: hidden; }
+	    .instance-avatar .agent-stage { position: relative; display: grid; place-items: center; width: 100%; height: 100%; border-radius: 6px; background: linear-gradient(180deg, rgba(255,255,255,0.74), rgba(255,255,255,0.28)); overflow: hidden; }
+	    .instance-avatar .agent-pixel-canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
+	    .card h2, .panel h2 { margin: 0; font-size: 17px; letter-spacing: 0; }
     .panel { margin-top: 12px; }
     .panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 10px; }
     .badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 8px; font-size: 12px; border: 1px solid var(--border); color: #344054; background: #f9fafb; }
@@ -9391,7 +9410,7 @@ function renderMultiInstanceOverview(
     .action-result.error { border-color: rgba(220, 38, 38, 0.28); background: #fef3f2; color: #b42318; }
     @media (max-width: 980px) { .overview-layout { grid-template-columns: 1fr; } }
     @media (max-width: 760px) { .pie-wrap { grid-template-columns: 1fr; } }
-    @media (max-width: 720px) { .metrics { grid-template-columns: 1fr; } .panel-head { display: grid; } }
+	    @media (max-width: 720px) { .metrics { grid-template-columns: 1fr; } .panel-head { display: grid; } .instance-card-top { grid-template-columns: 76px minmax(0, 1fr); } .instance-avatar { width: 76px; } }
   </style>
 </head>
 <body>
@@ -9409,10 +9428,11 @@ function renderMultiInstanceOverview(
     ${warningHtml}
     <section class="status-strip">${totalChips}</section>
     ${sectionBody}
-  </main>
-  ${renderManagedActionDryRunScript(language)}
-</body>
-</html>`;
+	  </main>
+	  ${renderManagedActionDryRunScript(language)}
+	  ${renderAgentVisualEnhancerScript()}
+	</body>
+	</html>`;
 }
 
 function renderManagedActionDryRunPanel(
@@ -9699,21 +9719,27 @@ function renderMultiInstanceCard(instance: InstanceSnapshot, selectedInstanceId:
     { label: t("Pending", "待审批"), value: metrics.pendingApprovals },
     { label: t("Errors", "错误数"), value: metrics.errors },
     { label: "Cron", value: metrics.cronJobs },
-  ]
-    .map((item) => `<div class="metric"><span>${escapeHtml(item.label)}</span><strong>${item.value}</strong></div>`)
-    .join("");
-  const selected = isSelected ? `<div class="meta">${escapeHtml(t("Current instance", "当前实例"))}</div>` : "";
-  return `<article class="card${isSelected ? " active" : ""}">
-    <div class="card-head">
-      <div>
-        <h2>${escapeHtml(instance.instance.name)}</h2>
-        <div class="meta">${escapeHtml(instance.instance.id)}</div>
-      </div>
-      ${badge(instance.status, multiInstanceStatusLabel(instance.status, language))}
-    </div>
-    ${selected}
-    <div class="metrics">${metricHtml}</div>
-    <div class="meta">${escapeHtml(instance.detail)}${metrics.lastActivityAt ? ` · ${escapeHtml(t("Last", "最近"))}${escapeHtml(language === "zh" ? "：" : ": ")}${escapeHtml(formatUiTimestamp(metrics.lastActivityAt, language))}` : ""}</div>
+	  ]
+	    .map((item) => `<div class="metric"><span>${escapeHtml(item.label)}</span><strong>${item.value}</strong></div>`)
+	    .join("");
+	  const selected = isSelected ? `<div class="meta">${escapeHtml(t("Current instance", "当前实例"))}</div>` : "";
+	  const avatar = renderInstanceAvatar(instance.instance, language, "card");
+	  return `<article class="card instance-card${isSelected ? " active" : ""}">
+	    <div class="instance-card-top">
+	      ${avatar}
+	      <div class="instance-card-title">
+	        <div class="card-head">
+	          <div>
+	            <h2>${escapeHtml(instance.instance.name)}</h2>
+	            <div class="meta">${escapeHtml(instance.instance.id)}</div>
+	          </div>
+	          ${badge(instance.status, multiInstanceStatusLabel(instance.status, language))}
+	        </div>
+	        ${selected}
+	      </div>
+	    </div>
+	    <div class="metrics">${metricHtml}</div>
+	    <div class="meta">${escapeHtml(instance.detail)}${metrics.lastActivityAt ? ` · ${escapeHtml(t("Last", "最近"))}${escapeHtml(language === "zh" ? "：" : ": ")}${escapeHtml(formatUiTimestamp(metrics.lastActivityAt, language))}` : ""}</div>
     ${renderMiniSessions(instance, language)}
     <a class="button" href="${detailHref}">${escapeHtml(t("Open readonly detail", "进入只读详情"))}</a>
   </article>`;
@@ -9747,12 +9773,12 @@ function renderMultiInstanceDetail(
   const idleCount = selectedSnapshot?.sessions.filter((session) => session.state === "idle").length ?? 0;
   const switcher = snapshot.instances
     .map((item) => {
-      const active = item.instance.id === selectedInstanceId;
-      const href = `/?instance=${encodeURIComponent(item.instance.id)}&amp;section=${encodeURIComponent(section)}&amp;lang=${encodeURIComponent(language)}`;
-      const label = active ? `${item.instance.name} · ${t("Current", "当前")}` : item.instance.name;
-      return `<a class="switcher-link${active ? " active" : ""}" href="${href}"${active ? ' aria-current="page"' : ""}>${escapeHtml(label)}</a>`;
-    })
-    .join("");
+	      const active = item.instance.id === selectedInstanceId;
+	      const href = `/?instance=${encodeURIComponent(item.instance.id)}&amp;section=${encodeURIComponent(section)}&amp;lang=${encodeURIComponent(language)}`;
+	      const label = active ? `${item.instance.name} · ${t("Current", "当前")}` : item.instance.name;
+	      return `<a class="switcher-link${active ? " active" : ""}" href="${href}"${active ? ' aria-current="page"' : ""}>${renderInstanceAvatar(item.instance, language, "mini")}<span class="switcher-label">${escapeHtml(label)}</span></a>`;
+	    })
+	    .join("");
   const sessionRows = (selectedSnapshot?.sessions ?? [])
     .sort((a, b) => toSortableMs(b.lastMessageAt) - toSortableMs(a.lastMessageAt))
     .slice(0, 50)
@@ -9818,8 +9844,9 @@ function renderMultiInstanceDetail(
   ]
     .map((item) => `<div class="status-chip"><span>${escapeHtml(item.label)}</span><strong>${item.value}</strong></div>`)
     .join("");
-  const title = selected?.instance.name ?? selectedInstanceId;
-  const notFound = selected
+	  const title = selected?.instance.name ?? selectedInstanceId;
+	  const selectedAvatar = selected ? renderInstanceAvatar(selected.instance, language, "hero") : "";
+	  const notFound = selected
     ? ""
     : `<div class="notice warning">${escapeHtml(t("Instance snapshot is not available.", "实例快照不可用。"))}</div>`;
 
@@ -9836,13 +9863,21 @@ function renderMultiInstanceDetail(
     .shell { max-width: 1180px; margin: 0 auto; padding: 26px 20px 44px; }
     .topbar { position: sticky; top: 0; z-index: 20; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--border); background: rgba(255, 255, 255, 0.96); }
     .topbar strong { margin-right: 4px; }
-    .switcher-link { display: inline-flex; align-items: center; border: 1px solid var(--border); border-radius: 999px; padding: 6px 10px; text-decoration: none; color: #344054; background: #fff; }
-    .switcher-link.active { color: #005cb9; border-color: rgba(0, 113, 227, 0.5); background: #eff8ff; }
-    .overview-link { color: #005cb9; text-decoration: none; font-weight: 600; }
-    .hero { display: grid; gap: 8px; margin-bottom: 16px; }
-    .hero h1 { margin: 0; font-size: 28px; letter-spacing: 0; }
-    .meta { color: var(--muted); font-size: 13px; }
-    .notice { border: 1px solid rgba(180, 83, 9, 0.24); background: #fff7ed; color: #92400e; border-radius: 8px; padding: 10px 12px; margin: 14px 0; }
+	    .switcher-link { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px 4px 5px; text-decoration: none; color: #344054; background: #fff; min-width: 0; }
+	    .switcher-link.active { color: #005cb9; border-color: rgba(0, 113, 227, 0.5); background: #eff8ff; }
+	    .switcher-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	    .overview-link { color: #005cb9; text-decoration: none; font-weight: 600; }
+	    .hero { display: grid; gap: 8px; margin-bottom: 16px; }
+	    .detail-hero { grid-template-columns: 126px minmax(0, 1fr); gap: 16px; align-items: center; }
+	    .detail-hero-copy { min-width: 0; display: grid; gap: 8px; }
+	    .hero h1 { margin: 0; font-size: 28px; letter-spacing: 0; }
+	    .meta { color: var(--muted); font-size: 13px; }
+	    .instance-avatar { position: relative; display: grid; place-items: center; aspect-ratio: 1; padding: 7px; border: 1px solid rgba(17, 24, 39, 0.12); border-radius: 8px; background-color: var(--agent-accent, #4e79a7); background-image: radial-gradient(circle at 34% 22%, rgba(255,255,255,0.92), rgba(255,255,255,0.28) 42%, rgba(255,255,255,0.58) 100%); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.7); overflow: hidden; }
+	    .instance-avatar--hero { width: 126px; }
+	    .instance-avatar--mini { width: 28px; padding: 2px; border-radius: 7px; flex: 0 0 auto; }
+	    .instance-avatar .agent-stage { position: relative; display: grid; place-items: center; width: 100%; height: 100%; border-radius: 6px; background: linear-gradient(180deg, rgba(255,255,255,0.74), rgba(255,255,255,0.28)); overflow: hidden; }
+	    .instance-avatar .agent-pixel-canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
+	    .notice { border: 1px solid rgba(180, 83, 9, 0.24); background: #fff7ed; color: #92400e; border-radius: 8px; padding: 10px 12px; margin: 14px 0; }
     .status-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 16px 0; }
     .status-chip, .card, .panel { border: 1px solid var(--border); border-radius: 8px; background: #fff; }
     .status-chip { padding: 12px; }
@@ -9889,8 +9924,8 @@ function renderMultiInstanceDetail(
     .state-line div { border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
     .state-line span { display: block; color: var(--muted); font-size: 12px; }
     .state-line strong { display: block; margin-top: 3px; font-size: 18px; }
-    @media (max-width: 760px) { .pie-wrap { grid-template-columns: 1fr; } }
-    @media (max-width: 720px) { .state-line { grid-template-columns: 1fr 1fr; } }
+	    @media (max-width: 760px) { .pie-wrap { grid-template-columns: 1fr; } .detail-hero { grid-template-columns: 84px minmax(0, 1fr); } .instance-avatar--hero { width: 84px; } }
+	    @media (max-width: 720px) { .state-line { grid-template-columns: 1fr 1fr; } }
   </style>
 </head>
 <body>
@@ -9900,14 +9935,17 @@ function renderMultiInstanceDetail(
     ${switcher}
   </nav>
   <main class="shell">
-    <section class="hero">
-      <div class="meta">OpenClaw Control Center</div>
-      <h1>${escapeHtml(title)}</h1>
-      <div>${selected ? badge(selected.status, multiInstanceStatusLabel(selected.status, language)) : ""}</div>
-      <div class="meta">${escapeHtml(t("Readonly monitoring only. This page does not mount execution, edit, or approval controls.", "仅用于只读监控。本页不挂载执行、编辑或审批控件。"))}</div>
-      <div class="meta">${escapeHtml(t("Updated", "更新时间"))}${escapeHtml(language === "zh" ? "：" : ": ")}${escapeHtml(formatUiTimestamp(snapshot.generatedAt, language))}</div>
-      <div class="meta">${escapeHtml(selected?.detail ?? "")}</div>
-    </section>
+	    <section class="hero detail-hero">
+	      ${selectedAvatar}
+	      <div class="detail-hero-copy">
+	        <div class="meta">OpenClaw Control Center</div>
+	        <h1>${escapeHtml(title)}</h1>
+	        <div>${selected ? badge(selected.status, multiInstanceStatusLabel(selected.status, language)) : ""}</div>
+	        <div class="meta">${escapeHtml(t("Readonly monitoring only. This page does not mount execution, edit, or approval controls.", "仅用于只读监控。本页不挂载执行、编辑或审批控件。"))}</div>
+	        <div class="meta">${escapeHtml(t("Updated", "更新时间"))}${escapeHtml(language === "zh" ? "：" : ": ")}${escapeHtml(formatUiTimestamp(snapshot.generatedAt, language))}</div>
+	        <div class="meta">${escapeHtml(selected?.detail ?? "")}</div>
+	      </div>
+	    </section>
     ${notFound}
     <section class="status-strip">${metrics}</section>
     ${selected ? renderCollectorSnapshotPanel([selected], language, snapshot.generatedAt) : ""}
@@ -9967,9 +10005,10 @@ function renderMultiInstanceDetail(
       <h2>${escapeHtml(t("Budget attention", "预算关注"))}</h2>
       ${budgetRows ? `<div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Label", "标签"))}</th><th>${escapeHtml(t("State", "状态"))}</th><th>${escapeHtml(t("Scope", "范围"))}</th><th>${escapeHtml(t("Metrics", "指标"))}</th></tr></thead><tbody>${budgetRows}</tbody></table></div>` : `<div class="meta">${escapeHtml(t("No budget warnings.", "暂无预算关注。"))}</div>`}
     </section>
-  </main>
-</body>
-</html>`;
+	  </main>
+	  ${renderAgentVisualEnhancerScript()}
+	</body>
+	</html>`;
 }
 
 async function renderHtml(
@@ -17407,6 +17446,39 @@ export function deriveAgentAnimalIdentity(agentId: string): AgentAnimalIdentity 
   };
 }
 
+function animalIdentityByKey(animalKey: string): AgentAnimalIdentity | undefined {
+  const matched = ANIMAL_CATALOG.find((item) => item.key === animalKey);
+  if (!matched) return undefined;
+  return {
+    animal: matched.key,
+    title: matched.title,
+    accent: matched.accent,
+    sprite: matched.sprite,
+  };
+}
+
+function deriveInstanceAvatarIdentity(instance: OpenClawInstanceConfig): AgentAnimalIdentity {
+  const normalizedId = instance.id.trim().toLowerCase();
+  const compactName = `${instance.id} ${instance.name}`.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const exact = animalIdentityByKey(INSTANCE_AVATAR_ANIMAL_BY_ID[normalizedId] ?? "");
+  if (exact) return exact;
+  const keywordAnimal = Object.entries(INSTANCE_AVATAR_ANIMAL_BY_ID).find(([keyword]) => compactName.includes(keyword))?.[1];
+  const keywordIdentity = animalIdentityByKey(keywordAnimal ?? "");
+  return keywordIdentity ?? deriveAgentAnimalIdentity(`instance-${instance.id}-${instance.name}`);
+}
+
+function renderInstanceAvatar(
+  instance: OpenClawInstanceConfig,
+  language: UiLanguage,
+  variant: "card" | "hero" | "mini" = "card",
+): string {
+  const identity = deriveInstanceAvatarIdentity(instance);
+  const label = `${instance.name} ${pickUiText(language, "instance avatar", "实例头像")}`;
+  return `<div class="instance-avatar instance-avatar--${variant}" style="--agent-accent: ${escapeHtml(identity.accent)};" data-instance-id="${escapeHtml(instance.id)}" data-animal="${escapeHtml(identity.animal)}" aria-label="${escapeHtml(label)}">
+    <div class="agent-stage" aria-hidden="true"><canvas class="agent-pixel-canvas" width="256" height="256"></canvas></div>
+  </div>`;
+}
+
 export function buildOfficeAgentRosterIds(
   snapshot: ReadModelSnapshot,
   _tasks: TaskListItem[],
@@ -21066,7 +21138,7 @@ function renderFileWorkbenchScript(): string {
 function renderAgentVisualEnhancerScript(): string {
   return `<script>
 (() => {
-  const avatars = Array.from(document.querySelectorAll('.agent-avatar, .staff-avatar, .hall-agent-avatar'));
+	  const avatars = Array.from(document.querySelectorAll('.agent-avatar, .staff-avatar, .hall-agent-avatar, .instance-avatar'));
   if (!avatars.length) return;
   const prefersReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   // Pixel motion runs fully on client; no network polling and no extra token usage.

@@ -278,9 +278,12 @@ test("multi-instance overview renders status metrics detail links and selected s
 
   const html = renderMultiInstanceOverviewForSmoke(snapshot, "zh");
   assert(html.includes("多实例只读总览"));
-  assert(html.includes("Tom Workspace"));
-  assert(html.includes("Jerry Workspace"));
-  assert(html.includes("已连接"));
+	  assert(html.includes("Tom Workspace"));
+	  assert(html.includes("Jerry Workspace"));
+	  assert(html.includes("instance-avatar"));
+	  assert(html.includes("data-animal"));
+	  assert(html.includes("agent-pixel-canvas"));
+	  assert(html.includes("已连接"));
   assert(html.includes("未连接"));
   assert(html.includes("会话数"));
   assert(html.includes("待审批"));
@@ -582,14 +585,15 @@ test("multi-instance routes render overview detail and invalid-instance fallback
     assert(detailHtml.includes("main token budget"));
     assert(detailHtml.includes("本页不挂载执行、编辑或审批控件"));
     assert(detailHtml.includes('href="/?section=projects-tasks&amp;lang=zh"'));
-    assert(detailHtml.includes('href="/?instance=tom&amp;section=projects-tasks&amp;lang=zh"'));
-    assert(detailHtml.includes('href="/?instance=jerry&amp;section=projects-tasks&amp;lang=zh"'));
-    assert(!detailHtml.includes("data-file-save"));
-    assert(!detailHtml.includes("data-task-room-approve"));
-    assert(!detailHtml.includes("<script"));
-    assert(!detailHtml.includes("/api/approvals"));
-    assert(!detailHtml.includes("/api/files/content"));
-    assert(!detailHtml.includes("fetch("));
+	  assert(detailHtml.includes('href="/?instance=tom&amp;section=projects-tasks&amp;lang=zh"'));
+	  assert(detailHtml.includes('href="/?instance=jerry&amp;section=projects-tasks&amp;lang=zh"'));
+	  assert(detailHtml.includes("instance-avatar"));
+	  assert(detailHtml.includes("agent-pixel-canvas"));
+	  assert(!detailHtml.includes("data-file-save"));
+	  assert(!detailHtml.includes("data-task-room-approve"));
+	  assert(!detailHtml.includes("/api/approvals"));
+	  assert(!detailHtml.includes("/api/files/content"));
+	  assert(!detailHtml.includes("fetch("));
 
     const invalidResponse = await fetch(`${baseUrl}/?instance=missing`);
     assert.equal(invalidResponse.status, 200);
@@ -826,8 +830,8 @@ test("legacy mission-control routes resolve to dashboard sections", async () => 
   assert.equal(resolveLegacyDashboardSectionForSmoke("/heartbeat"), "overview");
   assert.equal(resolveLegacyDashboardSectionForSmoke("/tools"), "settings");
   assert.equal(resolveLegacyDashboardSectionForSmoke("/not-a-route"), undefined);
-  assert.equal(resolveDashboardSection(new URLSearchParams("section=alerts")), "overview");
-  assert.equal(resolveDashboardSection(new URLSearchParams("section=replay-audit")), "overview");
+	  assert.equal(resolveDashboardSection(new URLSearchParams("section=alerts")), "alerts");
+	  assert.equal(resolveDashboardSection(new URLSearchParams("section=replay-audit")), "replay-audit");
 });
 
 test("session activity timestamp prefers the fresher runtime signal over older history", async () => {
@@ -1253,7 +1257,7 @@ test("memory and workspace sections expose editable file workbenches", async () 
   assert(source.includes('const staffOverviewCards = needsTeamSnapshot'));
   assert(source.includes(".staff-brief-grid {\n      margin-top: 12px;\n      display: grid;\n      grid-template-columns: repeat(3, minmax(0, 1fr));"));
   assert(source.includes('<canvas class="agent-pixel-canvas" width="256" height="256"></canvas>'));
-  assert(source.includes("querySelectorAll('.agent-avatar, .staff-avatar, .hall-agent-avatar')"));
+	  assert(source.includes("querySelectorAll('.agent-avatar, .staff-avatar, .hall-agent-avatar, .instance-avatar')"));
   assert(source.includes('data-animal="${escapeHtml(effectiveAnimal)}"'));
   assert(source.includes('t("Shared staff mission", "员工共同目标")'));
   assert(source.includes('t("Staff system details", "员工配置明细")'));
