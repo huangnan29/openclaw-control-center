@@ -9361,6 +9361,13 @@ function renderMultiInstanceOverview(
 	    .instance-avatar { position: relative; display: grid; place-items: center; width: 96px; aspect-ratio: 1; padding: 7px; border: 1px solid rgba(17, 24, 39, 0.12); border-radius: 8px; background-color: var(--agent-accent, #4e79a7); background-image: radial-gradient(circle at 34% 22%, rgba(255,255,255,0.92), rgba(255,255,255,0.28) 42%, rgba(255,255,255,0.58) 100%); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.7); overflow: hidden; }
 	    .instance-avatar .agent-stage { position: relative; display: grid; place-items: center; width: 100%; height: 100%; border-radius: 6px; background: linear-gradient(180deg, rgba(255,255,255,0.74), rgba(255,255,255,0.28)); overflow: hidden; }
 	    .instance-avatar .agent-pixel-canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
+	    .instance-avatar-rail { display: flex; gap: 10px; overflow-x: auto; padding: 2px 0 12px; margin: -2px 0 8px; scrollbar-width: thin; }
+	    .instance-avatar-link { flex: 0 0 230px; display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 10px; align-items: center; border: 1px solid var(--border); border-radius: 8px; padding: 8px; color: inherit; background: rgba(255, 255, 255, 0.92); text-decoration: none; }
+	    .instance-avatar-link.active { border-color: rgba(0, 113, 227, 0.5); background: #eff8ff; }
+	    .instance-avatar--rail { width: 56px; padding: 5px; }
+	    .instance-rail-copy { min-width: 0; display: grid; gap: 3px; }
+	    .instance-rail-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+	    .instance-rail-meta { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	    .card h2, .panel h2 { margin: 0; font-size: 17px; letter-spacing: 0; }
     .panel { margin-top: 12px; }
     .panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 10px; }
@@ -9425,9 +9432,10 @@ function renderMultiInstanceOverview(
       ${renderMultiInstanceSectionNav(activeSection, language, selectedServerId)}
       ${renderServerFilterBar(snapshot, language, selectedServerId)}
     </section>
-    ${warningHtml}
-    <section class="status-strip">${totalChips}</section>
-    ${sectionBody}
+	    ${warningHtml}
+	    <section class="status-strip">${totalChips}</section>
+	    ${renderInstanceAvatarRail(snapshot, language)}
+	    ${sectionBody}
 	  </main>
 	  ${renderManagedActionDryRunScript(language)}
 	  ${renderAgentVisualEnhancerScript()}
@@ -9705,6 +9713,29 @@ function renderManagedActionDryRunScript(language: UiLanguage): string {
   });
 })();
 </script>`;
+}
+
+function renderInstanceAvatarRail(snapshot: MultiInstanceSnapshot, language: UiLanguage): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const rows = snapshot.instances
+    .map((item) => {
+      const active = item.instance.id === snapshot.selectedInstanceId;
+      const metrics = buildInstanceUiMetrics(item);
+      const href = `/?instance=${encodeURIComponent(item.instance.id)}&amp;section=overview&amp;lang=${encodeURIComponent(language)}`;
+      const metricText = [
+        `${t("Sessions", "会话")}${language === "zh" ? " " : ": "}${metrics.sessions}`,
+        `${t("Running", "运行")}${language === "zh" ? " " : ": "}${metrics.running}`,
+      ].join(" · ");
+      return `<a class="instance-avatar-link${active ? " active" : ""}" href="${href}"${active ? ' aria-current="page"' : ""}>
+        ${renderInstanceAvatar(item.instance, language, "rail")}
+        <span class="instance-rail-copy">
+          <span class="instance-rail-name">${escapeHtml(item.instance.name)}</span>
+          <span class="instance-rail-meta">${escapeHtml(multiInstanceStatusLabel(item.status, language))} · ${escapeHtml(metricText)}</span>
+        </span>
+      </a>`;
+    })
+    .join("");
+  return `<section class="instance-avatar-rail" aria-label="${escapeHtml(t("Instance roster", "实例名录"))}">${rows}</section>`;
 }
 
 function renderMultiInstanceCard(instance: InstanceSnapshot, selectedInstanceId: string, language: UiLanguage): string {
@@ -17470,7 +17501,7 @@ function deriveInstanceAvatarIdentity(instance: OpenClawInstanceConfig): AgentAn
 function renderInstanceAvatar(
   instance: OpenClawInstanceConfig,
   language: UiLanguage,
-  variant: "card" | "hero" | "mini" = "card",
+  variant: "card" | "hero" | "mini" | "rail" = "card",
 ): string {
   const identity = deriveInstanceAvatarIdentity(instance);
   const label = `${instance.name} ${pickUiText(language, "instance avatar", "实例头像")}`;

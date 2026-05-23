@@ -280,6 +280,7 @@ test("multi-instance overview renders status metrics detail links and selected s
   assert(html.includes("多实例只读总览"));
 	  assert(html.includes("Tom Workspace"));
 	  assert(html.includes("Jerry Workspace"));
+	  assert(html.includes("instance-avatar-rail"));
 	  assert(html.includes("instance-avatar"));
 	  assert(html.includes("data-animal"));
 	  assert(html.includes("agent-pixel-canvas"));
