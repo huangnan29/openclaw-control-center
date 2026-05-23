@@ -647,8 +647,9 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(commandRunnerText, /api\/managed-actions\/dry-run/);
   assert.match(commandRunnerText, /api\/managed-actions\/live/);
   assert.match(commandRunnerText, /CONFIRM_MANAGED_ACTION_COMMAND_LIVE/);
-  assert.match(commandRunnerText, /liveAllowedActions = new Set\(\["healthcheck", "collector_refresh"\]\)/);
-  assert.match(commandRunnerText, /skill_run 只允许 dry-run 预览/);
+  assert.match(commandRunnerText, /liveAllowedActions = new Set\(\["healthcheck", "collector_refresh", "skill_run"\]\)/);
+  assert.match(commandRunnerText, /CONFIRM_MANAGED_ACTION_COMMAND_SKILL_RUN_LIVE/);
+  assert.match(commandRunnerText, /checkSkillRunReadiness/);
   assert.match(commandRunnerText, /writesOpenClawInstanceDirs: false/);
   const commandTextBridgeText = readFileSync(managedActionTextBridge, "utf8");
   assert.match(commandTextBridgeText, /managed-action-text-bridge\.sh parse/);

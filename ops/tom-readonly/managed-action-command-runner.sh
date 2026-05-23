@@ -14,6 +14,7 @@ DEPLOY_DIR="${DEPLOY_DIR:-$(cd "${SCRIPT_DIR}/../.." && pwd)}"
 CONTROL_CENTER_BASE_URL="${CONTROL_CENTER_BASE_URL:-http://127.0.0.1:4311}"
 CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN="${CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN:-}"
 CONFIRM_MANAGED_ACTION_COMMAND_LIVE="${CONFIRM_MANAGED_ACTION_COMMAND_LIVE:-}"
+CONFIRM_MANAGED_ACTION_COMMAND_SKILL_RUN_LIVE="${CONFIRM_MANAGED_ACTION_COMMAND_SKILL_RUN_LIVE:-}"
 LOCAL_API_TOKEN="${LOCAL_API_TOKEN:-}"
 MANAGED_ACTION_COMMAND_TOKEN_SOURCE="${MANAGED_ACTION_COMMAND_TOKEN_SOURCE:-env}"
 RESOLVED_LOCAL_API_TOKEN_SOURCE="${LOCAL_API_TOKEN:+env}"
@@ -91,12 +92,14 @@ live 必须设置：
   CONFIRM_MANAGED_ACTION_COMMAND_LIVE=I_UNDERSTAND_THIS_CALLS_MANAGED_ACTION_LIVE_API
   LOCAL_API_TOKEN=<本地令牌>
 
+skill_run live 还必须额外设置：
+  CONFIRM_MANAGED_ACTION_COMMAND_SKILL_RUN_LIVE=I_UNDERSTAND_THIS_MAY_RUN_OPENCLAW_SKILL_ON_ALLOWED_INSTANCE
+
 安全边界：
   - plan 不联网、不写文件。
   - parse-text/plan-text 不联网、不写文件。
   - dry-run 只调用 /api/managed-actions/dry-run，不执行 OpenClaw 实例命令。
-  - live 只允许 healthcheck/collector_refresh，且只在 control-center live 闸门、白名单、灰度规则、dry-run 引用都通过时执行。
-  - skill_run 只允许 dry-run 预览，不允许通过本入口 live 执行。
+  - live 默认只允许 healthcheck/collector_refresh；skill_run live 必须额外确认，并要求 control-center readiness 显示 skill_run 白名单、rollout 和 skill/instance allowlist 已匹配。
   - 不打开 live gate，不重启实例；是否修改 OpenClaw 实例由 live API 返回的 safety 决定。
 TEXT
 }
@@ -129,6 +132,7 @@ run_node() {
     CONTROL_CENTER_BASE_URL="$CONTROL_CENTER_BASE_URL" \
     CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN="$CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN" \
     CONFIRM_MANAGED_ACTION_COMMAND_LIVE="$CONFIRM_MANAGED_ACTION_COMMAND_LIVE" \
+    CONFIRM_MANAGED_ACTION_COMMAND_SKILL_RUN_LIVE="$CONFIRM_MANAGED_ACTION_COMMAND_SKILL_RUN_LIVE" \
     LOCAL_API_TOKEN="$LOCAL_API_TOKEN" \
     RESOLVED_LOCAL_API_TOKEN_SOURCE="$RESOLVED_LOCAL_API_TOKEN_SOURCE" \
     COMMAND_FILE="$COMMAND_FILE" \
@@ -140,12 +144,14 @@ const commandFile = process.env.COMMAND_FILE || "";
 const baseUrl = normalizeBaseUrl(process.env.CONTROL_CENTER_BASE_URL || "http://127.0.0.1:4311");
 const confirmDryRun = process.env.CONFIRM_MANAGED_ACTION_COMMAND_DRY_RUN || "";
 const confirmLive = process.env.CONFIRM_MANAGED_ACTION_COMMAND_LIVE || "";
+const confirmSkillRunLive = process.env.CONFIRM_MANAGED_ACTION_COMMAND_SKILL_RUN_LIVE || "";
 const localApiToken = process.env.LOCAL_API_TOKEN || "";
 const localApiTokenSource = process.env.RESOLVED_LOCAL_API_TOKEN_SOURCE || "missing";
 const dryRunConfirmation = "DRY-RUN-ONLY";
 const liveConfirmation = "LIVE-ACTION-APPROVED";
+const skillRunLiveConfirmation = "I_UNDERSTAND_THIS_MAY_RUN_OPENCLAW_SKILL_ON_ALLOWED_INSTANCE";
 const allowedActions = new Set(["healthcheck", "collector_refresh", "skill_run"]);
-const liveAllowedActions = new Set(["healthcheck", "collector_refresh"]);
+const liveAllowedActions = new Set(["healthcheck", "collector_refresh", "skill_run"]);
 const thinkingLevels = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
 
 function normalizeBaseUrl(value) {
@@ -352,7 +358,15 @@ function buildLivePayload(command) {
   const payload = buildPayload({ ...command, confirmedText: dryRunConfirmation });
   const operationRequestId = readRequiredString(command, "operationRequestId", 120);
   if (!liveAllowedActions.has(payload.action)) {
-    throw new Error("live 只允许 healthcheck 或 collector_refresh；skill_run 只允许 dry-run 预览。");
+    throw new Error("live 只允许 healthcheck、collector_refresh 或受控 skill_run。");
+  }
+  if (payload.action === "skill_run") {
+    if (confirmSkillRunLive !== skillRunLiveConfirmation) {
+      throw new Error(`skill_run live 必须额外设置 CONFIRM_MANAGED_ACTION_COMMAND_SKILL_RUN_LIVE=${skillRunLiveConfirmation}。`);
+    }
+    if (!payload.message || !(payload.agentId || payload.sessionKey || payload.sessionId)) {
+      throw new Error("skill_run live 必须提供 message，并指定 agentId/sessionKey/sessionId 之一。");
+    }
   }
   return {
     ...payload,
@@ -404,6 +418,10 @@ function nextDryRunCommand(inputKind = "json") {
 
 function nextLiveCommand() {
   return "CONFIRM_MANAGED_ACTION_COMMAND_LIVE=I_UNDERSTAND_THIS_CALLS_MANAGED_ACTION_LIVE_API LOCAL_API_TOKEN=<本地令牌> repo/ops/tom-readonly/managed-action-command-runner.sh live <command.json>";
+}
+
+function nextSkillRunLiveCommand() {
+  return "CONFIRM_MANAGED_ACTION_COMMAND_LIVE=I_UNDERSTAND_THIS_CALLS_MANAGED_ACTION_LIVE_API CONFIRM_MANAGED_ACTION_COMMAND_SKILL_RUN_LIVE=I_UNDERSTAND_THIS_MAY_RUN_OPENCLAW_SKILL_ON_ALLOWED_INSTANCE LOCAL_API_TOKEN=<本地令牌> repo/ops/tom-readonly/managed-action-command-runner.sh live <command.json>";
 }
 
 function plannedReport(payload, inputKind = "json") {
@@ -577,6 +595,44 @@ async function liveReport(payload) {
     };
   }
 
+  let skillRunReadiness;
+  if (payload.action === "skill_run") {
+    skillRunReadiness = await checkSkillRunReadiness(payload);
+    if (!skillRunReadiness.allowed) {
+      return {
+        schemaVersion: 1,
+        status: "blocked_skill_run_readiness",
+        mode,
+        generatedAt: new Date().toISOString(),
+        target: {
+          instanceId: payload.instanceId,
+          action: payload.action,
+          operator: payload.operator,
+          operationRequestId: payload.operationRequestId,
+          skillName: payload.skillName,
+          ...(payload.agentId ? { agentId: payload.agentId } : {}),
+          ...(payload.sessionKey ? { sessionKey: payload.sessionKey } : {}),
+          ...(payload.sessionId ? { sessionId: payload.sessionId } : {}),
+        },
+        issues: skillRunReadiness.issues,
+        readinessApi: skillRunReadiness.readinessApi,
+        nextCommands: [
+          "repo/ops/tom-readonly/managed-action-command-runner.sh status",
+          nextSkillRunLiveCommand(),
+        ],
+        safety: baseSafety({
+          blockedBeforeLiveApi: true,
+          checkedSkillRunReadiness: true,
+          callsManagedActionsLiveApi: false,
+          requiresLiveConfirmation: true,
+          requiresSkillRunLiveConfirmation: true,
+          requiresLocalApiToken: true,
+          localApiTokenSource,
+        }),
+      };
+    }
+  }
+
   const result = await requestJson("/api/managed-actions/live", {
     method: "POST",
     token: localApiToken,
@@ -602,6 +658,7 @@ async function liveReport(payload) {
       statusCode: result.statusCode,
       body: result.body,
     },
+    ...(skillRunReadiness ? { skillRunReadiness } : {}),
     nextCommands: ok
       ? [
         "repo/ops/tom-readonly/managed-action-command-runner.sh status",
@@ -611,10 +668,44 @@ async function liveReport(payload) {
     safety: baseSafety({
       callsManagedActionsLiveApi: true,
       requiresLiveConfirmation: true,
+      requiresSkillRunLiveConfirmation: payload.action === "skill_run",
       requiresLocalApiToken: true,
       localApiTokenSource,
       mutatesOpenClawInstance: result.body?.safety?.mutatesOpenClawInstance === true,
     }),
+  };
+}
+
+async function checkSkillRunReadiness(payload) {
+  const readiness = await requestJson("/api/managed-actions/readiness");
+  const issues = [];
+  const body = readiness.body || {};
+  const gateActions = Array.isArray(body.gate?.allowedActions) ? body.gate.allowedActions : [];
+  const rolloutActions = Array.isArray(body.rollout?.actions) ? body.rollout.actions : [];
+  const allowedSkills = Array.isArray(body.skillRunPolicy?.allowedSkills) ? body.skillRunPolicy.allowedSkills : [];
+  const allowedInstances = Array.isArray(body.skillRunPolicy?.allowedInstances) ? body.skillRunPolicy.allowedInstances : [];
+  if (!readiness.ok || body.ok !== true) issues.push("无法读取 managed-actions readiness。");
+  if (body.liveExecutionAvailable !== true) issues.push("managed-actions readiness 尚未 ready。");
+  if (!gateActions.includes("skill_run")) issues.push("live gate 未允许 skill_run。");
+  if (!rolloutActions.includes("skill_run")) issues.push("rollout 未允许 skill_run。");
+  if (body.skillRunPolicy?.required !== true) issues.push("skill_run policy 未处于 required 状态。");
+  if (!allowedSkills.includes(payload.skillName)) issues.push(`skill_run skillName 未在 allowlist 中：${payload.skillName}`);
+  if (!allowedInstances.includes(payload.instanceId)) issues.push(`skill_run instance 未在 allowlist 中：${payload.instanceId}`);
+  if (body.skillRunPolicy?.deliverAllowed !== true && payload.deliver === true) issues.push("skill_run policy 不允许 deliver=true。");
+  if (
+    typeof payload.timeoutSeconds === "number"
+    && typeof body.skillRunPolicy?.maxTimeoutSeconds === "number"
+    && payload.timeoutSeconds > body.skillRunPolicy.maxTimeoutSeconds
+  ) {
+    issues.push(`skill_run timeoutSeconds 超过 policy 上限：${payload.timeoutSeconds} > ${body.skillRunPolicy.maxTimeoutSeconds}`);
+  }
+  return {
+    allowed: issues.length === 0,
+    issues,
+    readinessApi: {
+      statusCode: readiness.statusCode,
+      body,
+    },
   };
 }
 

@@ -10,7 +10,7 @@ import { promisify } from "node:util";
 const ROOT = process.cwd();
 const SCRIPT = join(ROOT, "ops", "tom-readonly", "managed-action-command-runner.sh");
 const execFileAsync = promisify(execFile);
-type RunnerMode = "status" | "plan" | "dry-run" | "parse-text" | "plan-text" | "dry-run-text";
+type RunnerMode = "status" | "plan" | "dry-run" | "live" | "parse-text" | "plan-text" | "dry-run-text";
 
 async function writeCommandFile(dir: string, overrides: Record<string, unknown> = {}): Promise<string> {
   const file = join(dir, "managed-action-command.json");
@@ -91,6 +91,10 @@ async function withFakeApi<T>(
     baseUrl: string,
     requests: Array<{ method?: string; url?: string; headers: IncomingMessage["headers"]; body: string }>,
   ) => Promise<T>,
+  options: {
+    readinessBody?: Record<string, unknown>;
+    liveBody?: Record<string, unknown>;
+  } = {},
 ): Promise<T> {
   const requests: Array<{ method?: string; url?: string; headers: IncomingMessage["headers"]; body: string }> = [];
   const server = createServer(async (req, res) => {
@@ -104,7 +108,7 @@ async function withFakeApi<T>(
     }
     if (req.method === "GET" && req.url === "/api/managed-actions/readiness") {
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ ok: true, status: "blocked", liveExecutionAvailable: false }));
+      res.end(JSON.stringify(options.readinessBody ?? { ok: true, status: "blocked", liveExecutionAvailable: false }));
       return;
     }
     if (req.method === "POST" && req.url === "/api/managed-actions/dry-run") {
@@ -125,6 +129,17 @@ async function withFakeApi<T>(
           reason: parsed.reason,
           confirmationTextMatched: parsed.confirmedText === "DRY-RUN-ONLY",
         },
+      }));
+      return;
+    }
+    if (req.method === "POST" && req.url === "/api/managed-actions/live") {
+      const parsed = JSON.parse(body);
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify(options.liveBody ?? {
+        ok: true,
+        status: parsed.action === "skill_run" ? "executed_skill_run" : "executed_readonly_healthcheck",
+        liveExecution: true,
+        safety: { mutatesOpenClawInstance: parsed.action === "skill_run" },
       }));
       return;
     }
@@ -317,6 +332,129 @@ test("managed action command runner dry-run-text 只调用 dry-run API", async (
       assert.equal(body.action, "skill_run");
       assert.equal(body.skillName, "zhihu-human-ops-writing");
       assert.equal(body.confirmedText, "DRY-RUN-ONLY");
+    });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("managed action command runner live 对 skill_run 要求额外确认", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-managed-action-command-live-skill-confirm-"));
+  try {
+    const file = await writeCommandFile(dir, {
+      operationRequestId: "dry-run-for-skill-run",
+      agentId: "main",
+      message: "只做受控 skill_run 测试，不发布。",
+    });
+    const { exitCode, report } = runRunner("live", file, {
+      CONTROL_CENTER_BASE_URL: "http://127.0.0.1:9",
+      CONFIRM_MANAGED_ACTION_COMMAND_LIVE: "I_UNDERSTAND_THIS_CALLS_MANAGED_ACTION_LIVE_API",
+      LOCAL_API_TOKEN: "test-token",
+    });
+
+    assert.notEqual(exitCode, 0);
+    assert.equal(report.status, "blocked_invalid_command");
+    assert(report.issues.some((issue: string) => issue.includes("CONFIRM_MANAGED_ACTION_COMMAND_SKILL_RUN_LIVE")));
+    assert.equal(report.safety.blockedBeforeApi, true);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("managed action command runner live 在 skill_run readiness 未允许时不调用 live API", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-managed-action-command-live-skill-readiness-"));
+  try {
+    const file = await writeCommandFile(dir, {
+      operationRequestId: "dry-run-for-skill-run",
+      agentId: "main",
+      message: "只做受控 skill_run 测试，不发布。",
+    });
+    await withFakeApi(async (baseUrl, requests) => {
+      const result = await execFileAsync(SCRIPT, ["live", file], {
+        cwd: ROOT,
+        env: {
+          ...process.env,
+          CONTROL_CENTER_BASE_URL: baseUrl,
+          CONFIRM_MANAGED_ACTION_COMMAND_LIVE: "I_UNDERSTAND_THIS_CALLS_MANAGED_ACTION_LIVE_API",
+          CONFIRM_MANAGED_ACTION_COMMAND_SKILL_RUN_LIVE: "I_UNDERSTAND_THIS_MAY_RUN_OPENCLAW_SKILL_ON_ALLOWED_INSTANCE",
+          LOCAL_API_TOKEN: "test-token",
+        },
+      }).then(
+        ({ stdout, stderr }) => ({
+          exitCode: 0,
+          stdout,
+          stderr,
+          report: JSON.parse(stdout),
+        }),
+        (error: NodeJS.ErrnoException & { stdout?: string; stderr?: string }) => ({
+          exitCode: typeof error.code === "number" ? error.code : 1,
+          stdout: error.stdout ?? "",
+          stderr: error.stderr ?? "",
+          report: JSON.parse(error.stdout ?? "{}"),
+        }),
+      );
+
+      assert.notEqual(result.exitCode, 0);
+      assert.equal(result.report.status, "blocked_skill_run_readiness");
+      assert(result.report.issues.some((issue: string) => issue.includes("live gate 未允许 skill_run")));
+      assert.equal(result.report.safety.blockedBeforeLiveApi, true);
+      assert.equal(result.report.safety.callsManagedActionsLiveApi, false);
+      assert.equal(requests.length, 1);
+      assert.equal(requests[0]?.method, "GET");
+      assert.equal(requests[0]?.url, "/api/managed-actions/readiness");
+    });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("managed action command runner live 仅在 skill_run readiness 允许后调用 live API", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-managed-action-command-live-skill-allowed-"));
+  try {
+    const file = await writeCommandFile(dir, {
+      operationRequestId: "dry-run-for-skill-run",
+      agentId: "main",
+      message: "只做受控 skill_run 测试，不发布。",
+      timeoutSeconds: 300,
+    });
+    await withFakeApi(async (baseUrl, requests) => {
+      const { exitCode, report } = await runRunnerAsync("live", file, {
+        CONTROL_CENTER_BASE_URL: baseUrl,
+        CONFIRM_MANAGED_ACTION_COMMAND_LIVE: "I_UNDERSTAND_THIS_CALLS_MANAGED_ACTION_LIVE_API",
+        CONFIRM_MANAGED_ACTION_COMMAND_SKILL_RUN_LIVE: "I_UNDERSTAND_THIS_MAY_RUN_OPENCLAW_SKILL_ON_ALLOWED_INSTANCE",
+        LOCAL_API_TOKEN: "test-token",
+      });
+
+      assert.equal(exitCode, 0);
+      assert.equal(report.status, "live_completed");
+      assert.equal(report.target.action, "skill_run");
+      assert.equal(report.safety.callsManagedActionsLiveApi, true);
+      assert.equal(report.safety.mutatesOpenClawInstance, true);
+      assert.equal(report.safety.requiresSkillRunLiveConfirmation, true);
+      assert.equal(report.skillRunReadiness.allowed, true);
+      assert.equal(requests.length, 2);
+      assert.equal(requests[0]?.url, "/api/managed-actions/readiness");
+      assert.equal(requests[1]?.url, "/api/managed-actions/live");
+      const body = JSON.parse(requests[1]?.body || "{}");
+      assert.equal(body.action, "skill_run");
+      assert.equal(body.confirmedText, "LIVE-ACTION-APPROVED");
+      assert.equal(body.skillName, "zhihu-human-ops-writing");
+      assert.equal(body.agentId, "main");
+    }, {
+      readinessBody: {
+        ok: true,
+        status: "ready",
+        liveExecutionAvailable: true,
+        gate: { allowedActions: ["skill_run"] },
+        rollout: { actions: ["skill_run"] },
+        skillRunPolicy: {
+          required: true,
+          allowedSkills: ["zhihu-human-ops-writing"],
+          allowedInstances: ["tom"],
+          maxTimeoutSeconds: 600,
+          deliverAllowed: false,
+        },
+      },
     });
   } finally {
     await rm(dir, { recursive: true, force: true });
