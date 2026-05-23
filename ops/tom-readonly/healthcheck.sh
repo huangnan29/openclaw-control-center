@@ -72,7 +72,7 @@ check_http_pages() {
 
   log "检查多实例总览页面"
   curl_to_file "${base}/?section=overview&lang=zh" "${TMP_DIR}/overview.html" "多实例总览页面"
-  require_contains "${TMP_DIR}/overview.html" "多实例只读总览" "总览标题"
+  require_contains "${TMP_DIR}/overview.html" "多实例受控总览" "总览标题"
   require_contains "${TMP_DIR}/overview.html" "服务器健康" "服务器健康"
   require_contains "${TMP_DIR}/overview.html" "实例矩阵" "实例矩阵"
   require_contains "${TMP_DIR}/overview.html" "关注队列" "关注队列"
@@ -82,7 +82,7 @@ check_http_pages() {
   for instance_id in ${INSTANCE_IDS}; do
     log "检查实例详情页：${instance_id}"
     curl_to_file "${base}/?instance=${instance_id}&section=overview&lang=zh" "${TMP_DIR}/detail-${instance_id}.html" "${instance_id} 实例详情页"
-    require_contains "${TMP_DIR}/detail-${instance_id}.html" "只读实例详情" "${instance_id} 详情标题"
+    require_contains "${TMP_DIR}/detail-${instance_id}.html" "受控实例详情" "${instance_id} 详情标题"
     require_contains "${TMP_DIR}/detail-${instance_id}.html" "运行态分布" "${instance_id} 运行态分布"
     require_contains "${TMP_DIR}/detail-${instance_id}.html" "返回总览" "${instance_id} 返回总览"
   done
@@ -322,7 +322,7 @@ main() {
   check_container_security
   check_collector_snapshot_freshness
 
-  log "健康检查通过：Tom 多实例只读控制中心可继续作为灰度监控入口。"
+  log "健康检查通过：Tom 多实例受控 live 控制中心可继续作为灰度监控入口。"
 }
 
 main "$@"

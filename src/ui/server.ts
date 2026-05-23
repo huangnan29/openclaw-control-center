@@ -1268,12 +1268,12 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
             const scopedSnapshot = requestedServerId ? filterMultiInstanceSnapshotByServer(snapshot, requestedServerId) : snapshot;
             const warningParts = [
               requestedInstanceId
-              ? pickUiText(language, "Instance not found. Showing the readonly overview.", "未找到该实例，已显示只读总览。")
+              ? pickUiText(language, "Instance not found. Showing the controlled overview.", "未找到该实例，已显示受控总览。")
               : instanceConfigs.issues.length > 0
                 ? instanceConfigs.issues.map((issue) => issue.message).join("; ")
                 : undefined,
               requestedServerId && !scopedSnapshot
-                ? pickUiText(language, "Server not found. Showing all readonly instances.", "未找到该服务器，已显示全部只读实例。")
+                ? pickUiText(language, "Server not found. Showing all controlled instances.", "未找到该服务器，已显示全部受控实例。")
                 : undefined,
             ].filter((value): value is string => typeof value === "string" && value.length > 0);
             const overviewSnapshot = scopedSnapshot ?? snapshot;
@@ -9049,7 +9049,7 @@ function multiInstanceSectionTitle(section: DashboardSection, language: UiLangua
   if (section === "alerts") return pickUiText(language, "Alerts and Decisions", "告警与决策");
   if (section === "replay-audit") return pickUiText(language, "Replay and Audit", "回放与审计");
   if (section === "settings") return pickUiText(language, "Settings and Safety", "设置与安全");
-  return pickUiText(language, "Readonly multi-instance overview", "多实例只读总览");
+  return pickUiText(language, "Controlled multi-instance overview", "多实例受控总览");
 }
 
 function multiInstanceSectionLead(section: DashboardSection, language: UiLanguage): string {
@@ -9119,14 +9119,14 @@ function multiInstanceSectionLead(section: DashboardSection, language: UiLanguag
   if (section === "settings") {
     return pickUiText(
       language,
-      "Connection health, data freshness, safety gates, and deployment facts for this readonly service.",
-      "查看这个只读服务的连接健康、数据新鲜度、安全闸门和部署事实。",
+      "Connection health, data freshness, safety gates, and deployment facts for this controlled service.",
+      "查看这个受控服务的连接健康、数据新鲜度、安全闸门和部署事实。",
     );
   }
   return pickUiText(
     language,
-    "Readonly monitoring only. No execution, pause, or approval actions are available here.",
-    "仅用于只读监控。这里不提供执行、暂停或审批动作。",
+    "Controlled monitoring only. Execution, pause, and approval actions are not mounted here.",
+    "仅用于受控监控。这里不挂载执行、暂停或审批动作。",
   );
 }
 
@@ -10346,7 +10346,7 @@ function renderMultiInstanceDetail(
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${escapeHtml(t("OpenClaw readonly instance detail", "OpenClaw 只读实例详情"))}</title>
+  <title>${escapeHtml(t("OpenClaw controlled instance detail", "OpenClaw 受控实例详情"))}</title>
   <style>
     :root { color-scheme: light; --border: rgba(17, 24, 39, 0.12); --muted: #667085; --text: #1d1d1f; --bg: #f5f7fb; }
     * { box-sizing: border-box; }
@@ -10421,7 +10421,7 @@ function renderMultiInstanceDetail(
 </head>
 <body>
   <nav class="topbar" aria-label="${escapeHtml(t("Instances", "实例"))}">
-    <strong>${escapeHtml(t("Readonly instance detail", "只读实例详情"))}</strong>
+    <strong>${escapeHtml(t("Controlled instance detail", "受控实例详情"))}</strong>
     <a class="overview-link" href="${overviewHref}">${escapeHtml(t("Back to overview", "返回总览"))}</a>
     ${switcher}
   </nav>
@@ -10432,7 +10432,7 @@ function renderMultiInstanceDetail(
 	        <div class="meta">OpenClaw Control Center</div>
 	        <h1>${escapeHtml(title)}</h1>
 	        <div>${selected ? badge(selected.status, multiInstanceStatusLabel(selected.status, language)) : ""}</div>
-	        <div class="meta">${escapeHtml(t("Readonly monitoring only. This page does not mount execution, edit, or approval controls.", "仅用于只读监控。本页不挂载执行、编辑或审批控件。"))}</div>
+	        <div class="meta">${escapeHtml(t("Controlled monitoring only. This page does not mount execution, edit, or approval controls.", "仅用于受控监控。本页不挂载执行、编辑或审批控件。"))}</div>
 	        <div class="meta">${escapeHtml(t("Updated", "更新时间"))}${escapeHtml(language === "zh" ? "：" : ": ")}${escapeHtml(formatUiTimestamp(snapshot.generatedAt, language))}</div>
 	        <div class="meta">${escapeHtml(selected?.detail ?? "")}</div>
 	      </div>
