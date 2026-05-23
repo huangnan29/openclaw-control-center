@@ -624,6 +624,10 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(liveWindowText, /live-healthcheck-report\.sh/);
   assert.match(liveWindowText, /instance-impact-snapshot\.sh/);
   assert.match(liveWindowText, /compare "\$IMPACT_BEFORE" "\$impact_after"/);
+  const instanceImpactSnapshotText = readFileSync(instanceImpactSnapshot, "utf8");
+  assert.match(instanceImpactSnapshotText, /compare-controlled-live/);
+  assert.match(instanceImpactSnapshotText, /受控 live 白名单包含会影响实例或未知动作/);
+  assert.match(instanceImpactSnapshotText, /实例挂载读写属性发生变化/);
   assert.match(readFileSync(liveHealthcheckRollout, "utf8"), /"action": "healthcheck"/);
   assert.match(readFileSync(liveHealthcheckRollout, "utf8"), /"risk": "low"/);
   const commandRunnerText = readFileSync(managedActionCommandRunner, "utf8");

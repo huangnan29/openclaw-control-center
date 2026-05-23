@@ -206,6 +206,84 @@ function fail(message) {
   failures.push(message);
 }
 
+compare_controlled_live_snapshots() {
+  local before_path="${1:-}"
+  local after_path="${2:-}"
+  [ -f "$before_path" ] || fail "before 快照不存在：${before_path}"
+  [ -f "$after_path" ] || fail "after 快照不存在：${after_path}"
+
+  log "比较受控 live 实例影响快照：${before_path} -> ${after_path}"
+  node - "$before_path" "$after_path" <<'NODE'
+const fs = require("node:fs");
+
+const beforePath = process.argv[2];
+const afterPath = process.argv[3];
+const before = JSON.parse(fs.readFileSync(beforePath, "utf8"));
+const after = JSON.parse(fs.readFileSync(afterPath, "utf8"));
+const failures = [];
+
+function fail(message) {
+  failures.push(message);
+}
+
+function gatewayKey(item) {
+  return String(item.port);
+}
+
+const beforeGateways = new Map((before.gateways ?? []).map((item) => [gatewayKey(item), item]));
+const afterGateways = new Map((after.gateways ?? []).map((item) => [gatewayKey(item), item]));
+for (const [port, item] of beforeGateways) {
+  const next = afterGateways.get(port);
+  if (!next) {
+    fail(`after 快照缺少 gateway 端口：${port}`);
+    continue;
+  }
+  if (item.healthOk !== true || next.healthOk !== true) fail(`gateway ${port} health 前后未保持 ok=true`);
+  if (item.listenerOk !== true || next.listenerOk !== true) fail(`gateway ${port} 监听状态前后不可用`);
+  if (String(item.listener || "") !== String(next.listener || "")) fail(`gateway ${port} 监听行发生变化`);
+}
+
+if (after.controlCenter?.ok !== true) fail("after 快照无法读取 control-center 容器");
+if (after.controlCenter?.privileged !== false) fail("control-center 容器 privileged 非 false");
+if (after.controlCenter?.dockerSockMounted === true) fail("control-center 容器挂载了 docker.sock");
+
+const beforeMounts = new Map((before.controlCenter?.instanceMounts ?? []).map((item) => [item.destination, item]));
+for (const mount of after.controlCenter?.instanceMounts ?? []) {
+  const previous = beforeMounts.get(mount.destination);
+  if (!previous) {
+    fail(`after 快照出现新增实例挂载：${mount.destination}`);
+    continue;
+  }
+  if (mount.present !== true) fail(`after 快照缺少实例挂载：${mount.destination}`);
+  if (mount.rw !== previous.rw) {
+    fail(`实例挂载读写属性发生变化：${mount.destination} before=${previous.rw} after=${mount.rw}`);
+  }
+}
+
+const env = after.controlCenter?.env ?? {};
+if (env.READONLY_MODE !== "false") fail("受控 live 模式下 READONLY_MODE 应为 false");
+if (env.MANAGED_ACTIONS_LIVE_ENABLED !== "true") fail("受控 live 模式下 live gate 应为 true");
+if (env.MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED !== "true") fail("受控 live 模式下 live executor 应为 true");
+const actions = String(env.MANAGED_ACTIONS_LIVE_ALLOWED_ACTIONS || "")
+  .split(",")
+  .map((item) => item.trim())
+  .filter(Boolean);
+const unsafe = actions.filter((item) => !["healthcheck", "collector_refresh"].includes(item));
+if (unsafe.length > 0) fail(`受控 live 白名单包含会影响实例或未知动作：${[...new Set(unsafe)].join(",")}`);
+
+if (after.readiness?.ok !== true) fail("after 快照 readiness 不可用");
+if (after.readiness?.liveExecutionAvailable !== true) fail("受控 live 模式下 liveExecutionAvailable 应为 true");
+if (after.readiness?.executorProductionWired !== true) fail("受控 live 模式下 executorProductionWired 应为 true");
+
+if (failures.length > 0) {
+  for (const message of failures) console.error(`[失败] ${message}`);
+  process.exit(2);
+}
+
+console.log(`受控 live 实例影响比较通过：before=${beforePath} after=${afterPath}`);
+NODE
+}
+
 function gatewayKey(item) {
   return String(item.port);
 }
@@ -254,10 +332,12 @@ usage() {
 用法：
   instance-impact-snapshot.sh snapshot [label]
   instance-impact-snapshot.sh compare <before.json> <after.json>
+  instance-impact-snapshot.sh compare-controlled-live <before.json> <after.json>
 
 说明：
   snapshot 只读取 gateway health、监听端口、control-center 容器挂载和 readiness。
   compare 要求 after 恢复为只读状态，且 gateway 健康与监听状态保持稳定。
+  compare-controlled-live 用于长期受控 live 模式，要求 gateway 稳定、实例挂载读写属性不变、live 白名单仅包含低风险动作。
 TEXT
 }
 
@@ -273,6 +353,9 @@ main() {
       ;;
     compare)
       compare_snapshots "${2:-}" "${3:-}"
+      ;;
+    compare-controlled-live)
+      compare_controlled_live_snapshots "${2:-}" "${3:-}"
       ;;
     -h|--help|help)
       usage
