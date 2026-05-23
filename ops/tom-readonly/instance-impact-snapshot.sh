@@ -206,6 +206,49 @@ function fail(message) {
   failures.push(message);
 }
 
+function gatewayKey(item) {
+  return String(item.port);
+}
+
+const beforeGateways = new Map((before.gateways ?? []).map((item) => [gatewayKey(item), item]));
+const afterGateways = new Map((after.gateways ?? []).map((item) => [gatewayKey(item), item]));
+for (const [port, item] of beforeGateways) {
+  const next = afterGateways.get(port);
+  if (!next) {
+    fail(`after 快照缺少 gateway 端口：${port}`);
+    continue;
+  }
+  if (item.healthOk !== true || next.healthOk !== true) fail(`gateway ${port} health 前后未保持 ok=true`);
+  if (item.listenerOk !== true || next.listenerOk !== true) fail(`gateway ${port} 监听状态前后不可用`);
+  if (String(item.listener || "") !== String(next.listener || "")) fail(`gateway ${port} 监听行发生变化`);
+}
+
+if (after.controlCenter?.ok !== true) fail("after 快照无法读取 control-center 容器");
+if (after.controlCenter?.privileged !== false) fail("control-center 容器 privileged 非 false");
+if (after.controlCenter?.dockerSockMounted === true) fail("control-center 容器挂载了 docker.sock");
+
+for (const mount of after.controlCenter?.instanceMounts ?? []) {
+  if (mount.present !== true) fail(`after 快照缺少实例挂载：${mount.destination}`);
+  if (mount.rw !== false) fail(`after 快照实例挂载不是只读：${mount.destination}`);
+}
+
+if (after.controlCenter?.env?.READONLY_MODE !== "true") fail("after 快照 READONLY_MODE 未恢复为 true");
+if (after.controlCenter?.env?.MANAGED_ACTIONS_LIVE_ENABLED === "true") fail("after 快照 live gate 仍为 true");
+if (after.controlCenter?.env?.MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED === "true") fail("after 快照 live executor 仍为 true");
+
+if (after.readiness?.ok !== true) fail("after 快照 readiness 不可用");
+if (after.readiness?.liveExecutionAvailable !== false) fail("after 快照 liveExecutionAvailable 未恢复为 false");
+if (after.readiness?.executorProductionWired !== false) fail("after 快照 executorProductionWired 未恢复为 false");
+
+if (failures.length > 0) {
+  for (const message of failures) console.error(`[失败] ${message}`);
+  process.exit(2);
+}
+
+console.log(`实例影响比较通过：before=${beforePath} after=${afterPath}`);
+NODE
+}
+
 compare_controlled_live_snapshots() {
   local before_path="${1:-}"
   local after_path="${2:-}"
@@ -281,49 +324,6 @@ if (failures.length > 0) {
 }
 
 console.log(`受控 live 实例影响比较通过：before=${beforePath} after=${afterPath}`);
-NODE
-}
-
-function gatewayKey(item) {
-  return String(item.port);
-}
-
-const beforeGateways = new Map((before.gateways ?? []).map((item) => [gatewayKey(item), item]));
-const afterGateways = new Map((after.gateways ?? []).map((item) => [gatewayKey(item), item]));
-for (const [port, item] of beforeGateways) {
-  const next = afterGateways.get(port);
-  if (!next) {
-    fail(`after 快照缺少 gateway 端口：${port}`);
-    continue;
-  }
-  if (item.healthOk !== true || next.healthOk !== true) fail(`gateway ${port} health 前后未保持 ok=true`);
-  if (item.listenerOk !== true || next.listenerOk !== true) fail(`gateway ${port} 监听状态前后不可用`);
-  if (String(item.listener || "") !== String(next.listener || "")) fail(`gateway ${port} 监听行发生变化`);
-}
-
-if (after.controlCenter?.ok !== true) fail("after 快照无法读取 control-center 容器");
-if (after.controlCenter?.privileged !== false) fail("control-center 容器 privileged 非 false");
-if (after.controlCenter?.dockerSockMounted === true) fail("control-center 容器挂载了 docker.sock");
-
-for (const mount of after.controlCenter?.instanceMounts ?? []) {
-  if (mount.present !== true) fail(`after 快照缺少实例挂载：${mount.destination}`);
-  if (mount.rw !== false) fail(`after 快照实例挂载不是只读：${mount.destination}`);
-}
-
-if (after.controlCenter?.env?.READONLY_MODE !== "true") fail("after 快照 READONLY_MODE 未恢复为 true");
-if (after.controlCenter?.env?.MANAGED_ACTIONS_LIVE_ENABLED === "true") fail("after 快照 live gate 仍为 true");
-if (after.controlCenter?.env?.MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED === "true") fail("after 快照 live executor 仍为 true");
-
-if (after.readiness?.ok !== true) fail("after 快照 readiness 不可用");
-if (after.readiness?.liveExecutionAvailable !== false) fail("after 快照 liveExecutionAvailable 未恢复为 false");
-if (after.readiness?.executorProductionWired !== false) fail("after 快照 executorProductionWired 未恢复为 false");
-
-if (failures.length > 0) {
-  for (const message of failures) console.error(`[失败] ${message}`);
-  process.exit(2);
-}
-
-console.log(`实例影响比较通过：before=${beforePath} after=${afterPath}`);
 NODE
 }
 
