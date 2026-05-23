@@ -9202,6 +9202,7 @@ function renderMultiInstanceSectionBody(input: {
       language,
       snapshot.selectedInstanceId,
       input.managedActionReadiness ?? buildFallbackManagedActionLiveReadiness(),
+      input.managedActionAudit?.records ?? [],
     )}
     ${renderManagedActionAuditPanel(input.managedActionAudit?.records ?? [], language)}
     <section class="overview-layout">
@@ -9437,6 +9438,7 @@ function renderMultiInstanceOverview(
 	    .action-console { display: grid; gap: 10px; margin: 0 0 12px; }
 	    .action-console-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; align-items: center; }
 	    .action-console-head strong { font-size: 14px; }
+	    .action-console-latest { border: 1px solid rgba(17, 24, 39, 0.1); border-radius: 999px; padding: 4px 8px; background: rgba(255, 255, 255, 0.72); color: var(--muted); font-size: 12px; }
 	    .action-preset-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px; }
 	    .action-preset { display: grid; gap: 6px; min-height: 112px; border: 1px solid var(--border); border-radius: 8px; padding: 10px; text-align: left; background: rgba(255, 255, 255, 0.88); color: inherit; font: inherit; cursor: pointer; }
 	    .action-preset:hover, .action-preset:focus-visible { border-color: rgba(0, 113, 227, 0.48); background: #eff8ff; outline: none; }
@@ -9445,6 +9447,7 @@ function renderMultiInstanceOverview(
 	    .action-preset-desc { color: var(--muted); font-size: 12px; line-height: 1.45; }
 	    .action-preset-meta { display: flex; flex-wrap: wrap; gap: 6px; color: var(--muted); font-size: 11px; }
 	    .action-preset-meta span { border: 1px solid rgba(17, 24, 39, 0.1); border-radius: 999px; padding: 3px 7px; background: rgba(255, 255, 255, 0.72); }
+	    .action-preset-last { display: block; min-height: 16px; color: var(--muted); font-size: 11px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 	    .action-result { margin: 10px 0 0; white-space: pre-wrap; border: 1px solid var(--border); border-radius: 8px; padding: 10px; background: #f9fafb; color: #344054; font-size: 12px; overflow-x: auto; }
     .action-result.ok { border-color: rgba(22, 163, 74, 0.28); background: #f0fdf4; color: #05603a; }
     .action-result.error { border-color: rgba(220, 38, 38, 0.28); background: #fef3f2; color: #b42318; }
@@ -9482,6 +9485,7 @@ function renderManagedActionDryRunPanel(
   language: UiLanguage,
   selectedInstanceId?: string,
   readiness?: ManagedActionLiveReadinessSnapshot,
+  auditRecords: ManagedActionAuditRecord[] = [],
 ): string {
   const t = (en: string, zh: string): string => pickUiText(language, en, zh);
   const instanceOptions = instances
@@ -9506,7 +9510,7 @@ function renderManagedActionDryRunPanel(
       ${badge("partial", "dry-run")}
 	    </div>
 	    <form data-managed-action-form>
-	      ${renderManagedActionPresetConsole(language, readiness)}
+	      ${renderManagedActionPresetConsole(language, readiness, auditRecords)}
 	      <div class="control-grid">
         <div class="control-field">
           <label for="managed-action-instance">${escapeHtml(t("Instance", "实例"))}</label>
@@ -9548,19 +9552,29 @@ function renderManagedActionDryRunPanel(
 function renderManagedActionPresetConsole(
   language: UiLanguage,
   readiness?: ManagedActionLiveReadinessSnapshot,
+  auditRecords: ManagedActionAuditRecord[] = [],
 ): string {
   const t = (en: string, zh: string): string => pickUiText(language, en, zh);
   const liveReady = readiness?.status === "ready";
   const allowedActions = new Set(readiness?.gate.allowedActions ?? []);
+  const latest = latestManagedActionAuditRecord(auditRecords);
+  const latestText = latest
+    ? `${t("Latest", "最近")}: ${managedActionAuditCompactText(latest, language)}`
+    : t("No dry-run audit yet", "暂无 dry-run 审计");
   const presets = listManagedActions()
     .map((definition) => {
       const labels = managedActionPresetUi(definition.action, language);
+      const latestForAction = latestManagedActionAuditRecord(auditRecords, definition.action);
+      const latestForActionText = latestForAction
+        ? `${t("Latest", "最近")}: ${managedActionAuditCompactText(latestForAction, language)}`
+        : t("No recent dry-run for this action.", "该动作暂无最近 dry-run。");
       const liveLabel = liveReady && allowedActions.has(definition.action)
         ? t("live-ready", "live 已就绪")
         : t("dry-run only", "仅 dry-run");
       return `<button type="button" class="action-preset" data-managed-action-preset="${escapeHtml(definition.action)}" data-managed-action-reason="${escapeHtml(labels.reason)}" data-managed-action-skill="${escapeHtml(labels.skillName ?? "")}">
         <span class="action-preset-title"><span>${escapeHtml(managedActionUiLabel(definition.action, language))}</span>${badge(liveReady && allowedActions.has(definition.action) ? "connected" : "partial", liveLabel)}</span>
         <span class="action-preset-desc">${escapeHtml(labels.description)}</span>
+        <span class="action-preset-last">${escapeHtml(latestForActionText)}</span>
         <span class="action-preset-meta">
           <span>${escapeHtml(t("Mode", "模式"))}: dry-run</span>
           <span>${escapeHtml(t("Confirmation", "确认"))}: ${escapeHtml(MANAGED_ACTION_DRY_RUN_CONFIRMATION)}</span>
@@ -9572,9 +9586,28 @@ function renderManagedActionPresetConsole(
     <div class="action-console-head">
       <strong>${escapeHtml(t("Action console", "动作操作台"))}</strong>
       <span class="meta">${escapeHtml(t("Choose a preset to fill the dry-run form below.", "选择预设后自动填充下方 dry-run 表单。"))}</span>
+      <span class="action-console-latest">${escapeHtml(latestText)}</span>
     </div>
     <div class="action-preset-grid">${presets}</div>
   </div>`;
+}
+
+function latestManagedActionAuditRecord(
+  records: ManagedActionAuditRecord[],
+  action?: ManagedActionName,
+): ManagedActionAuditRecord | undefined {
+  return records
+    .filter((record) => !action || record.action === action)
+    .filter((record) => !Number.isNaN(Date.parse(record.timestamp)))
+    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))[0];
+}
+
+function managedActionAuditCompactText(record: ManagedActionAuditRecord, language: UiLanguage): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const action = record.action ? managedActionUiLabel(record.action, language) : t("Unknown action", "未知动作");
+  const target = record.targetInstanceName ?? record.targetInstanceId ?? "-";
+  const status = record.ok ? t("OK", "通过") : t("Failed", "失败");
+  return `${formatUiTimestamp(record.timestamp, language)} · ${action} · ${target} · ${status}`;
 }
 
 function managedActionPresetUi(

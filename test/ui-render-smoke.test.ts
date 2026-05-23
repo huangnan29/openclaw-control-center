@@ -304,6 +304,8 @@ test("multi-instance overview renders status metrics detail links and selected s
 	  assert(html.includes("data-managed-action-preset=\"healthcheck\""));
 	  assert(html.includes("data-managed-action-preset=\"collector_refresh\""));
 	  assert(html.includes("data-managed-action-preset=\"skill_run\""));
+	  assert(html.includes("暂无 dry-run 审计"));
+	  assert(html.includes("该动作暂无最近 dry-run"));
 	  assert(html.includes("data-managed-action-form"));
   assert(html.includes("/api/managed-actions/dry-run"));
   assert(html.includes("mutatesOpenClawInstance"));
