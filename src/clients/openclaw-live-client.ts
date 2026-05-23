@@ -327,10 +327,12 @@ export class OpenClawLiveClient implements ToolClient {
       .join("\n\n")
       .trim();
     const sessionKey = asString(systemPromptReport?.sessionKey) ?? request.sessionKey?.trim();
+    const status = asString(rawJson.status);
+    const ok = resolveAgentRunOk({ rawJson, status, text });
     const response: AgentRunResponse = {
-      ok: asString(rawJson.status) === "ok",
+      ok,
       runId: asString(rawJson.runId),
-      status: asString(rawJson.status),
+      status: status ?? (ok ? "ok" : undefined),
       summary: asString(rawJson.summary),
       text,
       rawText: JSON.stringify(rawJson),
@@ -594,6 +596,17 @@ export class OpenClawLiveClient implements ToolClient {
       ?? candidates[0];
     return preferred?.sessionKey ?? preferred?.key ?? input.beforeSessionKey ?? `agent:${normalizedAgentId}:main`;
   }
+}
+
+function resolveAgentRunOk(input: { rawJson: Record<string, unknown>; status?: string; text: string }): boolean {
+  const explicitOk = asBoolean(input.rawJson.ok);
+  if (explicitOk !== undefined) return explicitOk;
+  const normalizedStatus = input.status?.trim().toLowerCase();
+  if (normalizedStatus && ["ok", "success", "completed", "complete", "done"].includes(normalizedStatus)) return true;
+  if (normalizedStatus && ["error", "failed", "failure", "cancelled", "canceled", "aborted"].includes(normalizedStatus)) {
+    return false;
+  }
+  return input.text.trim().length > 0;
 }
 
 async function runJson<T>(args: string[], options?: { timeoutMs?: number; maxBuffer?: number; cwd?: string; env?: NodeJS.ProcessEnv }): Promise<T> {

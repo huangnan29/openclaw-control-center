@@ -242,6 +242,49 @@ test("agentRun passes message as a flagged argument instead of positional args",
   }
 });
 
+test("agentRun treats final payload text as success when CLI omits ok status", async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), "openclaw-agent-run-status-"));
+  const originalPath = process.env.PATH;
+  try {
+    const cliLogPath = join(tempDir, "cli.log");
+    const binDir = await installFakeOpenClawCli(
+      tempDir,
+      cliLogPath,
+      JSON.stringify({
+        status: false,
+        result: {
+          payloads: [{ text: "skill 已连通" }],
+          meta: {
+            agentMeta: {
+              sessionId: "session-1",
+              model: "gpt-test",
+            },
+            systemPromptReport: {
+              sessionKey: "agent:pandas:main",
+            },
+          },
+        },
+      }),
+    );
+    process.env.PATH = binDir + delimiter + (originalPath ?? "");
+
+    const client = new OpenClawLiveClient();
+    const response = await client.agentRun({
+      agentId: "pandas",
+      message: "检查 skill 连通性",
+      thinking: "minimal",
+      timeoutSeconds: 5,
+    });
+
+    assert.equal(response.ok, true);
+    assert.equal(response.status, "ok");
+    assert.equal(response.text, "skill 已连通");
+  } finally {
+    process.env.PATH = originalPath;
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("buildWindowsOpenClawCommandLine quotes multiline hall prompts as a single message argument", () => {
   const message = "line one\nline two with spaces & symbols \"quoted\"";
   const commandLine = buildWindowsOpenClawCommandLine("C:\\tools\\openclaw.cmd", [
