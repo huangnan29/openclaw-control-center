@@ -303,6 +303,9 @@ export class OpenClawLiveClient implements ToolClient {
     if (request.deliver) args.push("--deliver");
     args.push("--json");
 
+    const beforeMarker = request.agentId?.trim()
+      ? await this.readLatestAgentSessionMarker(request.agentId.trim())
+      : undefined;
     const transportOptions = buildAgentRunProcessOptions(request.context);
     const rawJson = await runJson<Record<string, unknown>>(args, {
       timeoutMs: (request.timeoutSeconds && Number.isFinite(request.timeoutSeconds) && request.timeoutSeconds > 0)
@@ -318,7 +321,7 @@ export class OpenClawLiveClient implements ToolClient {
     const agentMeta = asObject(meta?.agentMeta);
     const systemPromptReport = asObject(meta?.systemPromptReport);
     const payloads = Array.isArray(result?.payloads) ? result?.payloads : [];
-    const text = payloads
+    let text = payloads
       .map((item) => {
         const payload = asObject(item);
         return asString(payload?.text)?.trim();
@@ -326,7 +329,16 @@ export class OpenClawLiveClient implements ToolClient {
       .filter((item): item is string => Boolean(item))
       .join("\n\n")
       .trim();
-    const sessionKey = asString(systemPromptReport?.sessionKey) ?? request.sessionKey?.trim();
+    const sessionKey = asString(systemPromptReport?.sessionKey)
+      ?? request.sessionKey?.trim()
+      ?? await this.resolveSessionKeyAfterRun({
+        agentId: request.agentId,
+        beforeUpdatedAtMs: beforeMarker?.updatedAtMs,
+        beforeSessionKey: beforeMarker?.sessionKey,
+      });
+    if (!text && sessionKey) {
+      text = await this.readLatestAssistantText(sessionKey) ?? "";
+    }
     const status = asString(rawJson.status);
     const ok = resolveAgentRunOk({ rawJson, status, text });
     const response: AgentRunResponse = {
@@ -352,6 +364,16 @@ export class OpenClawLiveClient implements ToolClient {
     }
 
     return response;
+  }
+
+  private async readLatestAssistantText(sessionKey: string): Promise<string | undefined> {
+    try {
+      const history = await this.sessionsHistory({ sessionKey, limit: 12 });
+      return extractLatestAssistantTextFromHistory(history.json)
+        ?? extractLatestAssistantTextFromRawHistory(history.rawText);
+    } catch {
+      return undefined;
+    }
   }
 
   async agentRunStream(
@@ -607,6 +629,51 @@ function resolveAgentRunOk(input: { rawJson: Record<string, unknown>; status?: s
     return false;
   }
   return input.text.trim().length > 0;
+}
+
+function extractLatestAssistantTextFromHistory(historyJson: unknown): string | undefined {
+  const root = asObject(historyJson);
+  const history = Array.isArray(root?.history) ? root.history : Array.isArray(historyJson) ? historyJson : [];
+  for (const entry of [...history].reverse()) {
+    const record = asObject(entry);
+    const message = asObject(record?.message) ?? record;
+    if (!message || asString(message.role) !== "assistant") continue;
+    const text = extractTextContent(message.content);
+    if (text) return text;
+  }
+  return undefined;
+}
+
+function extractLatestAssistantTextFromRawHistory(rawText: string | undefined): string | undefined {
+  if (!rawText) return undefined;
+  const entries = rawText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      try {
+        return JSON.parse(line) as unknown;
+      } catch {
+        return undefined;
+      }
+    })
+    .filter((item): item is unknown => item !== undefined);
+  return extractLatestAssistantTextFromHistory(entries);
+}
+
+function extractTextContent(content: unknown): string | undefined {
+  if (typeof content === "string") return content.trim() || undefined;
+  if (!Array.isArray(content)) return undefined;
+  const text = content
+    .map((item) => {
+      const block = asObject(item);
+      if (!block || asString(block.type) !== "text") return undefined;
+      return asString(block.text)?.trim();
+    })
+    .filter((item): item is string => Boolean(item))
+    .join("\n\n")
+    .trim();
+  return text || undefined;
 }
 
 async function runJson<T>(args: string[], options?: { timeoutMs?: number; maxBuffer?: number; cwd?: string; env?: NodeJS.ProcessEnv }): Promise<T> {

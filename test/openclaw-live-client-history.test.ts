@@ -242,35 +242,48 @@ test("agentRun passes message as a flagged argument instead of positional args",
   }
 });
 
-test("agentRun treats final payload text as success when CLI omits ok status", async () => {
+test("agentRun falls back to session history text when CLI omits ok payloads", async () => {
   const tempDir = await mkdtemp(join(tmpdir(), "openclaw-agent-run-status-"));
   const originalPath = process.env.PATH;
   try {
     const cliLogPath = join(tempDir, "cli.log");
-    const binDir = await installFakeOpenClawCli(
-      tempDir,
-      cliLogPath,
+    const sessionFile = join(tempDir, "session.jsonl");
+    await writeFile(
+      sessionFile,
       JSON.stringify({
-        status: false,
-        result: {
-          payloads: [{ text: "skill 已连通" }],
-          meta: {
-            agentMeta: {
-              sessionId: "session-1",
-              model: "gpt-test",
-            },
-            systemPromptReport: {
-              sessionKey: "agent:pandas:main",
-            },
-          },
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "skill 已连通" }],
         },
-      }),
+      }) + "\n",
+      "utf8",
     );
+    const binDir = join(tempDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const runnerPath = join(binDir, "openclaw");
+    await writeFile(
+      runnerPath,
+      [
+        "#!/usr/bin/env node",
+        "const fs = require('node:fs');",
+        `fs.appendFileSync(${JSON.stringify(cliLogPath)}, process.argv.slice(2).join(' ') + '\\n');`,
+        "const args = process.argv.slice(2);",
+        "if (args[0] === 'sessions') {",
+        `  process.stdout.write(JSON.stringify({ sessions: [{ key: "agent:pandas:main", agentId: "pandas", sessionId: "session-1", sessionFile: ${JSON.stringify(sessionFile)}, updatedAt: Date.now() }] }));`,
+        "} else {",
+        "  process.stdout.write(JSON.stringify({ status: false, result: { meta: { agentMeta: { sessionId: 'session-1', model: 'gpt-test' }, systemPromptReport: { sessionKey: 'agent:pandas:main' } } } }));",
+        "}",
+      ].join("\n"),
+      "utf8",
+    );
+    await chmod(runnerPath, 0o755);
     process.env.PATH = binDir + delimiter + (originalPath ?? "");
 
     const client = new OpenClawLiveClient();
+    attachSessionFile(client, "agent:pandas:main", sessionFile);
     const response = await client.agentRun({
       agentId: "pandas",
+      sessionKey: "agent:pandas:main",
       message: "检查 skill 连通性",
       thinking: "minimal",
       timeoutSeconds: 5,
