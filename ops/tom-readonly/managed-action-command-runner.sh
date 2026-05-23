@@ -220,6 +220,13 @@ function parseTextCommand(text) {
 
   const operator = extractNamedValue(normalized, ["operator", "操作者", "用户"]) || "Anan";
   const reason = extractNamedValue(normalized, ["reason", "原因"]) || `OpenClaw/Discord 文本指令 dry-run：${safeReason(normalized)}`;
+  const agentId = action === "skill_run"
+    ? extractNamedValue(normalized, ["agent", "agentId", "机器人"]) || "main"
+    : undefined;
+  const message = action === "skill_run"
+    ? extractFreeformValue(normalized, ["message", "msg", "任务", "指令"])
+      || `使用 ${skillName} 执行 OpenClaw/Discord 受控请求的最小化检查：确认 skill 可识别并返回状态；不要生成正式内容，不要生成图片，不要发布，不要操作浏览器。`
+    : undefined;
   return buildPayload({
     instanceId,
     action,
@@ -227,6 +234,9 @@ function parseTextCommand(text) {
     reason,
     confirmedText: dryRunConfirmation,
     ...(skillName ? { skillName } : {}),
+    ...(agentId ? { agentId } : {}),
+    ...(message ? { message } : {}),
+    ...(action === "skill_run" ? { timeoutSeconds: 90, deliver: false } : {}),
   });
 }
 
@@ -235,6 +245,15 @@ function extractNamedValue(text, names) {
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const match = text.match(new RegExp(`${escaped}\\s*[:=：]\\s*([A-Za-z0-9_-]+)`, "i"));
     if (match?.[1]) return match[1].trim();
+  }
+  return undefined;
+}
+
+function extractFreeformValue(text, names) {
+  for (const name of names) {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const match = text.match(new RegExp(`${escaped}\\s*[:=：]\\s*(.+)$`, "i"));
+    if (match?.[1]) return match[1].trim().slice(0, 360);
   }
   return undefined;
 }
@@ -543,6 +562,7 @@ async function dryRunReport(payload, inputKind = "json") {
       ...(payload.sessionKey ? { sessionKey: payload.sessionKey } : {}),
       ...(payload.sessionId ? { sessionId: payload.sessionId } : {}),
     },
+    payload: safePayloadForOutput(payload),
     dryRunApi: {
       statusCode: result.statusCode,
       body: result.body,

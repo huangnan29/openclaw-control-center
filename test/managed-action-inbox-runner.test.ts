@@ -62,6 +62,18 @@ if (mode === "dry-run") {
     status: "bridge_dry_run_completed",
     runnerStatus: "dry_run_completed",
     target: { instanceId: "tom", action: "skill_run", skillName: "zhihu-human-ops-writing" },
+    payload: {
+      instanceId: "tom",
+      action: "skill_run",
+      operator: "Anan",
+      reason: "fake dry-run",
+      confirmedText: "DRY-RUN-ONLY",
+      skillName: "zhihu-human-ops-writing",
+      agentId: "main",
+      message: "只做受控 skill_run 测试，不发布。",
+      timeoutSeconds: 90,
+      deliver: false
+    },
     operationRequestId: "inbox-fake-dry-run",
     commandPreview: ["openclaw skill dry-run for instance tom: zhihu-human-ops-writing"],
     safety: commonSafety,
@@ -78,6 +90,70 @@ NODE
   return { bridge, log };
 }
 
+async function makeFakeCommandRunner(dir: string): Promise<{ runner: string; log: string }> {
+  const runner = join(dir, "fake-managed-action-command-runner.sh");
+  const log = join(dir, "fake-command-runner-call.jsonl");
+  await writeFile(
+    runner,
+    `#!/usr/bin/env bash
+set -euo pipefail
+mode="$1"
+file="$2"
+node - "$mode" "$file" "$FAKE_COMMAND_RUNNER_CALL_LOG" <<'NODE'
+const fs = require("node:fs");
+const mode = process.argv[2];
+const file = process.argv[3];
+const logPath = process.argv[4];
+const command = JSON.parse(fs.readFileSync(file, "utf8"));
+fs.appendFileSync(logPath, JSON.stringify({
+  mode,
+  file,
+  command,
+  confirmLive: process.env.CONFIRM_MANAGED_ACTION_COMMAND_LIVE || "",
+  confirmSkillRunLive: process.env.CONFIRM_MANAGED_ACTION_COMMAND_SKILL_RUN_LIVE || "",
+  tokenSource: process.env.MANAGED_ACTION_COMMAND_TOKEN_SOURCE || "",
+  hasLocalToken: Boolean(process.env.LOCAL_API_TOKEN),
+}) + "\\n");
+if (mode === "live") {
+  console.log(JSON.stringify({
+    status: "live_completed",
+    target: {
+      instanceId: command.instanceId,
+      action: command.action,
+      operator: command.operator,
+      operationRequestId: command.operationRequestId,
+      skillName: command.skillName,
+      agentId: command.agentId,
+    },
+    liveApi: {
+      statusCode: 200,
+      body: {
+        ok: true,
+        status: "executed_skill_run",
+        liveExecution: true,
+        message: "Skill run completed for tom: skill=zhihu-human-ops-writing, status=ok.",
+        safety: { mutatesOpenClawInstance: true },
+      },
+    },
+    safety: {
+      callsManagedActionsLiveApi: true,
+      mutatesOpenClawInstance: true,
+      writesOpenClawInstanceDirs: false,
+      restartsOpenClawInstances: false,
+    },
+  }));
+  process.exit(0);
+}
+console.log(JSON.stringify({ status: "blocked_fake_unknown_mode" }));
+process.exit(2);
+NODE
+`,
+    "utf8",
+  );
+  await chmod(runner, 0o755);
+  return { runner, log };
+}
+
 async function writeInboxCommand(inbox: string, name: string, text = "对 tom 运行 zhihu-human-ops-writing dry-run"): Promise<string> {
   await mkdir(inbox, { recursive: true });
   const file = join(inbox, name);
@@ -86,7 +162,7 @@ async function writeInboxCommand(inbox: string, name: string, text = "对 tom �
 }
 
 function runInbox(
-  mode: "status" | "plan-next" | "run-next" | "run-pending",
+  mode: "status" | "plan-next" | "run-next" | "run-pending" | "run-live-next",
   env: Record<string, string>,
 ) {
   const result = spawnSync(SCRIPT, [mode], {
@@ -129,6 +205,61 @@ test("managed action inbox runner status 只列出待处理请求且不调用桥
     assert.equal(report.safety.writesOpenClawInstanceDirs, false);
     assert.equal(existsSync(log), false);
     assert.doesNotMatch(stdout, /api\/managed-actions\/live/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("managed action inbox runner run-live-next 晋升最近成功 dry-run 并调用 live runner", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openclaw-managed-action-inbox-live-"));
+  try {
+    const inbox = join(dir, "inbox");
+    const runtime = join(dir, "runtime");
+    await writeInboxCommand(inbox, "001.txt");
+    const { bridge, log: bridgeLog } = await makeFakeBridge(dir);
+    const { runner, log: runnerLog } = await makeFakeCommandRunner(dir);
+
+    const dry = runInbox("run-next", {
+      RUNTIME_DIR: runtime,
+      MANAGED_ACTION_INBOX_DIR: inbox,
+      MANAGED_ACTION_TEXT_BRIDGE: bridge,
+      FAKE_BRIDGE_CALL_LOG: bridgeLog,
+      CONFIRM_MANAGED_ACTION_INBOX_RUNNER: "I_UNDERSTAND_THIS_READS_OPENCLAW_INBOX_AND_RUNS_DRY_RUN_TEXT",
+      MANAGED_ACTION_COMMAND_TOKEN_SOURCE: "container",
+      LOCAL_API_TOKEN: "test-token",
+    });
+    assert.equal(dry.exitCode, 0);
+
+    const { exitCode, report, stdout } = runInbox("run-live-next", {
+      RUNTIME_DIR: runtime,
+      MANAGED_ACTION_INBOX_DIR: inbox,
+      MANAGED_ACTION_COMMAND_RUNNER: runner,
+      FAKE_COMMAND_RUNNER_CALL_LOG: runnerLog,
+      CONFIRM_MANAGED_ACTION_INBOX_LIVE_RUNNER: "I_UNDERSTAND_THIS_PROMOTES_LATEST_INBOX_DRY_RUN_TO_SKILL_RUN_LIVE",
+      MANAGED_ACTION_COMMAND_TOKEN_SOURCE: "container",
+      LOCAL_API_TOKEN: "test-token",
+    });
+
+    assert.equal(exitCode, 0);
+    assert.equal(report.status, "inbox_live_completed");
+    assert.equal(report.liveStatus, "live_completed");
+    assert.equal(report.operationRequestId, "inbox-fake-dry-run");
+    assert.equal(report.safety.callsManagedActionsLiveApi, true);
+    assert.equal(report.safety.mutatesOpenClawInstance, true);
+    assert.equal(report.safety.writesOpenClawInstanceDirs, false);
+    assert.doesNotMatch(stdout, /test-token/);
+
+    const call = JSON.parse((await readFile(runnerLog, "utf8")).trim());
+    assert.equal(call.mode, "live");
+    assert.equal(call.command.operationRequestId, "inbox-fake-dry-run");
+    assert.equal(call.command.skillName, "zhihu-human-ops-writing");
+    assert.equal(call.command.agentId, "main");
+    assert.equal(call.tokenSource, "container");
+    assert.equal(call.confirmLive, "I_UNDERSTAND_THIS_CALLS_MANAGED_ACTION_LIVE_API");
+    assert.equal(call.confirmSkillRunLive, "I_UNDERSTAND_THIS_MAY_RUN_OPENCLAW_SKILL_ON_ALLOWED_INSTANCE");
+
+    const liveResults = readdirSync(join(runtime, "managed-action-inbox-runner", "live-results"));
+    assert.equal(liveResults.length, 1);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

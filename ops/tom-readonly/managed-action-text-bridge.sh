@@ -194,6 +194,7 @@ try {
 
 const runnerSafety = runnerReport?.safety || {};
 const target = runnerReport?.target || runnerReport?.command || undefined;
+const payload = runnerReport?.payload || runnerReport?.command || undefined;
 const operationRequestId = runnerReport?.dryRunApi?.body?.review?.operationRequestId
   || runnerReport?.review?.operationRequestId
   || undefined;
@@ -215,6 +216,7 @@ console.log(JSON.stringify({
   inputPath: process.env.COMMAND_FILE,
   inputPreview: process.env.TEXT_PREVIEW,
   ...(target ? { target } : {}),
+  ...(payload ? { payload } : {}),
   ...(operationRequestId ? { operationRequestId } : {}),
   ...(commandPreview.length ? { commandPreview } : {}),
   ...(ok ? {} : {

@@ -129,7 +129,7 @@ function renderBlock() {
     `1. 只写入 inbox 文本请求：先创建 \`${inboxPath}\`，再把 Anan 的原始请求逐字写入一个新的 \`.txt\` 文件。建议文件名使用 UTC 时间，例如 \`$(date -u +%Y%m%dT%H%M%SZ)-managed-action.txt\`。`,
     "2. 文本必须明确包含 `dry-run`、`预览` 或 `演练`；如果 Anan 的话没有这些词，先询问是否只做 dry-run，不要写成真实执行。",
     "3. 如果文本包含 `发布`、`真实执行`、`live`、`重启`、`approval`、`批准` 等高风险词，只说明该请求会被 control-center 阻断，不要声称已经执行。",
-    "4. 写入 inbox 后，向 Anan 回报 inbox 文件路径，并说明 host 侧会用 `managed-action-inbox-runner.sh status/plan-next/run-next` 读取并创建 dry-run 审计。",
+    "4. 写入 inbox 后，向 Anan 回报 inbox 文件路径，并说明 host 侧会用 `managed-action-inbox-runner.sh status/plan-next/run-next` 读取并创建 dry-run 审计；真实 live 只能由 host 侧在 dry-run 成功后用 `run-live-next` 晋升。",
     "5. 不要调用 control-center API，不要读取或输出 LOCAL_API_TOKEN，不能把令牌写进日志或 Discord；不要打开 live gate，不要重启任何 OpenClaw 实例，不要删除或移动 inbox 请求文件。",
     "6. control-center 返回 dry-run 结果后，只汇报 `status`、`runnerStatus`、`operationRequestId`、`commandPreview` 和安全字段；不要把 dry-run 说成真实执行完成。",
     "",

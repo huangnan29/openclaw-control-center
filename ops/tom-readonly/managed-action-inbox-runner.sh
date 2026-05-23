@@ -4,7 +4,7 @@ set +x
 
 # OpenClaw/Discord 文本请求 inbox runner。
 # 它只读取 OpenClaw workspace 中的请求文本，把执行结果写入 control-center runtime，
-# 再交给 managed-action-text-bridge.sh 执行 parse/plan/dry-run。
+# 再交给 managed-action-text-bridge.sh 执行 parse/plan/dry-run；live 只能复用已完成 dry-run 审计。
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_DEPLOY_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
@@ -16,7 +16,9 @@ export RUNTIME_DIR="${RUNTIME_DIR:-${DEPLOY_DIR}/runtime}"
 export MANAGED_ACTION_INBOX_DIR="${MANAGED_ACTION_INBOX_DIR:-${RUNTIME_DIR}/managed-action-inbox}"
 export MANAGED_ACTION_INBOX_SOURCE="${MANAGED_ACTION_INBOX_SOURCE:-local}"
 export MANAGED_ACTION_TEXT_BRIDGE="${MANAGED_ACTION_TEXT_BRIDGE:-${SCRIPT_DIR}/managed-action-text-bridge.sh}"
+export MANAGED_ACTION_COMMAND_RUNNER="${MANAGED_ACTION_COMMAND_RUNNER:-${SCRIPT_DIR}/managed-action-command-runner.sh}"
 export CONFIRM_MANAGED_ACTION_INBOX_RUNNER="${CONFIRM_MANAGED_ACTION_INBOX_RUNNER:-}"
+export CONFIRM_MANAGED_ACTION_INBOX_LIVE_RUNNER="${CONFIRM_MANAGED_ACTION_INBOX_LIVE_RUNNER:-}"
 export MODE_NAME="${1:-status}"
 
 usage() {
@@ -26,6 +28,7 @@ usage() {
   managed-action-inbox-runner.sh plan-next
   managed-action-inbox-runner.sh run-next
   managed-action-inbox-runner.sh run-pending
+  managed-action-inbox-runner.sh run-live-next
 
 常用环境变量：
   MANAGED_ACTION_INBOX_DIR=<inbox 目录>
@@ -36,10 +39,14 @@ usage() {
 run-next/run-pending 必须设置：
   CONFIRM_MANAGED_ACTION_INBOX_RUNNER=I_UNDERSTAND_THIS_READS_OPENCLAW_INBOX_AND_RUNS_DRY_RUN_TEXT
 
+run-live-next 必须设置：
+  CONFIRM_MANAGED_ACTION_INBOX_LIVE_RUNNER=I_UNDERSTAND_THIS_PROMOTES_LATEST_INBOX_DRY_RUN_TO_SKILL_RUN_LIVE
+
 安全边界：
   - 只读取 inbox 中的 .txt 请求。
   - 结果和处理状态只写 control-center runtime。
   - run-next/run-pending 只调用 managed-action-text-bridge.sh dry-run。
+  - run-live-next 只会读取最近一次成功 dry-run 结果，并显式调用 managed-action-command-runner.sh live。
   - 不修改 OpenClaw 实例目录，不重启实例，不打开 live gate。
 TEXT
 }
@@ -63,13 +70,17 @@ const runtimeDir = process.env.RUNTIME_DIR || path.join(deployDir, "runtime");
 const inboxDir = process.env.MANAGED_ACTION_INBOX_DIR || path.join(runtimeDir, "managed-action-inbox");
 const inboxSource = process.env.MANAGED_ACTION_INBOX_SOURCE || "local";
 const bridgeScript = process.env.MANAGED_ACTION_TEXT_BRIDGE || path.join(deployDir, "repo", "ops", "tom-readonly", "managed-action-text-bridge.sh");
+const commandRunnerScript = process.env.MANAGED_ACTION_COMMAND_RUNNER || path.join(deployDir, "repo", "ops", "tom-readonly", "managed-action-command-runner.sh");
 const confirmRunner = process.env.CONFIRM_MANAGED_ACTION_INBOX_RUNNER || "";
+const confirmLiveRunner = process.env.CONFIRM_MANAGED_ACTION_INBOX_LIVE_RUNNER || "";
 const maxPerRun = Math.max(1, Number.parseInt(process.env.MANAGED_ACTION_INBOX_MAX_PER_RUN || "10", 10) || 10);
 const runnerConfirmation = "I_UNDERSTAND_THIS_READS_OPENCLAW_INBOX_AND_RUNS_DRY_RUN_TEXT";
+const liveRunnerConfirmation = "I_UNDERSTAND_THIS_PROMOTES_LATEST_INBOX_DRY_RUN_TO_SKILL_RUN_LIVE";
 const bridgeConfirmation = "I_UNDERSTAND_THIS_ONLY_RUNS_MANAGED_ACTION_DRY_RUN_TEXT";
 const stateDir = path.join(runtimeDir, "managed-action-inbox-runner");
 const statePath = path.join(stateDir, "state.json");
 const resultsDir = path.join(stateDir, "results");
+const liveResultsDir = path.join(stateDir, "live-results");
 
 function compactLines(text, limit = 40) {
   return String(text || "")
@@ -111,6 +122,7 @@ function blocked(status, issue, extra = {}, exitCode = 2) {
       "repo/ops/tom-readonly/managed-action-inbox-runner.sh plan-next",
       `CONFIRM_MANAGED_ACTION_INBOX_RUNNER=${runnerConfirmation} MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container repo/ops/tom-readonly/managed-action-inbox-runner.sh run-next`,
       `CONFIRM_MANAGED_ACTION_INBOX_RUNNER=${runnerConfirmation} MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container repo/ops/tom-readonly/managed-action-inbox-runner.sh run-pending`,
+      `CONFIRM_MANAGED_ACTION_INBOX_LIVE_RUNNER=${liveRunnerConfirmation} CONFIRM_MANAGED_ACTION_COMMAND_LIVE=I_UNDERSTAND_THIS_CALLS_MANAGED_ACTION_LIVE_API CONFIRM_MANAGED_ACTION_COMMAND_SKILL_RUN_LIVE=I_UNDERSTAND_THIS_MAY_RUN_OPENCLAW_SKILL_ON_ALLOWED_INSTANCE MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container repo/ops/tom-readonly/managed-action-inbox-runner.sh run-live-next`,
     ],
     safety: baseSafety({
       blockedBeforeBridge: true,
@@ -120,8 +132,8 @@ function blocked(status, issue, extra = {}, exitCode = 2) {
 }
 
 function ensureMode() {
-  if (!["status", "plan-next", "run-next", "run-pending"].includes(mode)) {
-    blocked("blocked_invalid_mode", `未知模式：${mode}。支持 status、plan-next、run-next、run-pending。`);
+  if (!["status", "plan-next", "run-next", "run-pending", "run-live-next"].includes(mode)) {
+    blocked("blocked_invalid_mode", `未知模式：${mode}。支持 status、plan-next、run-next、run-pending、run-live-next。`);
   }
 }
 
@@ -271,6 +283,33 @@ function runBridge(bridgeMode, inputPath) {
   return { exitCode: typeof result.status === "number" ? result.status : 1, stdout: result.stdout, stderr: result.stderr, report };
 }
 
+function runCommandRunnerLive(commandPath) {
+  const env = {
+    ...process.env,
+    DEPLOY_DIR: deployDir,
+    RUNTIME_DIR: runtimeDir,
+    CONFIRM_MANAGED_ACTION_COMMAND_LIVE: process.env.CONFIRM_MANAGED_ACTION_COMMAND_LIVE || "I_UNDERSTAND_THIS_CALLS_MANAGED_ACTION_LIVE_API",
+    CONFIRM_MANAGED_ACTION_COMMAND_SKILL_RUN_LIVE: process.env.CONFIRM_MANAGED_ACTION_COMMAND_SKILL_RUN_LIVE || "I_UNDERSTAND_THIS_MAY_RUN_OPENCLAW_SKILL_ON_ALLOWED_INSTANCE",
+  };
+  const result = spawnSync(commandRunnerScript, ["live", commandPath], {
+    cwd: deployDir,
+    env,
+    encoding: "utf8",
+    maxBuffer: 1024 * 1024,
+  });
+  let report;
+  try {
+    report = result.stdout.trim() ? JSON.parse(result.stdout) : { status: "missing_live_runner_output" };
+  } catch (error) {
+    report = {
+      status: "invalid_live_runner_output",
+      issues: [error instanceof Error ? error.message : String(error)],
+      rawLines: compactLines(result.stdout, 40),
+    };
+  }
+  return { exitCode: typeof result.status === "number" ? result.status : 1, stdout: result.stdout, stderr: result.stderr, report };
+}
+
 function resultName(next) {
   const safeBase = path.basename(next.sourcePath).replace(/[^A-Za-z0-9_.-]+/g, "_").slice(0, 80) || "command.txt";
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -288,6 +327,25 @@ function saveResult(next, bridge, status) {
     sourceKey: next.key,
     bridgeExitCode: bridge.exitCode,
     bridgeReport: bridge.report,
+  }, null, 2));
+  return resultPath;
+}
+
+function saveLiveResult(dryRunResult, live, status, commandPath) {
+  fs.mkdirSync(liveResultsDir, { recursive: true });
+  const sourceBase = path.basename(dryRunResult.sourcePath || "inbox-dry-run").replace(/[^A-Za-z0-9_.-]+/g, "_").slice(0, 80);
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const resultPath = path.join(liveResultsDir, `${timestamp}-${sourceBase}.json`);
+  fs.writeFileSync(resultPath, JSON.stringify({
+    schemaVersion: 1,
+    status,
+    generatedAt: new Date().toISOString(),
+    sourcePath: dryRunResult.sourcePath,
+    sourceKey: dryRunResult.sourceKey,
+    dryRunResultPath: dryRunResult.resultPath,
+    liveCommandPath: commandPath,
+    liveExitCode: live.exitCode,
+    liveReport: live.report,
   }, null, 2));
   return resultPath;
 }
@@ -339,6 +397,7 @@ function summary(status, next, bridge, resultPath, extraSafety = {}) {
 
 function reportStatus() {
   const { candidates, pending, next } = findNext();
+  const latestDryRun = findLatestSuccessfulDryRunResult();
   emit({
     schemaVersion: 1,
     status: pending.length > 0 ? "inbox_status_ready" : "inbox_empty",
@@ -351,18 +410,115 @@ function reportStatus() {
     },
     pendingCount: pending.length,
     ...(next ? { next: { sourcePath: next.sourcePath, sourceKey: next.key, size: next.size } } : {}),
+    ...(latestDryRun ? {
+      latestDryRun: {
+        sourcePath: latestDryRun.sourcePath,
+        operationRequestId: latestDryRun.operationRequestId,
+        resultPath: latestDryRun.resultPath,
+      },
+    } : {}),
     nextCommands: pending.length > 0
       ? [
         "repo/ops/tom-readonly/managed-action-inbox-runner.sh plan-next",
         `CONFIRM_MANAGED_ACTION_INBOX_RUNNER=${runnerConfirmation} MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container repo/ops/tom-readonly/managed-action-inbox-runner.sh run-next`,
         `CONFIRM_MANAGED_ACTION_INBOX_RUNNER=${runnerConfirmation} MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container repo/ops/tom-readonly/managed-action-inbox-runner.sh run-pending`,
       ]
-      : [],
+      : (latestDryRun ? [`CONFIRM_MANAGED_ACTION_INBOX_LIVE_RUNNER=${liveRunnerConfirmation} CONFIRM_MANAGED_ACTION_COMMAND_LIVE=I_UNDERSTAND_THIS_CALLS_MANAGED_ACTION_LIVE_API CONFIRM_MANAGED_ACTION_COMMAND_SKILL_RUN_LIVE=I_UNDERSTAND_THIS_MAY_RUN_OPENCLAW_SKILL_ON_ALLOWED_INSTANCE MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container repo/ops/tom-readonly/managed-action-inbox-runner.sh run-live-next`] : []),
     safety: baseSafety({
       callsManagedActionsDryRunApi: false,
       writesControlCenterRuntimeOnly: false,
     }),
   });
+}
+
+function findLatestSuccessfulDryRunResult() {
+  if (!fs.existsSync(resultsDir)) return undefined;
+  const files = fs.readdirSync(resultsDir)
+    .filter((name) => name.endsWith(".json"))
+    .map((name) => path.join(resultsDir, name))
+    .sort()
+    .reverse();
+  for (const file of files) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+      const bridge = parsed.bridgeReport || {};
+      const payload = bridge.payload || bridge.command || {};
+      const operationRequestId = bridge.operationRequestId;
+      if (parsed.status !== "inbox_dry_run_completed") continue;
+      if (bridge.runnerStatus !== "dry_run_completed") continue;
+      if (!operationRequestId || !payload || payload.action !== "skill_run") continue;
+      return {
+        resultPath: file,
+        sourcePath: parsed.sourcePath,
+        sourceKey: parsed.sourceKey,
+        operationRequestId,
+        payload,
+      };
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
+}
+
+function runLiveNext() {
+  if (confirmLiveRunner !== liveRunnerConfirmation) {
+    blocked("blocked_live_confirmation_required", `run-live-next 必须设置 CONFIRM_MANAGED_ACTION_INBOX_LIVE_RUNNER=${liveRunnerConfirmation}。`);
+  }
+  const dryRunResult = findLatestSuccessfulDryRunResult();
+  if (!dryRunResult) {
+    emit({
+      schemaVersion: 1,
+      status: "blocked_no_successful_inbox_dry_run",
+      mode,
+      generatedAt: new Date().toISOString(),
+      issues: ["没有可晋升为 live 的成功 inbox dry-run 结果。"],
+      nextCommands: [
+        "repo/ops/tom-readonly/managed-action-inbox-runner.sh status",
+        `CONFIRM_MANAGED_ACTION_INBOX_RUNNER=${runnerConfirmation} MANAGED_ACTION_COMMAND_TOKEN_SOURCE=container repo/ops/tom-readonly/managed-action-inbox-runner.sh run-next`,
+      ],
+      safety: baseSafety({
+        blockedBeforeLiveApi: true,
+        callsManagedActionsLiveApi: false,
+      }),
+    }, 2);
+  }
+  fs.mkdirSync(stateDir, { recursive: true });
+  const commandPath = path.join(stateDir, "current-live-command.json");
+  fs.writeFileSync(commandPath, JSON.stringify({
+    ...dryRunResult.payload,
+    operationRequestId: dryRunResult.operationRequestId,
+  }, null, 2));
+  const live = runCommandRunnerLive(commandPath);
+  const ok = live.exitCode === 0 && live.report?.status === "live_completed";
+  const status = ok ? "inbox_live_completed" : "blocked_inbox_live";
+  const resultPath = saveLiveResult(dryRunResult, live, status, commandPath);
+  const liveSafety = live.report?.safety || {};
+  emit({
+    schemaVersion: 1,
+    status,
+    mode,
+    generatedAt: new Date().toISOString(),
+    sourcePath: dryRunResult.sourcePath,
+    sourceKey: dryRunResult.sourceKey,
+    dryRunResultPath: dryRunResult.resultPath,
+    operationRequestId: dryRunResult.operationRequestId,
+    liveStatus: live.report?.status || "unknown",
+    liveExitCode: live.exitCode,
+    ...(live.report?.target ? { target: live.report.target } : {}),
+    ...(live.report?.liveApi?.body?.message ? { message: live.report.liveApi.body.message } : {}),
+    ...(Array.isArray(live.report?.issues) ? { issues: live.report.issues } : {}),
+    resultPath,
+    safety: baseSafety({
+      writesControlCenterRuntimeOnly: true,
+      callsManagedActionsLiveApi: liveSafety.callsManagedActionsLiveApi === true,
+      writesOpenClawInstanceDirs: liveSafety.writesOpenClawInstanceDirs === true,
+      restartsOpenClawInstances: liveSafety.restartsOpenClawInstances === true,
+      mutatesOpenClawInstance: liveSafety.mutatesOpenClawInstance === true,
+      opensLiveGate: false,
+      requiresLiveConfirmation: true,
+    }),
+  }, ok ? 0 : 2);
 }
 
 function planNext() {
@@ -504,4 +660,5 @@ if (mode === "status") reportStatus();
 if (mode === "plan-next") planNext();
 if (mode === "run-next") runNext();
 if (mode === "run-pending") runPending();
+if (mode === "run-live-next") runLiveNext();
 NODE

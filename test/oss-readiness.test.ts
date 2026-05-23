@@ -672,13 +672,17 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(managedActionInboxRunnerText, /managed-action-inbox-runner\.sh plan-next/);
   assert.match(managedActionInboxRunnerText, /managed-action-inbox-runner\.sh run-next/);
   assert.match(managedActionInboxRunnerText, /managed-action-inbox-runner\.sh run-pending/);
+  assert.match(managedActionInboxRunnerText, /managed-action-inbox-runner\.sh run-live-next/);
   assert.match(managedActionInboxRunnerText, /MANAGED_ACTION_INBOX_DIR/);
   assert.match(managedActionInboxRunnerText, /MANAGED_ACTION_INBOX_SOURCE/);
   assert.match(managedActionInboxRunnerText, /MANAGED_ACTION_INBOX_MAX_PER_RUN/);
   assert.match(managedActionInboxRunnerText, /control-center-container/);
   assert.match(managedActionInboxRunnerText, /CONFIRM_MANAGED_ACTION_INBOX_RUNNER/);
+  assert.match(managedActionInboxRunnerText, /CONFIRM_MANAGED_ACTION_INBOX_LIVE_RUNNER/);
   assert.match(managedActionInboxRunnerText, /I_UNDERSTAND_THIS_READS_OPENCLAW_INBOX_AND_RUNS_DRY_RUN_TEXT/);
+  assert.match(managedActionInboxRunnerText, /I_UNDERSTAND_THIS_PROMOTES_LATEST_INBOX_DRY_RUN_TO_SKILL_RUN_LIVE/);
   assert.match(managedActionInboxRunnerText, /managed-action-text-bridge\.sh/);
+  assert.match(managedActionInboxRunnerText, /managed-action-command-runner\.sh/);
   assert.match(managedActionInboxRunnerText, /readsOpenClawInboxOnly/);
   assert.match(managedActionInboxRunnerText, /writesControlCenterRuntimeOnly/);
   assert.match(managedActionInboxRunnerText, /callsManagedActionsLiveApi: false/);
