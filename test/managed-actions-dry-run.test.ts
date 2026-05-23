@@ -385,3 +385,137 @@ test("managed action live route executes readonly healthcheck only when executor
     }
   }
 });
+
+test("managed action live route executes collector refresh when explicitly allowed", async () => {
+  const previousInstancesJson = process.env.OPENCLAW_INSTANCES_JSON;
+  const previousInstancesFile = process.env.OPENCLAW_INSTANCES_FILE;
+  process.env.OPENCLAW_INSTANCES_JSON = JSON.stringify({
+    instances: [instance("tom")],
+  });
+  delete process.env.OPENCLAW_INSTANCES_FILE;
+
+  const executed: Array<{ action: string; instanceId: string; operationRequestId: string }> = [];
+  const server = startUiServer(0, new ReadonlyToolClient(), {
+    readonlyMode: false,
+    localTokenAuthRequired: false,
+    managedActionLiveGate: {
+      enabled: true,
+      readonlyMode: false,
+      allowedActions: ["collector_refresh"],
+      requiredConfirmationText: "LIVE-ACTION-APPROVED",
+    },
+    managedActionProductionExecutorEnabled: true,
+    managedActionExecutor: {
+      async collector_refresh(input) {
+        executed.push({
+          action: input.action,
+          instanceId: input.instance.id,
+          operationRequestId: input.operationRequestId,
+        });
+        return {
+          ok: true,
+          status: "executed_collector_refresh",
+          liveExecution: true,
+          mutatesOpenClawInstance: false,
+          action: input.action,
+          targetInstanceId: input.instance.id,
+          operationRequestId: input.operationRequestId,
+          detail: `Collector refresh completed for ${input.instance.id}.`,
+        };
+      },
+    },
+    managedActionLiveRolloutConfig: {
+      source: "file",
+      path: "/tmp/test-rollout-collector.json",
+      enabled: true,
+      issues: [],
+      rules: [
+        {
+          action: "collector_refresh",
+          instanceId: "tom",
+          operators: ["Anan"],
+          risk: "low",
+          enabled: true,
+          maxDryRunAgeMinutes: 60,
+        },
+      ],
+    },
+  });
+
+  try {
+    if (!server.listening) {
+      await new Promise<void>((resolve, reject) => {
+        server.once("listening", resolve);
+        server.once("error", reject);
+      });
+    }
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Failed to bind ephemeral UI port.");
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+
+    const dryRunResponse = await fetch(`${baseUrl}/api/managed-actions/dry-run`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        instanceId: "tom",
+        action: "collector_refresh",
+        operator: "Anan",
+        reason: "真实刷新 collector 前的 dry-run 引用",
+        confirmedText: "DRY-RUN-ONLY",
+      }),
+    });
+    assert.equal(dryRunResponse.status, 200);
+    const dryRun = await dryRunResponse.json() as { review: { operationRequestId: string } };
+
+    const liveResponse = await fetch(`${baseUrl}/api/managed-actions/live`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        instanceId: "tom",
+        action: "collector_refresh",
+        operator: "Anan",
+        reason: "显式开关打开后的 collector 刷新",
+        operationRequestId: dryRun.review.operationRequestId,
+        confirmedText: "LIVE-ACTION-APPROVED",
+      }),
+    });
+    assert.equal(liveResponse.status, 200);
+    const live = await liveResponse.json() as {
+      ok: boolean;
+      status: string;
+      liveExecution: boolean;
+      rollout: { allowed: boolean; status: string };
+      dryRunReference: { valid: boolean; status: string };
+      safety: { mutatesOpenClawInstance: boolean };
+    };
+    assert.equal(live.ok, true);
+    assert.equal(live.status, "executed_collector_refresh");
+    assert.equal(live.liveExecution, true);
+    assert.equal(live.rollout.allowed, true);
+    assert.equal(live.rollout.status, "allowed");
+    assert.equal(live.dryRunReference.valid, true);
+    assert.equal(live.dryRunReference.status, "valid");
+    assert.equal(live.safety.mutatesOpenClawInstance, false);
+    assert.deepEqual(executed, [
+      {
+        action: "collector_refresh",
+        instanceId: "tom",
+        operationRequestId: dryRun.review.operationRequestId,
+      },
+    ]);
+  } finally {
+    if (server.listening) {
+      await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+    }
+    if (previousInstancesJson === undefined) {
+      delete process.env.OPENCLAW_INSTANCES_JSON;
+    } else {
+      process.env.OPENCLAW_INSTANCES_JSON = previousInstancesJson;
+    }
+    if (previousInstancesFile === undefined) {
+      delete process.env.OPENCLAW_INSTANCES_FILE;
+    } else {
+      process.env.OPENCLAW_INSTANCES_FILE = previousInstancesFile;
+    }
+  }
+});

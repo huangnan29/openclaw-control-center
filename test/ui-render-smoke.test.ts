@@ -310,6 +310,11 @@ test("multi-instance overview renders status metrics detail links and selected s
   assert(html.includes("该动作暂无最近 dry-run"));
   assert(html.includes("data-managed-action-form"));
   assert(html.includes("/api/managed-actions/dry-run"));
+  assert(html.includes("data-managed-action-live-form"));
+  assert(html.includes("/api/managed-actions/live"));
+  assert(html.includes("受控真实执行"));
+  assert(html.includes("Dry-run 请求号"));
+  assert(html.includes("LIVE-ACTION-APPROVED"));
   assert(html.includes("mutatesOpenClawInstance"));
   assert(html.includes("操作者"));
   assert(html.includes("确认短语"));

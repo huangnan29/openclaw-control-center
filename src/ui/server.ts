@@ -60,6 +60,7 @@ import {
 import { buildManagedActionLiveAuditEntry } from "../runtime/managed-action-live-audit";
 import {
   evaluateManagedActionLiveGate,
+  MANAGED_ACTION_LIVE_CONFIRMATION,
   runtimeManagedActionLiveGate,
   type ManagedActionLiveGate,
 } from "../runtime/managed-action-live";
@@ -9442,7 +9443,8 @@ function renderMultiInstanceOverview(
     .control-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; align-items: end; }
     .control-field { display: grid; gap: 5px; }
 	    .control-field label { color: var(--muted); font-size: 12px; font-weight: 600; }
-	    .control-field select, .control-field input { width: 100%; min-height: 38px; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font: inherit; background: #fff; color: var(--text); }
+	    .control-field select, .control-field input, .control-field textarea { width: 100%; min-height: 38px; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font: inherit; background: #fff; color: var(--text); }
+    .control-field textarea { min-height: 76px; resize: vertical; }
 	    .control-field button { min-height: 38px; border: 1px solid rgba(0, 113, 227, 0.45); border-radius: 8px; padding: 8px 12px; font: inherit; font-weight: 700; color: #005cb9; background: #eff8ff; cursor: pointer; }
 	    .action-console { display: grid; gap: 10px; margin: 0 0 12px; }
 	    .action-console-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; align-items: center; }
@@ -9457,6 +9459,9 @@ function renderMultiInstanceOverview(
 	    .action-preset-meta { display: flex; flex-wrap: wrap; gap: 6px; color: var(--muted); font-size: 11px; }
 	    .action-preset-meta span { border: 1px solid rgba(17, 24, 39, 0.1); border-radius: 999px; padding: 3px 7px; background: rgba(255, 255, 255, 0.72); }
 	    .action-preset-last { display: block; min-height: 16px; color: var(--muted); font-size: 11px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .live-action-box { margin-top: 12px; border-top: 1px solid rgba(17, 24, 39, 0.08); padding-top: 12px; display: grid; gap: 10px; }
+    .live-action-head { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+    .live-action-head h3 { margin: 0 0 4px; font-size: 14px; letter-spacing: 0; }
 	    .action-result { margin: 10px 0 0; white-space: pre-wrap; border: 1px solid var(--border); border-radius: 8px; padding: 10px; background: #f9fafb; color: #344054; font-size: 12px; overflow-x: auto; }
     .action-result.ok { border-color: rgba(22, 163, 74, 0.28); background: #f0fdf4; color: #05603a; }
     .action-result.error { border-color: rgba(220, 38, 38, 0.28); background: #fef3f2; color: #b42318; }
@@ -9555,7 +9560,90 @@ function renderManagedActionDryRunPanel(
       </div>
       <pre class="action-result" data-managed-action-result hidden></pre>
 	    </form>
+    ${renderManagedActionLiveControlPanel(instances, language, selectedInstanceId, readiness)}
 	  </section>`;
+}
+
+function renderManagedActionLiveControlPanel(
+  instances: InstanceSnapshot[],
+  language: UiLanguage,
+  selectedInstanceId?: string,
+  readiness?: ManagedActionLiveReadinessSnapshot,
+): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const instanceOptions = instances
+    .map((item) => {
+      const selected = item.instance.id === selectedInstanceId ? " selected" : "";
+      const label = `${item.instance.name} (${item.instance.id})`;
+      return `<option value="${escapeHtml(item.instance.id)}"${selected}>${escapeHtml(label)}</option>`;
+    })
+    .join("");
+  const actionOptions = listManagedActions()
+    .map(
+      (action) =>
+        `<option value="${escapeHtml(action.action)}">${escapeHtml(managedActionUiLabel(action.action, language))}</option>`,
+    )
+    .join("");
+  const liveReady = readiness?.status === "ready";
+  const badgeClass = liveReady ? "connected" : "error";
+  const badgeLabel = liveReady ? t("live ready", "live 就绪") : t("blocked by gate", "闸门阻断");
+  return `<div class="live-action-box">
+    <div class="live-action-head">
+      <div>
+        <h3>${escapeHtml(t("Controlled live request", "受控真实执行"))}</h3>
+        <div class="meta">${escapeHtml(t("Manual submit only. Requires a dry-run operation id, local token, live confirmation phrase, whitelist, rollout rule, and executor readiness.", "仅人工提交。必须具备 dry-run 请求号、本地令牌、live 确认短语、白名单、灰度规则与执行器就绪。"))}</div>
+      </div>
+      ${badge(badgeClass, badgeLabel)}
+    </div>
+    <form data-managed-action-live-form>
+      <div class="control-grid">
+        <div class="control-field">
+          <label for="managed-action-live-instance">${escapeHtml(t("Instance", "实例"))}</label>
+          <select id="managed-action-live-instance" name="instanceId" required>${instanceOptions}</select>
+        </div>
+        <div class="control-field">
+          <label for="managed-action-live-name">${escapeHtml(t("Action", "动作"))}</label>
+          <select id="managed-action-live-name" name="action" required>${actionOptions}</select>
+        </div>
+        <div class="control-field">
+          <label for="managed-action-live-request">${escapeHtml(t("Dry-run operation id", "Dry-run 请求号"))}</label>
+          <input id="managed-action-live-request" name="operationRequestId" type="text" autocomplete="off" required placeholder="operationRequestId" />
+        </div>
+        <div class="control-field">
+          <label for="managed-action-live-operator">${escapeHtml(t("Operator", "操作者"))}</label>
+          <input id="managed-action-live-operator" name="operator" type="text" autocomplete="name" required />
+        </div>
+        <div class="control-field">
+          <label for="managed-action-live-reason">${escapeHtml(t("Reason", "原因"))}</label>
+          <input id="managed-action-live-reason" name="reason" type="text" autocomplete="off" required />
+        </div>
+        <div class="control-field">
+          <label for="managed-action-live-confirmed">${escapeHtml(t("Live confirmation", "Live 确认短语"))}</label>
+          <input id="managed-action-live-confirmed" name="confirmedText" type="text" autocomplete="off" required placeholder="${escapeHtml(MANAGED_ACTION_LIVE_CONFIRMATION)}" />
+        </div>
+        <div class="control-field">
+          <label for="managed-action-live-token">${escapeHtml(t("Local token", "本地令牌"))}</label>
+          <input id="managed-action-live-token" name="localToken" type="password" autocomplete="current-password" />
+        </div>
+        <div class="control-field">
+          <label for="managed-action-live-skill">${escapeHtml(t("Skill", "Skill"))}</label>
+          <input id="managed-action-live-skill" name="skillName" type="text" autocomplete="off" placeholder="${escapeHtml(t("Only needed for skill_run", "仅 skill_run 需要"))}" />
+        </div>
+        <div class="control-field">
+          <label for="managed-action-live-agent">${escapeHtml(t("Agent", "Agent"))}</label>
+          <input id="managed-action-live-agent" name="agentId" type="text" autocomplete="off" placeholder="${escapeHtml(t("Only needed for skill_run", "仅 skill_run 需要"))}" />
+        </div>
+        <div class="control-field">
+          <label for="managed-action-live-message">${escapeHtml(t("Message", "消息"))}</label>
+          <textarea id="managed-action-live-message" name="message" autocomplete="off" placeholder="${escapeHtml(t("Only needed for skill_run", "仅 skill_run 需要"))}"></textarea>
+        </div>
+        <div class="control-field">
+          <button type="submit">${escapeHtml(t("Submit live request", "提交 live 请求"))}</button>
+        </div>
+      </div>
+      <pre class="action-result" data-managed-action-live-result hidden></pre>
+    </form>
+  </div>`;
 }
 
 function renderManagedActionPresetConsole(
@@ -9787,12 +9875,20 @@ function renderManagedActionDryRunScript(language: UiLanguage): string {
     operator: pickUiText(language, "Operator", "操作者"),
     commandPreview: pickUiText(language, "Command preview", "命令预览"),
     dryRun: "dry-run",
+    liveLoading: pickUiText(language, "Submitting live request...", "正在提交 live 请求..."),
+    liveFailed: pickUiText(language, "Live request failed", "Live 请求失败"),
+    message: pickUiText(language, "Message", "消息"),
     noCommand: pickUiText(language, "No command preview returned.", "没有返回命令预览。"),
   }).replace(/</g, "\\u003c");
   return `<script>
 (() => {
   const copy = ${copy};
-  const forms = Array.from(document.querySelectorAll("[data-managed-action-form]"));
+  const dryRunForms = Array.from(document.querySelectorAll("[data-managed-action-form]"));
+  const liveForms = Array.from(document.querySelectorAll("[data-managed-action-live-form]"));
+  const setFieldValue = (form, name, value) => {
+    const field = form.querySelector('[name="' + name + '"]');
+    if (field && "value" in field) field.value = value == null ? "" : String(value);
+  };
   const fillManagedActionForm = (form, button) => {
     const instanceSelect = form.querySelector('[name="instanceId"]');
     const actionSelect = form.querySelector('[name="action"]');
@@ -9814,14 +9910,25 @@ function renderManagedActionDryRunScript(language: UiLanguage): string {
       form.scrollIntoView({ behavior: "smooth", block: "start" });
     }
   };
+  const fillManagedActionLiveForm = (body, payload) => {
+    const form = liveForms[0];
+    if (!(form instanceof HTMLFormElement)) return;
+    setFieldValue(form, "instanceId", body?.target?.instanceId || payload.instanceId);
+    setFieldValue(form, "action", body?.action || payload.action);
+    setFieldValue(form, "operationRequestId", body?.review?.operationRequestId || "");
+    setFieldValue(form, "operator", body?.review?.operator || payload.operator);
+    setFieldValue(form, "reason", payload.reason);
+    setFieldValue(form, "skillName", payload.skillName);
+    setFieldValue(form, "confirmedText", "");
+  };
   Array.from(document.querySelectorAll("[data-managed-action-preset]")).forEach((button) => {
     button.addEventListener("click", () => {
-      const form = button.closest("form") || forms[0];
+      const form = button.closest("form") || dryRunForms[0];
       if (!(form instanceof HTMLFormElement)) return;
       fillManagedActionForm(form, button);
     });
   });
-  forms.forEach((form) => {
+  dryRunForms.forEach((form) => {
     const resultNode = form.querySelector("[data-managed-action-result]");
     if (!(form instanceof HTMLFormElement) || !(resultNode instanceof HTMLElement)) return;
     form.addEventListener("submit", async (event) => {
@@ -9865,9 +9972,57 @@ function renderManagedActionDryRunScript(language: UiLanguage): string {
           copy.commandPreview + ":",
           commands,
         ].join("\\n");
+        fillManagedActionLiveForm(body, payload);
       } catch (error) {
         resultNode.classList.add("error");
         resultNode.textContent = copy.failed + "\\n" + String(error && error.message ? error.message : error);
+      }
+    });
+  });
+  liveForms.forEach((form) => {
+    const resultNode = form.querySelector("[data-managed-action-live-result]");
+    if (!(form instanceof HTMLFormElement) || !(resultNode instanceof HTMLElement)) return;
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      resultNode.hidden = false;
+      resultNode.classList.remove("ok", "error");
+      resultNode.textContent = copy.liveLoading;
+      const data = new FormData(form);
+      const payload = {
+        instanceId: String(data.get("instanceId") || ""),
+        action: String(data.get("action") || ""),
+        operationRequestId: String(data.get("operationRequestId") || ""),
+        operator: String(data.get("operator") || ""),
+        reason: String(data.get("reason") || ""),
+        confirmedText: String(data.get("confirmedText") || ""),
+        localToken: String(data.get("localToken") || ""),
+        skillName: String(data.get("skillName") || ""),
+        agentId: String(data.get("agentId") || ""),
+        message: String(data.get("message") || ""),
+      };
+      try {
+        const response = await fetch("/api/managed-actions/live", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const body = await response.json().catch(() => ({}));
+        resultNode.classList.add(response.ok ? "ok" : "error");
+        resultNode.textContent = [
+          copy.status + ": " + String(body.status || response.status),
+          copy.message + ": " + String(body.message || "-"),
+          copy.request + ": " + String(payload.operationRequestId || "-"),
+          copy.operator + ": " + String(payload.operator || "-"),
+          copy.target + ": " + String(body.target?.instanceName || body.target?.instanceId || payload.instanceId),
+          copy.mode + ": live / liveExecution=" + String(body.liveExecution === true),
+          copy.safety + ": mutatesOpenClawInstance=" + String(body.safety?.mutatesOpenClawInstance === true),
+          "dryRunReference=" + String(body.dryRunReference?.status || "-"),
+          "rollout=" + String(body.rollout?.status || "-"),
+          "executor=" + String(body.executor?.status || "-"),
+        ].join("\\n");
+      } catch (error) {
+        resultNode.classList.add("error");
+        resultNode.textContent = copy.liveFailed + "\\n" + String(error && error.message ? error.message : error);
       }
     });
   });
