@@ -9254,7 +9254,9 @@ function renderMultiInstanceOverview(
     renderFleetMetricChip(t("Errors", "错误数"), snapshot.totals.errors, snapshot.totals.errors > 0 ? "danger" : ""),
     renderFleetMetricChip("Cron", snapshot.totals.cronJobs),
   ].join("");
-  const cards = snapshot.instances.map((instance) => renderMultiInstanceCard(instance, snapshot.selectedInstanceId, language)).join("");
+  const cards = snapshot.instances
+    .map((instance) => renderMultiInstanceCard(instance, snapshot.selectedInstanceId, language, managedActionAudit?.records ?? []))
+    .join("");
   const selectedInstance = snapshot.instances.find((item) => item.instance.id === snapshot.selectedInstanceId);
   const selectedMessage = selectedInstance
     ? `${t("Current instance", "当前实例")}${language === "zh" ? "：" : ": "}${selectedInstance.instance.name}`
@@ -9357,15 +9359,22 @@ function renderMultiInstanceOverview(
     .overview-context-row span { border: 1px solid rgba(17, 24, 39, 0.1); border-radius: 999px; background: rgba(255, 255, 255, 0.7); padding: 5px 9px; }
     .overview-chart-wall { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
     .overview-mini-trends { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-top: 12px; }
-	    .overview-layout { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(320px, 0.9fr); gap: 12px; align-items: start; margin-top: 14px; }
-	    .instance-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
-	    .card, .panel { border: 1px solid var(--border); border-radius: 8px; background: #fff; padding: 14px; }
-	    .card.active { border-color: rgba(0, 113, 227, 0.5); box-shadow: 0 8px 24px rgba(0, 113, 227, 0.08); }
-	    .card-head { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
-	    .instance-card { display: grid; gap: 12px; }
-	    .instance-card-top { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 12px; align-items: center; }
-	    .instance-card-title { min-width: 0; }
-	    .instance-card-title h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .overview-layout { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(320px, 0.9fr); gap: 12px; align-items: start; margin-top: 14px; }
+    .instance-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+    .card, .panel { border: 1px solid var(--border); border-radius: 8px; background: #fff; padding: 14px; }
+    .card.active { border-color: rgba(0, 113, 227, 0.5); box-shadow: 0 8px 24px rgba(0, 113, 227, 0.08); }
+    .card-head { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+    .instance-card { display: grid; gap: 12px; }
+    .instance-card-top { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 12px; align-items: center; }
+    .instance-card-title { min-width: 0; }
+    .instance-card-title h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .instance-action-strip { display: grid; gap: 8px; border-top: 1px solid rgba(17, 24, 39, 0.08); padding-top: 10px; }
+    .instance-action-head { display: flex; justify-content: space-between; gap: 8px; align-items: center; min-width: 0; }
+    .instance-action-head strong { font-size: 13px; }
+    .instance-action-latest { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .instance-action-buttons { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+    .instance-action-shortcut { min-height: 32px; border: 1px solid rgba(0, 113, 227, 0.2); border-radius: 8px; padding: 6px 7px; background: rgba(0, 113, 227, 0.06); color: #005cb9; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .instance-action-shortcut:hover, .instance-action-shortcut:focus-visible { border-color: rgba(0, 113, 227, 0.48); background: #eff8ff; outline: none; }
 	    .instance-avatar { position: relative; display: grid; place-items: center; width: 96px; aspect-ratio: 1; padding: 7px; border: 1px solid rgba(17, 24, 39, 0.12); border-radius: 8px; background-color: var(--agent-accent, #4e79a7); background-image: radial-gradient(circle at 34% 22%, rgba(255,255,255,0.92), rgba(255,255,255,0.28) 42%, rgba(255,255,255,0.58) 100%); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.7); overflow: hidden; }
 	    .instance-avatar .agent-stage { position: relative; display: grid; place-items: center; width: 100%; height: 100%; border-radius: 6px; background: linear-gradient(180deg, rgba(255,255,255,0.74), rgba(255,255,255,0.28)); overflow: hidden; }
 	    .instance-avatar .agent-pixel-canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
@@ -9782,29 +9791,40 @@ function renderManagedActionDryRunScript(language: UiLanguage): string {
   }).replace(/</g, "\\u003c");
   return `<script>
 (() => {
-	  const copy = ${copy};
-	  const forms = Array.from(document.querySelectorAll("[data-managed-action-form]"));
-	  forms.forEach((form) => {
-	    const resultNode = form.querySelector("[data-managed-action-result]");
-	    if (!(form instanceof HTMLFormElement) || !(resultNode instanceof HTMLElement)) return;
-	    const actionSelect = form.querySelector('[name="action"]');
-	    const reasonInput = form.querySelector('[name="reason"]');
-	    const skillInput = form.querySelector('[name="skillName"]');
-	    const confirmInput = form.querySelector('[name="confirmedText"]');
-	    const operatorInput = form.querySelector('[name="operator"]');
-	    Array.from(form.querySelectorAll("[data-managed-action-preset]")).forEach((button) => {
-	      button.addEventListener("click", () => {
-	        const action = button.getAttribute("data-managed-action-preset") || "";
-	        const reason = button.getAttribute("data-managed-action-reason") || "";
-	        const skill = button.getAttribute("data-managed-action-skill") || "";
-	        if (actionSelect && "value" in actionSelect) actionSelect.value = action;
-	        if (reasonInput && "value" in reasonInput) reasonInput.value = reason;
-	        if (skillInput && "value" in skillInput && skill) skillInput.value = skill;
-	        if (confirmInput && "value" in confirmInput) confirmInput.value = "DRY-RUN-ONLY";
-	        if (operatorInput && typeof operatorInput.focus === "function") operatorInput.focus();
-	      });
-	    });
-	    form.addEventListener("submit", async (event) => {
+  const copy = ${copy};
+  const forms = Array.from(document.querySelectorAll("[data-managed-action-form]"));
+  const fillManagedActionForm = (form, button) => {
+    const instanceSelect = form.querySelector('[name="instanceId"]');
+    const actionSelect = form.querySelector('[name="action"]');
+    const reasonInput = form.querySelector('[name="reason"]');
+    const skillInput = form.querySelector('[name="skillName"]');
+    const confirmInput = form.querySelector('[name="confirmedText"]');
+    const operatorInput = form.querySelector('[name="operator"]');
+    const instanceId = button.getAttribute("data-managed-action-instance") || "";
+    const action = button.getAttribute("data-managed-action-preset") || "";
+    const reason = button.getAttribute("data-managed-action-reason") || "";
+    const skill = button.getAttribute("data-managed-action-skill") || "";
+    if (instanceSelect && "value" in instanceSelect && instanceId) instanceSelect.value = instanceId;
+    if (actionSelect && "value" in actionSelect) actionSelect.value = action;
+    if (reasonInput && "value" in reasonInput) reasonInput.value = reason;
+    if (skillInput && "value" in skillInput && skill) skillInput.value = skill;
+    if (confirmInput && "value" in confirmInput) confirmInput.value = "DRY-RUN-ONLY";
+    if (operatorInput && typeof operatorInput.focus === "function") operatorInput.focus();
+    if (!form.contains(button) && typeof form.scrollIntoView === "function") {
+      form.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  };
+  Array.from(document.querySelectorAll("[data-managed-action-preset]")).forEach((button) => {
+    button.addEventListener("click", () => {
+      const form = button.closest("form") || forms[0];
+      if (!(form instanceof HTMLFormElement)) return;
+      fillManagedActionForm(form, button);
+    });
+  });
+  forms.forEach((form) => {
+    const resultNode = form.querySelector("[data-managed-action-result]");
+    if (!(form instanceof HTMLFormElement) || !(resultNode instanceof HTMLElement)) return;
+    form.addEventListener("submit", async (event) => {
       event.preventDefault();
       resultNode.hidden = false;
       resultNode.classList.remove("ok", "error");
@@ -9927,7 +9947,12 @@ function renderInstanceLoadPanel(
   }
 }
 
-function renderMultiInstanceCard(instance: InstanceSnapshot, selectedInstanceId: string, language: UiLanguage): string {
+function renderMultiInstanceCard(
+  instance: InstanceSnapshot,
+  selectedInstanceId: string,
+  language: UiLanguage,
+  auditRecords: ManagedActionAuditRecord[] = [],
+): string {
   const t = (en: string, zh: string): string => pickUiText(language, en, zh);
   const metrics = buildInstanceUiMetrics(instance);
   const isSelected = instance.instance.id === selectedInstanceId;
@@ -9939,30 +9964,64 @@ function renderMultiInstanceCard(instance: InstanceSnapshot, selectedInstanceId:
     { label: t("Pending", "待审批"), value: metrics.pendingApprovals },
     { label: t("Errors", "错误数"), value: metrics.errors },
     { label: "Cron", value: metrics.cronJobs },
-	  ]
-	    .map((item) => `<div class="metric"><span>${escapeHtml(item.label)}</span><strong>${item.value}</strong></div>`)
-	    .join("");
-	  const selected = isSelected ? `<div class="meta">${escapeHtml(t("Current instance", "当前实例"))}</div>` : "";
-	  const avatar = renderInstanceAvatar(instance.instance, language, "card");
-	  return `<article class="card instance-card${isSelected ? " active" : ""}">
-	    <div class="instance-card-top">
-	      ${avatar}
-	      <div class="instance-card-title">
-	        <div class="card-head">
-	          <div>
-	            <h2>${escapeHtml(instance.instance.name)}</h2>
-	            <div class="meta">${escapeHtml(instance.instance.id)}</div>
-	          </div>
-	          ${badge(instance.status, multiInstanceStatusLabel(instance.status, language))}
-	        </div>
-	        ${selected}
-	      </div>
-	    </div>
-	    <div class="metrics">${metricHtml}</div>
-	    <div class="meta">${escapeHtml(instance.detail)}${metrics.lastActivityAt ? ` · ${escapeHtml(t("Last", "最近"))}${escapeHtml(language === "zh" ? "：" : ": ")}${escapeHtml(formatUiTimestamp(metrics.lastActivityAt, language))}` : ""}</div>
+  ]
+    .map((item) => `<div class="metric"><span>${escapeHtml(item.label)}</span><strong>${item.value}</strong></div>`)
+    .join("");
+  const selected = isSelected ? `<div class="meta">${escapeHtml(t("Current instance", "当前实例"))}</div>` : "";
+  const avatar = renderInstanceAvatar(instance.instance, language, "card");
+  const latestAction = latestManagedActionAuditRecordForInstance(auditRecords, instance.instance.id);
+  const actionSummary = latestAction
+    ? managedActionAuditCompactText(latestAction, language)
+    : t("No recent dry-run for this instance.", "该实例暂无最近 dry-run。");
+  return `<article class="card instance-card${isSelected ? " active" : ""}">
+    <div class="instance-card-top">
+      ${avatar}
+      <div class="instance-card-title">
+        <div class="card-head">
+          <div>
+            <h2>${escapeHtml(instance.instance.name)}</h2>
+            <div class="meta">${escapeHtml(instance.instance.id)}</div>
+          </div>
+          ${badge(instance.status, multiInstanceStatusLabel(instance.status, language))}
+        </div>
+        ${selected}
+      </div>
+    </div>
+    <div class="metrics">${metricHtml}</div>
+    <div class="meta">${escapeHtml(instance.detail)}${metrics.lastActivityAt ? ` · ${escapeHtml(t("Last", "最近"))}${escapeHtml(language === "zh" ? "：" : ": ")}${escapeHtml(formatUiTimestamp(metrics.lastActivityAt, language))}` : ""}</div>
     ${renderMiniSessions(instance, language)}
+    <div class="instance-action-strip">
+      <div class="instance-action-head">
+        <strong>${escapeHtml(t("Actions", "动作"))}</strong>
+        <span class="instance-action-latest">${escapeHtml(actionSummary)}</span>
+      </div>
+      <div class="instance-action-buttons">
+        ${renderInstanceActionShortcut(instance.instance.id, "healthcheck", managedActionPresetUi("healthcheck", language), language)}
+        ${renderInstanceActionShortcut(instance.instance.id, "collector_refresh", managedActionPresetUi("collector_refresh", language), language)}
+        ${renderInstanceActionShortcut(instance.instance.id, "skill_run", managedActionPresetUi("skill_run", language), language)}
+      </div>
+    </div>
     <a class="button" href="${detailHref}">${escapeHtml(t("Open readonly detail", "进入只读详情"))}</a>
   </article>`;
+}
+
+function renderInstanceActionShortcut(
+  instanceId: string,
+  action: ManagedActionName,
+  preset: { reason: string; skillName?: string },
+  language: UiLanguage,
+): string {
+  return `<button type="button" class="instance-action-shortcut" data-managed-action-instance="${escapeHtml(instanceId)}" data-managed-action-preset="${escapeHtml(action)}" data-managed-action-reason="${escapeHtml(preset.reason)}" data-managed-action-skill="${escapeHtml(preset.skillName ?? "")}">${escapeHtml(managedActionUiLabel(action, language))}</button>`;
+}
+
+function latestManagedActionAuditRecordForInstance(
+  records: ManagedActionAuditRecord[],
+  instanceId: string,
+): ManagedActionAuditRecord | undefined {
+  return records
+    .filter((record) => record.targetInstanceId === instanceId)
+    .filter((record) => !Number.isNaN(Date.parse(record.timestamp)))
+    .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp))[0];
 }
 
 function multiInstanceStatusLabel(status: InstanceSnapshot["status"], language: UiLanguage): string {
