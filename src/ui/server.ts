@@ -9197,7 +9197,12 @@ function renderMultiInstanceSectionBody(input: {
     ${renderServerHealthPanel(snapshot, language)}
     ${renderCollectorSnapshotPanel(snapshot.instances, language, snapshot.generatedAt)}
     ${renderManagedActionReadinessPanel(input.managedActionReadiness ?? buildFallbackManagedActionLiveReadiness(), language)}
-    ${renderManagedActionDryRunPanel(snapshot.instances, language, snapshot.selectedInstanceId)}
+    ${renderManagedActionDryRunPanel(
+      snapshot.instances,
+      language,
+      snapshot.selectedInstanceId,
+      input.managedActionReadiness ?? buildFallbackManagedActionLiveReadiness(),
+    )}
     ${renderManagedActionAuditPanel(input.managedActionAudit?.records ?? [], language)}
     <section class="overview-layout">
       <div>
@@ -9426,10 +9431,21 @@ function renderMultiInstanceOverview(
     a.button { display: inline-flex; margin-top: 8px; text-decoration: none; color: #005cb9; font-weight: 600; }
     .control-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; align-items: end; }
     .control-field { display: grid; gap: 5px; }
-    .control-field label { color: var(--muted); font-size: 12px; font-weight: 600; }
-    .control-field select, .control-field input { width: 100%; min-height: 38px; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font: inherit; background: #fff; color: var(--text); }
-    .control-field button { min-height: 38px; border: 1px solid rgba(0, 113, 227, 0.45); border-radius: 8px; padding: 8px 12px; font: inherit; font-weight: 700; color: #005cb9; background: #eff8ff; cursor: pointer; }
-    .action-result { margin: 10px 0 0; white-space: pre-wrap; border: 1px solid var(--border); border-radius: 8px; padding: 10px; background: #f9fafb; color: #344054; font-size: 12px; overflow-x: auto; }
+	    .control-field label { color: var(--muted); font-size: 12px; font-weight: 600; }
+	    .control-field select, .control-field input { width: 100%; min-height: 38px; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font: inherit; background: #fff; color: var(--text); }
+	    .control-field button { min-height: 38px; border: 1px solid rgba(0, 113, 227, 0.45); border-radius: 8px; padding: 8px 12px; font: inherit; font-weight: 700; color: #005cb9; background: #eff8ff; cursor: pointer; }
+	    .action-console { display: grid; gap: 10px; margin: 0 0 12px; }
+	    .action-console-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; align-items: center; }
+	    .action-console-head strong { font-size: 14px; }
+	    .action-preset-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px; }
+	    .action-preset { display: grid; gap: 6px; min-height: 112px; border: 1px solid var(--border); border-radius: 8px; padding: 10px; text-align: left; background: rgba(255, 255, 255, 0.88); color: inherit; font: inherit; cursor: pointer; }
+	    .action-preset:hover, .action-preset:focus-visible { border-color: rgba(0, 113, 227, 0.48); background: #eff8ff; outline: none; }
+	    .action-preset-title { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; font-weight: 800; }
+	    .action-preset-title span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	    .action-preset-desc { color: var(--muted); font-size: 12px; line-height: 1.45; }
+	    .action-preset-meta { display: flex; flex-wrap: wrap; gap: 6px; color: var(--muted); font-size: 11px; }
+	    .action-preset-meta span { border: 1px solid rgba(17, 24, 39, 0.1); border-radius: 999px; padding: 3px 7px; background: rgba(255, 255, 255, 0.72); }
+	    .action-result { margin: 10px 0 0; white-space: pre-wrap; border: 1px solid var(--border); border-radius: 8px; padding: 10px; background: #f9fafb; color: #344054; font-size: 12px; overflow-x: auto; }
     .action-result.ok { border-color: rgba(22, 163, 74, 0.28); background: #f0fdf4; color: #05603a; }
     .action-result.error { border-color: rgba(220, 38, 38, 0.28); background: #fef3f2; color: #b42318; }
     @media (max-width: 980px) { .overview-layout { grid-template-columns: 1fr; } }
@@ -9465,6 +9481,7 @@ function renderManagedActionDryRunPanel(
   instances: InstanceSnapshot[],
   language: UiLanguage,
   selectedInstanceId?: string,
+  readiness?: ManagedActionLiveReadinessSnapshot,
 ): string {
   const t = (en: string, zh: string): string => pickUiText(language, en, zh);
   const instanceOptions = instances
@@ -9487,9 +9504,10 @@ function renderManagedActionDryRunPanel(
         <div class="meta">${escapeHtml(t("Dry-run and audit only. No OpenClaw instance command is executed.", "仅 dry-run 与审计，不执行 OpenClaw 实例命令。"))}</div>
       </div>
       ${badge("partial", "dry-run")}
-    </div>
-    <form data-managed-action-form>
-      <div class="control-grid">
+	    </div>
+	    <form data-managed-action-form>
+	      ${renderManagedActionPresetConsole(language, readiness)}
+	      <div class="control-grid">
         <div class="control-field">
           <label for="managed-action-instance">${escapeHtml(t("Instance", "实例"))}</label>
           <select id="managed-action-instance" name="instanceId" required>${instanceOptions}</select>
@@ -9523,8 +9541,62 @@ function renderManagedActionDryRunPanel(
         </div>
       </div>
       <pre class="action-result" data-managed-action-result hidden></pre>
-    </form>
-  </section>`;
+	    </form>
+	  </section>`;
+}
+
+function renderManagedActionPresetConsole(
+  language: UiLanguage,
+  readiness?: ManagedActionLiveReadinessSnapshot,
+): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const liveReady = readiness?.status === "ready";
+  const allowedActions = new Set(readiness?.gate.allowedActions ?? []);
+  const presets = listManagedActions()
+    .map((definition) => {
+      const labels = managedActionPresetUi(definition.action, language);
+      const liveLabel = liveReady && allowedActions.has(definition.action)
+        ? t("live-ready", "live 已就绪")
+        : t("dry-run only", "仅 dry-run");
+      return `<button type="button" class="action-preset" data-managed-action-preset="${escapeHtml(definition.action)}" data-managed-action-reason="${escapeHtml(labels.reason)}" data-managed-action-skill="${escapeHtml(labels.skillName ?? "")}">
+        <span class="action-preset-title"><span>${escapeHtml(managedActionUiLabel(definition.action, language))}</span>${badge(liveReady && allowedActions.has(definition.action) ? "connected" : "partial", liveLabel)}</span>
+        <span class="action-preset-desc">${escapeHtml(labels.description)}</span>
+        <span class="action-preset-meta">
+          <span>${escapeHtml(t("Mode", "模式"))}: dry-run</span>
+          <span>${escapeHtml(t("Confirmation", "确认"))}: ${escapeHtml(MANAGED_ACTION_DRY_RUN_CONFIRMATION)}</span>
+        </span>
+      </button>`;
+    })
+    .join("");
+  return `<div class="action-console">
+    <div class="action-console-head">
+      <strong>${escapeHtml(t("Action console", "动作操作台"))}</strong>
+      <span class="meta">${escapeHtml(t("Choose a preset to fill the dry-run form below.", "选择预设后自动填充下方 dry-run 表单。"))}</span>
+    </div>
+    <div class="action-preset-grid">${presets}</div>
+  </div>`;
+}
+
+function managedActionPresetUi(
+  action: ManagedActionName,
+  language: UiLanguage,
+): { description: string; reason: string; skillName?: string } {
+  if (action === "healthcheck") {
+    return {
+      description: pickUiText(language, "Preview the control-center healthcheck command for the selected instance.", "预览选中实例的控制中心健康检查命令。"),
+      reason: pickUiText(language, "Operator healthcheck preview", "操作者健康检查预览"),
+    };
+  }
+  if (action === "collector_refresh") {
+    return {
+      description: pickUiText(language, "Preview collector refresh without running the collector or touching instance directories.", "预览 collector 刷新，不运行 collector，也不触碰实例目录。"),
+      reason: pickUiText(language, "Collector refresh preview", "collector 刷新预览"),
+    };
+  }
+  return {
+    description: pickUiText(language, "Preview a skill invocation. Fill Skill before generating the command preview.", "预览 skill 调用。生成命令预览前需要填写 Skill。"),
+    reason: pickUiText(language, "Skill invocation preview", "skill 调用预览"),
+  };
 }
 
 function renderManagedActionReadinessPanel(
@@ -9677,12 +9749,29 @@ function renderManagedActionDryRunScript(language: UiLanguage): string {
   }).replace(/</g, "\\u003c");
   return `<script>
 (() => {
-  const copy = ${copy};
-  const forms = Array.from(document.querySelectorAll("[data-managed-action-form]"));
-  forms.forEach((form) => {
-    const resultNode = form.querySelector("[data-managed-action-result]");
-    if (!(form instanceof HTMLFormElement) || !(resultNode instanceof HTMLElement)) return;
-    form.addEventListener("submit", async (event) => {
+	  const copy = ${copy};
+	  const forms = Array.from(document.querySelectorAll("[data-managed-action-form]"));
+	  forms.forEach((form) => {
+	    const resultNode = form.querySelector("[data-managed-action-result]");
+	    if (!(form instanceof HTMLFormElement) || !(resultNode instanceof HTMLElement)) return;
+	    const actionSelect = form.querySelector('[name="action"]');
+	    const reasonInput = form.querySelector('[name="reason"]');
+	    const skillInput = form.querySelector('[name="skillName"]');
+	    const confirmInput = form.querySelector('[name="confirmedText"]');
+	    const operatorInput = form.querySelector('[name="operator"]');
+	    Array.from(form.querySelectorAll("[data-managed-action-preset]")).forEach((button) => {
+	      button.addEventListener("click", () => {
+	        const action = button.getAttribute("data-managed-action-preset") || "";
+	        const reason = button.getAttribute("data-managed-action-reason") || "";
+	        const skill = button.getAttribute("data-managed-action-skill") || "";
+	        if (actionSelect && "value" in actionSelect) actionSelect.value = action;
+	        if (reasonInput && "value" in reasonInput) reasonInput.value = reason;
+	        if (skillInput && "value" in skillInput && skill) skillInput.value = skill;
+	        if (confirmInput && "value" in confirmInput) confirmInput.value = "DRY-RUN-ONLY";
+	        if (operatorInput && typeof operatorInput.focus === "function") operatorInput.focus();
+	      });
+	    });
+	    form.addEventListener("submit", async (event) => {
       event.preventDefault();
       resultNode.hidden = false;
       resultNode.classList.remove("ok", "error");
