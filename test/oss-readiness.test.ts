@@ -641,9 +641,11 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(commandRunnerText, /MANAGED_ACTION_COMMAND_TOKEN_SOURCE/);
   assert.match(commandRunnerText, /RESOLVED_LOCAL_API_TOKEN_SOURCE/);
   assert.match(commandRunnerText, /api\/managed-actions\/dry-run/);
-  assert.match(commandRunnerText, /callsManagedActionsLiveApi: false/);
+  assert.match(commandRunnerText, /api\/managed-actions\/live/);
+  assert.match(commandRunnerText, /CONFIRM_MANAGED_ACTION_COMMAND_LIVE/);
+  assert.match(commandRunnerText, /liveAllowedActions = new Set\(\["healthcheck", "collector_refresh"\]\)/);
+  assert.match(commandRunnerText, /skill_run 只允许 dry-run 预览/);
   assert.match(commandRunnerText, /writesOpenClawInstanceDirs: false/);
-  assert.doesNotMatch(commandRunnerText, /api\/managed-actions\/live/);
   const commandTextBridgeText = readFileSync(managedActionTextBridge, "utf8");
   assert.match(commandTextBridgeText, /managed-action-text-bridge\.sh parse/);
   assert.match(commandTextBridgeText, /managed-action-text-bridge\.sh plan/);
@@ -743,6 +745,9 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(dryRunGateText, /writesOpenClawInstanceDirs: false/);
   assert.doesNotMatch(dryRunGateText, /api\/managed-actions\/live/);
   assert(healthcheck.includes("COLLECTOR_SNAPSHOT_MAX_AGE_SECONDS"));
+  assert.match(healthcheck, /受控 live 动作白名单包含会影响实例或未知动作/);
+  assert.match(healthcheck, /rollout 启用了会影响实例或未知动作/);
+  assert.match(healthcheck, /healthcheck\|collector_refresh/);
   assert(compose.includes("OPENCLAW_INSTANCES_FILE"));
   assert(env.includes("OPENCLAW_INSTANCES_JSON"));
   assert(env.includes("servers"));

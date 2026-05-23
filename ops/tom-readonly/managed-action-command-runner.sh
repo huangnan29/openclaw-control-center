@@ -71,15 +71,10 @@ command.json 示例：
 live command.json 还必须带 dry-run 返回的 operationRequestId：
   {
     "instanceId": "tom",
-    "action": "skill_run",
+    "action": "collector_refresh",
     "operator": "Anan",
-    "reason": "通过 OpenClaw 指令真实调用 skill",
-    "operationRequestId": "<dry-run operationRequestId>",
-    "skillName": "zhihu-human-ops-writing",
-    "agentId": "main",
-    "message": "请使用 zhihu-human-ops-writing skill 执行一次安全测试，不要发布。",
-    "timeoutSeconds": 600,
-    "thinking": "minimal"
+    "reason": "通过 OpenClaw 指令刷新 collector 快照",
+    "operationRequestId": "<dry-run operationRequestId>"
   }
 
 文本指令示例：
@@ -100,7 +95,8 @@ live 必须设置：
   - plan 不联网、不写文件。
   - parse-text/plan-text 不联网、不写文件。
   - dry-run 只调用 /api/managed-actions/dry-run，不执行 OpenClaw 实例命令。
-  - live 只在 control-center live 闸门、白名单、灰度规则、dry-run 引用都通过时执行。
+  - live 只允许 healthcheck/collector_refresh，且只在 control-center live 闸门、白名单、灰度规则、dry-run 引用都通过时执行。
+  - skill_run 只允许 dry-run 预览，不允许通过本入口 live 执行。
   - 不打开 live gate，不重启实例；是否修改 OpenClaw 实例由 live API 返回的 safety 决定。
 TEXT
 }
@@ -149,6 +145,7 @@ const localApiTokenSource = process.env.RESOLVED_LOCAL_API_TOKEN_SOURCE || "miss
 const dryRunConfirmation = "DRY-RUN-ONLY";
 const liveConfirmation = "LIVE-ACTION-APPROVED";
 const allowedActions = new Set(["healthcheck", "collector_refresh", "skill_run"]);
+const liveAllowedActions = new Set(["healthcheck", "collector_refresh"]);
 const thinkingLevels = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
 
 function normalizeBaseUrl(value) {
@@ -354,11 +351,8 @@ function buildPayload(command) {
 function buildLivePayload(command) {
   const payload = buildPayload({ ...command, confirmedText: dryRunConfirmation });
   const operationRequestId = readRequiredString(command, "operationRequestId", 120);
-  if (payload.action === "skill_run") {
-    if (!payload.message) throw new Error("live skill_run 必须提供 message。");
-    if (!payload.agentId && !payload.sessionKey && !payload.sessionId) {
-      throw new Error("live skill_run 必须提供 agentId、sessionKey 或 sessionId。");
-    }
+  if (!liveAllowedActions.has(payload.action)) {
+    throw new Error("live 只允许 healthcheck 或 collector_refresh；skill_run 只允许 dry-run 预览。");
   }
   return {
     ...payload,

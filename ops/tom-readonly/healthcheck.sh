@@ -154,7 +154,25 @@ check_container_security() {
   else
     printf '%s\n' "$envs" | grep -Fxq "MANAGED_ACTIONS_LIVE_ENABLED=true" || fail "受控 live 模式下 MANAGED_ACTIONS_LIVE_ENABLED 未开启"
     printf '%s\n' "$envs" | grep -Fxq "MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED=true" || fail "受控 live 模式下生产执行器未开启"
-    printf '%s\n' "$envs" | grep -Eq '^MANAGED_ACTIONS_LIVE_ALLOWED_ACTIONS=(healthcheck|collector_refresh|skill_run|,)+$' || fail "受控 live 动作白名单缺失或包含未知动作"
+    local allowed_actions
+    allowed_actions="$(printf '%s\n' "$envs" | awk -F= '$1 == "MANAGED_ACTIONS_LIVE_ALLOWED_ACTIONS" { print $2 }' | tail -n 1)"
+    [ -n "$allowed_actions" ] || fail "受控 live 动作白名单为空"
+    local found_low_risk_action="false"
+    IFS=',' read -r -a allowed_action_items <<< "$allowed_actions"
+    local action
+    for action in "${allowed_action_items[@]}"; do
+      [ -n "$action" ] || continue
+      case "$action" in
+        healthcheck|collector_refresh)
+          found_low_risk_action="true"
+          ;;
+        *)
+          fail "受控 live 动作白名单包含会影响实例或未知动作：${action}"
+          ;;
+      esac
+    done
+    [ "$found_low_risk_action" = "true" ] || fail "受控 live 动作白名单缺少低风险动作"
+    check_managed_action_rollout_boundary "$envs"
   fi
   printf '%s\n' "$envs" | grep -Fxq "APPROVAL_ACTIONS_ENABLED=false" || fail "审批写动作未禁用"
   printf '%s\n' "$envs" | grep -Fxq "IMPORT_MUTATION_ENABLED=false" || fail "导入写动作未禁用"
@@ -182,6 +200,42 @@ check_container_security() {
   instances_line="$(printf '%s\n' "$mounts" | awk -F '|' '$2 == "/app/config/instances.json" { print }')"
   [ -n "$instances_line" ] || fail "缺少 instances.json 挂载"
   printf '%s\n' "$instances_line" | grep -Fq "|false" || fail "instances.json 挂载不是只读"
+}
+
+check_managed_action_rollout_boundary() {
+  local envs="$1"
+  local rollout_file
+  rollout_file="$(printf '%s\n' "$envs" | awk -F= '$1 == "MANAGED_ACTIONS_LIVE_ROLLOUT_FILE" { print $2 }' | tail -n 1)"
+  [ -n "$rollout_file" ] || fail "受控 live 模式缺少 MANAGED_ACTIONS_LIVE_ROLLOUT_FILE"
+  docker exec -i \
+    -e MANAGED_ACTIONS_LIVE_ROLLOUT_FILE="$rollout_file" \
+    "$CONTAINER_NAME" \
+    node <<'NODE' || fail "受控 live rollout 边界检查失败"
+const fs = require("fs");
+
+const rolloutFile = process.env.MANAGED_ACTIONS_LIVE_ROLLOUT_FILE;
+const config = JSON.parse(fs.readFileSync(rolloutFile, "utf8"));
+if (config.enabled !== true) {
+  throw new Error("rollout.enabled 必须为 true");
+}
+const rules = Array.isArray(config.rules) ? config.rules : [];
+const enabledRules = rules.filter((rule) => rule && rule.enabled !== false);
+if (enabledRules.length === 0) {
+  throw new Error("rollout 没有启用规则");
+}
+const allowed = new Set(["healthcheck", "collector_refresh"]);
+const unsafe = enabledRules
+  .map((rule) => String(rule.action || ""))
+  .filter((action) => !allowed.has(action));
+if (unsafe.length > 0) {
+  throw new Error(`rollout 启用了会影响实例或未知动作：${[...new Set(unsafe)].join(",")}`);
+}
+const healthcheckRule = enabledRules.find((rule) => rule.action === "healthcheck");
+if (!healthcheckRule) {
+  throw new Error("rollout 缺少 healthcheck 规则");
+}
+console.log(`受控 live rollout 正常：rules=${enabledRules.length} actions=${[...new Set(enabledRules.map((rule) => rule.action))].join(",")}`);
+NODE
 }
 
 check_collector_snapshot_freshness() {
