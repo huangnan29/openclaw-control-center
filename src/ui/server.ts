@@ -9274,6 +9274,8 @@ function renderMultiInstanceOverview(
     pricingCatalog,
     usageBudgetPolicy,
   });
+  const instanceLoadPanel =
+    activeSection === "overview" ? renderInstanceLoadPanel(snapshot, language, pricingCatalog) : "";
 
   return `<!doctype html>
 <html lang="${escapeHtml(language)}">
@@ -9368,6 +9370,21 @@ function renderMultiInstanceOverview(
 	    .instance-rail-copy { min-width: 0; display: grid; gap: 3px; }
 	    .instance-rail-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
 	    .instance-rail-meta { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	    .instance-load-panel { margin: 0 0 14px; }
+	    .instance-load-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-end; margin: 0 0 8px; }
+	    .instance-load-head h2 { margin: 0; font-size: 16px; letter-spacing: 0; }
+	    .instance-load-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+	    .instance-load-item { display: grid; gap: 8px; border: 1px solid var(--border); border-radius: 8px; padding: 10px; color: inherit; background: rgba(255, 255, 255, 0.86); text-decoration: none; }
+	    .instance-load-item.warn { border-color: rgba(217, 119, 6, 0.34); background: #fffbeb; }
+	    .instance-load-item.danger { border-color: rgba(220, 38, 38, 0.3); background: #fef3f2; }
+	    .instance-load-title { display: flex; justify-content: space-between; gap: 8px; align-items: center; min-width: 0; }
+	    .instance-load-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+	    .load-row { display: grid; grid-template-columns: 46px minmax(0, 1fr) auto; gap: 7px; align-items: center; font-size: 12px; color: var(--muted); }
+	    .load-track { height: 7px; border-radius: 999px; overflow: hidden; background: rgba(17, 24, 39, 0.08); }
+	    .load-fill { height: 100%; border-radius: inherit; background: #4e79a7; }
+	    .load-fill.tasks { background: #59a14f; }
+	    .load-fill.risk { background: #f28e2b; }
+	    .load-fill.usage { background: #af7aa1; }
 	    .card h2, .panel h2 { margin: 0; font-size: 17px; letter-spacing: 0; }
     .panel { margin-top: 12px; }
     .panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 10px; }
@@ -9433,9 +9450,10 @@ function renderMultiInstanceOverview(
       ${renderServerFilterBar(snapshot, language, selectedServerId)}
     </section>
 	    ${warningHtml}
-	    <section class="status-strip">${totalChips}</section>
-	    ${renderInstanceAvatarRail(snapshot, language)}
-	    ${sectionBody}
+		    <section class="status-strip">${totalChips}</section>
+		    ${renderInstanceAvatarRail(snapshot, language)}
+		    ${instanceLoadPanel}
+		    ${sectionBody}
 	  </main>
 	  ${renderManagedActionDryRunScript(language)}
 	  ${renderAgentVisualEnhancerScript()}
@@ -9736,6 +9754,55 @@ function renderInstanceAvatarRail(snapshot: MultiInstanceSnapshot, language: UiL
     })
     .join("");
   return `<section class="instance-avatar-rail" aria-label="${escapeHtml(t("Instance roster", "实例名录"))}">${rows}</section>`;
+}
+
+function renderInstanceLoadPanel(
+  snapshot: MultiInstanceSnapshot,
+  language: UiLanguage,
+  pricingCatalog: ModelContextCatalogEntry[] = [],
+): string {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const rows = snapshot.instances.map((item) => {
+    const metrics = buildInstanceUiMetrics(item, pricingCatalog);
+    return {
+      item,
+      metrics,
+      risk: metrics.blocked + metrics.errors + metrics.pendingApprovals,
+    };
+  });
+  const maxSessions = Math.max(1, ...rows.map((row) => row.metrics.sessions));
+  const maxTasks = Math.max(1, ...rows.map((row) => row.metrics.tasks));
+  const maxRisk = Math.max(1, ...rows.map((row) => row.risk));
+  const maxUsage = Math.max(1, ...rows.map((row) => row.metrics.totalTokens));
+  const barWidth = (value: number, max: number): string => `${Math.min(100, Math.max(0, (value / max) * 100)).toFixed(2)}%`;
+  const rowHtml = rows
+    .map(({ item, metrics, risk }) => {
+      const tone = item.status === "not_connected" || metrics.errors > 0 ? "danger" : risk > 0 || item.status === "partial" ? "warn" : "";
+      const href = `/?instance=${encodeURIComponent(item.instance.id)}&amp;section=overview&amp;lang=${encodeURIComponent(language)}`;
+      return `<a class="instance-load-item${tone ? ` ${escapeHtml(tone)}` : ""}" href="${href}">
+        <span class="instance-load-title"><strong>${escapeHtml(item.instance.name)}</strong>${badge(item.status, multiInstanceStatusLabel(item.status, language))}</span>
+        ${renderInstanceLoadRow(t("Sessions", "会话"), metrics.sessions, maxSessions, "")}
+        ${renderInstanceLoadRow(t("Tasks", "任务"), metrics.tasks, maxTasks, "tasks")}
+        ${renderInstanceLoadRow(t("Risk", "风险"), risk, maxRisk, "risk")}
+        ${renderInstanceLoadRow(t("Usage", "用量"), metrics.totalTokens, maxUsage, "usage", formatInt(metrics.totalTokens))}
+      </a>`;
+    })
+    .join("");
+  return `<section class="instance-load-panel" aria-label="${escapeHtml(t("Instance load", "实例负载"))}">
+    <div class="instance-load-head">
+      <h2>${escapeHtml(t("Instance load", "实例负载"))}</h2>
+      <div class="meta">${escapeHtml(t("Sessions, tasks, risk and usage at a glance.", "一眼查看会话、任务、风险和用量。"))}</div>
+    </div>
+    <div class="instance-load-grid">${rowHtml || `<div class="empty-state">${escapeHtml(t("No instances configured.", "尚未配置实例。"))}</div>`}</div>
+  </section>`;
+
+  function renderInstanceLoadRow(label: string, value: number, max: number, className: string, displayValue = String(value)): string {
+    return `<span class="load-row">
+      <span>${escapeHtml(label)}</span>
+      <span class="load-track"><span class="load-fill${className ? ` ${escapeHtml(className)}` : ""}" style="width:${barWidth(value, max)}"></span></span>
+      <span>${escapeHtml(displayValue)}</span>
+    </span>`;
+  }
 }
 
 function renderMultiInstanceCard(instance: InstanceSnapshot, selectedInstanceId: string, language: UiLanguage): string {
