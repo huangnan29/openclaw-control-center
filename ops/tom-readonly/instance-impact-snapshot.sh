@@ -313,8 +313,17 @@ const actions = String(env.MANAGED_ACTIONS_LIVE_ALLOWED_ACTIONS || "")
   .split(",")
   .map((item) => item.trim())
   .filter(Boolean);
-const unsafe = actions.filter((item) => !["healthcheck", "collector_refresh"].includes(item));
-if (unsafe.length > 0) fail(`受控 live 白名单包含会影响实例或未知动作：${[...new Set(unsafe)].join(",")}`);
+const hasSkillRun = actions.includes("skill_run");
+const unsafe = actions.filter((item) => !["healthcheck", "collector_refresh", "skill_run"].includes(item));
+if (unsafe.length > 0) fail(`受控 live 白名单包含未知动作：${[...new Set(unsafe)].join(",")}`);
+if (hasSkillRun) {
+  if (env.MANAGED_ACTIONS_LIVE_SKILL_RUN_ALLOWED_SKILLS !== "zhihu-human-ops-writing") {
+    fail(`skill_run live 技能 allowlist 超出边界：${env.MANAGED_ACTIONS_LIVE_SKILL_RUN_ALLOWED_SKILLS || "<unset>"}`);
+  }
+  if (env.MANAGED_ACTIONS_LIVE_SKILL_RUN_ALLOWED_INSTANCES !== "tom") {
+    fail(`skill_run live 实例 allowlist 超出边界：${env.MANAGED_ACTIONS_LIVE_SKILL_RUN_ALLOWED_INSTANCES || "<unset>"}`);
+  }
+}
 
 if (after.readiness?.ok !== true) fail("after 快照 readiness 不可用");
 if (after.readiness?.liveExecutionAvailable !== true) fail("受控 live 模式下 liveExecutionAvailable 应为 true");

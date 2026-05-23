@@ -626,7 +626,7 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.match(liveWindowText, /compare "\$IMPACT_BEFORE" "\$impact_after"/);
   const instanceImpactSnapshotText = readFileSync(instanceImpactSnapshot, "utf8");
   assert.match(instanceImpactSnapshotText, /compare-controlled-live/);
-  assert.match(instanceImpactSnapshotText, /受控 live 白名单包含会影响实例或未知动作/);
+  assert.match(instanceImpactSnapshotText, /skill_run live 技能 allowlist 超出边界/);
   assert.match(instanceImpactSnapshotText, /实例挂载读写属性发生变化/);
   assert.match(readFileSync(liveHealthcheckRollout, "utf8"), /"action": "healthcheck"/);
   assert.match(readFileSync(liveHealthcheckRollout, "utf8"), /"risk": "low"/);
@@ -751,7 +751,8 @@ test("multi-instance readonly docs describe safe Oracle deployment", async () =>
   assert.doesNotMatch(dryRunGateText, /api\/managed-actions\/live/);
   assert(healthcheck.includes("COLLECTOR_SNAPSHOT_MAX_AGE_SECONDS"));
   assert.match(healthcheck, /受控 live 动作白名单包含会影响实例或未知动作/);
-  assert.match(healthcheck, /rollout 启用了会影响实例或未知动作/);
+  assert.match(healthcheck, /check_skill_run_policy_boundary/);
+  assert.match(healthcheck, /rollout 启用了超出 Tom 单 skill 灰度边界的动作/);
   assert.match(healthcheck, /healthcheck\|collector_refresh/);
   assert(compose.includes("OPENCLAW_INSTANCES_FILE"));
   assert(env.includes("OPENCLAW_INSTANCES_JSON"));

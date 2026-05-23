@@ -158,6 +158,7 @@ check_container_security() {
     allowed_actions="$(printf '%s\n' "$envs" | awk -F= '$1 == "MANAGED_ACTIONS_LIVE_ALLOWED_ACTIONS" { print $2 }' | tail -n 1)"
     [ -n "$allowed_actions" ] || fail "受控 live 动作白名单为空"
     local found_low_risk_action="false"
+    local found_skill_run_action="false"
     IFS=',' read -r -a allowed_action_items <<< "$allowed_actions"
     local action
     for action in "${allowed_action_items[@]}"; do
@@ -166,12 +167,18 @@ check_container_security() {
         healthcheck|collector_refresh)
           found_low_risk_action="true"
           ;;
+        skill_run)
+          found_skill_run_action="true"
+          ;;
         *)
           fail "受控 live 动作白名单包含会影响实例或未知动作：${action}"
           ;;
       esac
     done
     [ "$found_low_risk_action" = "true" ] || fail "受控 live 动作白名单缺少低风险动作"
+    if [ "$found_skill_run_action" = "true" ]; then
+      check_skill_run_policy_boundary "$envs"
+    fi
     check_managed_action_rollout_boundary "$envs"
   fi
   printf '%s\n' "$envs" | grep -Fxq "APPROVAL_ACTIONS_ENABLED=false" || fail "审批写动作未禁用"
@@ -202,6 +209,22 @@ check_container_security() {
   printf '%s\n' "$instances_line" | grep -Fq "|false" || fail "instances.json 挂载不是只读"
 }
 
+check_skill_run_policy_boundary() {
+  local envs="$1"
+  local skills instances max_timeout deliver_enabled
+  skills="$(printf '%s\n' "$envs" | awk -F= '$1 == "MANAGED_ACTIONS_LIVE_SKILL_RUN_ALLOWED_SKILLS" { print $2 }' | tail -n 1)"
+  instances="$(printf '%s\n' "$envs" | awk -F= '$1 == "MANAGED_ACTIONS_LIVE_SKILL_RUN_ALLOWED_INSTANCES" { print $2 }' | tail -n 1)"
+  max_timeout="$(printf '%s\n' "$envs" | awk -F= '$1 == "MANAGED_ACTIONS_LIVE_SKILL_RUN_MAX_TIMEOUT_SECONDS" { print $2 }' | tail -n 1)"
+  deliver_enabled="$(printf '%s\n' "$envs" | awk -F= '$1 == "MANAGED_ACTIONS_LIVE_SKILL_RUN_DELIVER_ENABLED" { print $2 }' | tail -n 1)"
+  [ "$skills" = "zhihu-human-ops-writing" ] || fail "skill_run live 只允许 zhihu-human-ops-writing，当前：${skills:-<unset>}"
+  [ "$instances" = "tom" ] || fail "skill_run live 只允许 tom 实例，当前：${instances:-<unset>}"
+  if ! printf '%s\n' "${max_timeout:-600}" | grep -Eq '^[0-9]+$'; then
+    fail "skill_run live timeout 不是数字：${max_timeout}"
+  fi
+  [ "${max_timeout:-600}" -le 600 ] || fail "skill_run live timeout 上限过大：${max_timeout}"
+  [ "${deliver_enabled:-false}" = "false" ] || fail "skill_run live 不允许 deliver=true"
+}
+
 check_managed_action_rollout_boundary() {
   local envs="$1"
   local rollout_file
@@ -224,11 +247,26 @@ if (enabledRules.length === 0) {
   throw new Error("rollout 没有启用规则");
 }
 const allowed = new Set(["healthcheck", "collector_refresh"]);
-const unsafe = enabledRules
-  .map((rule) => String(rule.action || ""))
-  .filter((action) => !allowed.has(action));
+const unsafe = [];
+let skillRunRules = 0;
+for (const rule of enabledRules) {
+  const action = String(rule.action || "");
+  if (allowed.has(action)) continue;
+  if (action === "skill_run") {
+    skillRunRules += 1;
+    if (rule.instanceId !== "tom") unsafe.push(`skill_run:${rule.instanceId || "<missing-instance>"}`);
+    if (!Array.isArray(rule.operators) || rule.operators.length !== 1 || rule.operators[0] !== "Anan") unsafe.push("skill_run:operators");
+    if (rule.risk !== "high") unsafe.push("skill_run:risk");
+    if (Number(rule.maxDryRunAgeMinutes || 0) > 60) unsafe.push("skill_run:maxDryRunAgeMinutes");
+    continue;
+  }
+  unsafe.push(action);
+}
 if (unsafe.length > 0) {
-  throw new Error(`rollout 启用了会影响实例或未知动作：${[...new Set(unsafe)].join(",")}`);
+  throw new Error(`rollout 启用了超出 Tom 单 skill 灰度边界的动作：${[...new Set(unsafe)].join(",")}`);
+}
+if (skillRunRules > 1) {
+  throw new Error("rollout 中 skill_run 规则数量超过 1");
 }
 const healthcheckRule = enabledRules.find((rule) => rule.action === "healthcheck");
 if (!healthcheckRule) {
