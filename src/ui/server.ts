@@ -8382,6 +8382,36 @@ function renderMultiInstanceUsageByAgentPanel(
   </section>`;
 }
 
+function isLowRiskManagedAction(action: ManagedActionName): boolean {
+  return action === "healthcheck" || action === "collector_refresh";
+}
+
+function managedActionLiveBlockedActions(allowedActions: ManagedActionName[]): ManagedActionName[] {
+  const allowed = new Set(allowedActions);
+  return listManagedActions()
+    .map((definition) => definition.action)
+    .filter((action) => !allowed.has(action));
+}
+
+function isControlledLowRiskManagedActionLive(readiness?: ManagedActionLiveReadinessSnapshot): boolean {
+  if (!readiness || READONLY_MODE || !readiness.liveExecutionAvailable) return false;
+  if (readiness.gate.allowedActions.length === 0) return false;
+  return readiness.gate.allowedActions.every(isLowRiskManagedAction)
+    && readiness.rollout.actions.every(isLowRiskManagedAction)
+    && readiness.mutatesOpenClawInstance === false;
+}
+
+function managedActionControlMode(
+  readiness: ManagedActionLiveReadinessSnapshot | undefined,
+  language: UiLanguage,
+): { label: string; tone: "ok" | "warn" | "danger" } {
+  const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  if (READONLY_MODE) return { label: t("Readonly", "只读"), tone: "ok" };
+  if (isControlledLowRiskManagedActionLive(readiness)) return { label: t("Controlled live", "受控 live"), tone: "warn" };
+  if (readiness?.liveExecutionAvailable) return { label: t("Live review", "Live 复核"), tone: "danger" };
+  return { label: t("Write review", "写入复核"), tone: "warn" };
+}
+
 function renderMultiInstanceSettingsSummaryPanel(
   snapshot: MultiInstanceSnapshot,
   language: UiLanguage,
@@ -8391,33 +8421,42 @@ function renderMultiInstanceSettingsSummaryPanel(
   const collectorStates = snapshot.instances.map((item) => buildCollectorSnapshotUiState(item, language, snapshot.generatedAt));
   const freshCollectors = collectorStates.filter((item) => item.tone === "connected").length;
   const attentionCollectors = collectorStates.filter((item) => item.tone !== "connected").length;
+  const controlMode = managedActionControlMode(managedActionReadiness, language);
   const chips = [
     renderFleetMetricChip(t("Instances", "实例数"), snapshot.totals.instances),
     renderFleetMetricChip(t("Connected", "已连接"), `${snapshot.totals.connected}/${snapshot.totals.instances}`, snapshot.totals.notConnected > 0 ? "warn" : "ok"),
     renderFleetMetricChip(t("Fresh data sources", "新鲜数据源"), `${freshCollectors}/${collectorStates.length}`, attentionCollectors > 0 ? "warn" : "ok"),
-    renderFleetMetricChip(t("Readonly mode", "只读模式"), READONLY_MODE ? t("On", "开启") : t("Off", "关闭"), READONLY_MODE ? "ok" : "danger"),
+    renderFleetMetricChip(t("Control mode", "控制模式"), controlMode.label, controlMode.tone),
     renderFleetMetricChip(t("Local token", "本地令牌"), LOCAL_API_TOKEN ? t("Configured", "已配置") : t("Missing", "缺失"), LOCAL_API_TOKEN ? "ok" : "warn"),
     renderFleetMetricChip(t("Live actions", "Live 动作"), managedActionReadiness?.liveExecutionAvailable ? t("Available", "可用") : t("Blocked", "阻断"), managedActionReadiness?.liveExecutionAvailable ? "warn" : "ok"),
   ].join("");
   return `<section class="panel">
     <div class="panel-head">
       <h2>${escapeHtml(t("Settings summary", "设置总览"))}</h2>
-      <div class="meta">${escapeHtml(t("Safety and connection posture for the readonly control center.", "只读控制中心的安全与接入状态。"))}</div>
+      <div class="meta">${escapeHtml(t("Safety and connection posture for the control center.", "控制中心的安全与接入状态。"))}</div>
     </div>
     <div class="status-strip">${chips}</div>
   </section>`;
 }
 
-function renderMultiInstanceSafetyPanel(language: UiLanguage): string {
+function renderMultiInstanceSafetyPanel(
+  language: UiLanguage,
+  managedActionReadiness?: ManagedActionLiveReadinessSnapshot,
+): string {
   const t = (en: string, zh: string): string => pickUiText(language, en, zh);
+  const controlledLowRiskLive = isControlledLowRiskManagedActionLive(managedActionReadiness);
+  const allowedLiveActions = managedActionReadiness?.gate.allowedActions ?? [];
+  const blockedLiveActions = managedActionLiveBlockedActions(allowedLiveActions);
   const rows = [
     {
       label: "READONLY_MODE",
       value: String(READONLY_MODE),
-      status: READONLY_MODE ? "connected" : "error",
+      status: READONLY_MODE || controlledLowRiskLive ? "connected" : "partial",
       detail: READONLY_MODE
         ? t("Mutation routes stay blocked by default.", "默认阻断写入类路由。")
-        : t("Readonly protection is off; review before exposing publicly.", "只读保护已关闭，公网暴露前需要复核。"),
+        : controlledLowRiskLive
+          ? t("Readonly is off because controlled live is enabled for non-mutating actions only.", "只读已关闭，因为当前只对不修改实例的动作开放受控 live。")
+          : t("Readonly protection is off; review live action scope before exposing publicly.", "只读保护已关闭，公网暴露前需要复核 live 动作范围。"),
     },
     {
       label: "LOCAL_TOKEN_AUTH_REQUIRED",
@@ -8432,6 +8471,14 @@ function renderMultiInstanceSafetyPanel(language: UiLanguage): string {
       value: LOCAL_API_TOKEN ? t("Configured", "已配置") : t("Missing", "缺失"),
       status: LOCAL_API_TOKEN ? "connected" : "partial",
       detail: t("The value is intentionally not displayed.", "令牌值不会在页面展示。"),
+    },
+    {
+      label: "MANAGED_ACTIONS_LIVE_ALLOWED_ACTIONS",
+      value: allowedLiveActions.join(", ") || "-",
+      status: controlledLowRiskLive || READONLY_MODE ? "connected" : "partial",
+      detail: blockedLiveActions.includes("skill_run")
+        ? t("Live scope excludes skill_run and only allows low-risk maintenance actions.", "live 范围不包含 skill_run，仅允许低风险维护动作。")
+        : t("Live scope should be reviewed before running instance-affecting actions.", "执行可能影响实例的动作前需要复核 live 范围。"),
     },
     {
       label: "APPROVAL_ACTIONS_ENABLED",
@@ -8452,9 +8499,11 @@ function renderMultiInstanceSafetyPanel(language: UiLanguage): string {
     {
       label: "MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED",
       value: String(MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED),
-      status: MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED && !READONLY_MODE ? "partial" : "connected",
+      status: MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED && !READONLY_MODE && !controlledLowRiskLive ? "partial" : "connected",
       detail: MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED
-        ? t("Production executor toggle is on; live gate readiness still decides availability.", "生产执行器开关已开；是否可用仍由 live readiness 决定。")
+        ? controlledLowRiskLive
+          ? t("Production executor is on, but live gate and rollout constrain it to low-risk actions.", "生产执行器已开启，但 live 闸门和灰度规则将其限制在低风险动作。")
+          : t("Production executor toggle is on; live gate readiness still decides availability.", "生产执行器开关已开；是否可用仍由 live readiness 决定。")
         : t("Production managed-action executor is disabled.", "生产 managed-action 执行器未开启。"),
     },
   ];
@@ -9177,7 +9226,7 @@ function renderMultiInstanceSectionBody(input: {
           ${renderMultiInstanceRuntimePanel(snapshot, language)}
         </div>
         <div>
-          ${renderMultiInstanceSafetyPanel(language)}
+          ${renderMultiInstanceSafetyPanel(language, input.managedActionReadiness)}
           ${renderManagedActionReadinessPanel(input.managedActionReadiness ?? buildFallbackManagedActionLiveReadiness(), language)}
           ${renderManagedActionAuditPanel(input.managedActionAudit?.records ?? [], language)}
         </div>
@@ -9578,13 +9627,17 @@ function renderManagedActionLiveControlPanel(
       return `<option value="${escapeHtml(item.instance.id)}"${selected}>${escapeHtml(label)}</option>`;
     })
     .join("");
+  const liveAllowedActions = new Set(readiness?.gate.allowedActions ?? []);
   const actionOptions = listManagedActions()
-    .map(
-      (action) =>
-        `<option value="${escapeHtml(action.action)}">${escapeHtml(managedActionUiLabel(action.action, language))}</option>`,
-    )
+    .map((action) => {
+      const liveAllowed = liveAllowedActions.has(action.action);
+      const suffix = liveAllowed ? "" : ` ${t("(live blocked)", "（live 阻断）")}`;
+      return `<option value="${escapeHtml(action.action)}"${liveAllowed ? "" : " disabled"}>${escapeHtml(`${managedActionUiLabel(action.action, language)}${suffix}`)}</option>`;
+    })
     .join("");
   const liveReady = readiness?.status === "ready";
+  const allowedText = [...liveAllowedActions].join(", ") || "-";
+  const blockedText = managedActionLiveBlockedActions([...liveAllowedActions]).join(", ") || "-";
   const badgeClass = liveReady ? "connected" : "error";
   const badgeLabel = liveReady ? t("live ready", "live 就绪") : t("blocked by gate", "闸门阻断");
   return `<div class="live-action-box">
@@ -9592,6 +9645,7 @@ function renderManagedActionLiveControlPanel(
       <div>
         <h3>${escapeHtml(t("Controlled live request", "受控真实执行"))}</h3>
         <div class="meta">${escapeHtml(t("Manual submit only. Requires a dry-run operation id, local token, live confirmation phrase, whitelist, rollout rule, and executor readiness.", "仅人工提交。必须具备 dry-run 请求号、本地令牌、live 确认短语、白名单、灰度规则与执行器就绪。"))}</div>
+        <div class="meta">${escapeHtml(t("Allowed live actions", "允许 live 动作"))}: <code>${escapeHtml(allowedText)}</code> · ${escapeHtml(t("Blocked in live", "live 阻断"))}: <code>${escapeHtml(blockedText)}</code></div>
       </div>
       ${badge(badgeClass, badgeLabel)}
     </div>
@@ -9745,6 +9799,7 @@ function renderManagedActionReadinessPanel(
       ].filter((value): value is string => Boolean(value)).join(" · ")
     : t("No dry-run record", "暂无 dry-run 记录");
   const rolloutPath = readiness.rollout.path ?? t("default config", "默认配置");
+  const blockedLiveActions = managedActionLiveBlockedActions(readiness.gate.allowedActions);
   const chips = [
     renderReadinessChip(t("Live gate", "Live 闸门"), readiness.gate.enabled ? t("enabled", "已开启") : t("disabled", "关闭"), readiness.gate.enabled ? "" : "blocked"),
     renderReadinessChip(t("Readonly", "只读模式"), readiness.gate.readonlyMode ? t("enabled", "开启") : t("disabled", "关闭"), readiness.gate.readonlyMode ? "blocked" : ""),
@@ -9752,6 +9807,7 @@ function renderManagedActionReadinessPanel(
     renderReadinessChip(t("Rollout", "灰度规则"), `${readiness.rollout.enabledRules}/${readiness.rollout.rulesTotal}`, readiness.rollout.enabled && readiness.rollout.enabledRules > 0 ? "" : "blocked"),
     renderReadinessChip(t("Dry-run audit", "Dry-run 审计"), String(readiness.dryRun.count), readiness.dryRun.count > 0 ? "" : "review"),
     renderReadinessChip(t("Executor", "执行器"), readiness.executor.productionWired ? t("wired", "已接入") : t("missing", "未接入"), readiness.executor.productionWired ? "" : "blocked"),
+    renderReadinessChip(t("Instance mutation", "实例写入"), readiness.mutatesOpenClawInstance ? t("possible", "可能") : t("blocked", "阻断"), readiness.mutatesOpenClawInstance ? "review" : ""),
   ].join("");
   const findingRows = readiness.findings
     .map((finding) => {
@@ -9767,13 +9823,14 @@ function renderManagedActionReadinessPanel(
     <div class="panel-head">
       <div>
         <h2>${escapeHtml(t("Live action readiness", "真实执行上线条件"))}</h2>
-        <div class="meta">${escapeHtml(t("Readonly diagnostics only. This card does not call the live API or execute OpenClaw instance commands.", "仅只读诊断。本卡片不调用 live API，也不执行 OpenClaw 实例命令。"))}</div>
+        <div class="meta">${escapeHtml(t("Status diagnostics only. This card reads gates, rollout, and audit records; it does not call the live API by itself.", "仅状态诊断。本卡片读取闸门、灰度和审计记录，不会自行调用 live API。"))}</div>
       </div>
       ${badge(statusBadgeClass, statusLabel)}
     </div>
     <div class="readiness-grid">${chips}</div>
     <div class="meta">${escapeHtml(t("Rollout source", "灰度来源"))}: <code>${escapeHtml(rolloutPath)}</code></div>
     <div class="meta">${escapeHtml(t("Allowed actions", "允许动作"))}: <code>${escapeHtml(readiness.gate.allowedActions.join(", ") || "-")}</code></div>
+    <div class="meta">${escapeHtml(t("Blocked live actions", "live 阻断动作"))}: <code>${escapeHtml(blockedLiveActions.join(", ") || "-")}</code></div>
     <div class="meta">${escapeHtml(t("Latest dry-run", "最近 dry-run"))}: <code>${escapeHtml(latestDryRunText || "-")}</code></div>
     <div class="meta">${escapeHtml(t("Reference max age", "引用有效期"))}: ${escapeHtml(formatDurationMinutes(readiness.dryRun.referenceMaxAgeMs, language))}</div>
     ${findingHtml}
