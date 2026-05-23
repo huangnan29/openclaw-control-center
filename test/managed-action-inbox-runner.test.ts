@@ -260,6 +260,20 @@ test("managed action inbox runner run-live-next 晋升最近成功 dry-run 并�
 
     const liveResults = readdirSync(join(runtime, "managed-action-inbox-runner", "live-results"));
     assert.equal(liveResults.length, 1);
+
+    const repeated = runInbox("run-live-next", {
+      RUNTIME_DIR: runtime,
+      MANAGED_ACTION_INBOX_DIR: inbox,
+      MANAGED_ACTION_COMMAND_RUNNER: runner,
+      FAKE_COMMAND_RUNNER_CALL_LOG: runnerLog,
+      CONFIRM_MANAGED_ACTION_INBOX_LIVE_RUNNER: "I_UNDERSTAND_THIS_PROMOTES_LATEST_INBOX_DRY_RUN_TO_SKILL_RUN_LIVE",
+      MANAGED_ACTION_COMMAND_TOKEN_SOURCE: "container",
+      LOCAL_API_TOKEN: "test-token",
+    });
+    assert.notEqual(repeated.exitCode, 0);
+    assert.equal(repeated.report.status, "blocked_no_successful_inbox_dry_run");
+    const calls = (await readFile(runnerLog, "utf8")).trim().split(/\n/);
+    assert.equal(calls.length, 1);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -424,6 +438,7 @@ test("managed action inbox runner run-next dry-run 后写 control-center runtime
 
     assert.equal(exitCode, 0);
     assert.equal(report.status, "inbox_dry_run_completed");
+    assert.equal(report.pendingCount, 0);
     assert.equal(report.sourcePath, commandFile);
     assert.equal(report.bridgeStatus, "bridge_dry_run_completed");
     assert.equal(report.operationRequestId, "inbox-fake-dry-run");

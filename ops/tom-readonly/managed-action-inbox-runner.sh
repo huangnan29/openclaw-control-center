@@ -342,6 +342,7 @@ function saveLiveResult(dryRunResult, live, status, commandPath) {
     generatedAt: new Date().toISOString(),
     sourcePath: dryRunResult.sourcePath,
     sourceKey: dryRunResult.sourceKey,
+    operationRequestId: dryRunResult.operationRequestId,
     dryRunResultPath: dryRunResult.resultPath,
     liveCommandPath: commandPath,
     liveExitCode: live.exitCode,
@@ -431,8 +432,31 @@ function reportStatus() {
   });
 }
 
+function livePromotionKey(sourceKey, operationRequestId) {
+  return `${sourceKey || ""}\0${operationRequestId || ""}`;
+}
+
+function loadPromotedLiveKeys() {
+  const promoted = new Set();
+  if (!fs.existsSync(liveResultsDir)) return promoted;
+  for (const name of fs.readdirSync(liveResultsDir).filter((item) => item.endsWith(".json"))) {
+    const file = path.join(liveResultsDir, name);
+    try {
+      const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+      if (parsed.status !== "inbox_live_completed") continue;
+      const operationRequestId = parsed.operationRequestId || parsed.liveReport?.target?.operationRequestId;
+      if (!parsed.sourceKey || !operationRequestId) continue;
+      promoted.add(livePromotionKey(parsed.sourceKey, operationRequestId));
+    } catch {
+      continue;
+    }
+  }
+  return promoted;
+}
+
 function findLatestSuccessfulDryRunResult() {
   if (!fs.existsSync(resultsDir)) return undefined;
+  const promotedLiveKeys = loadPromotedLiveKeys();
   const files = fs.readdirSync(resultsDir)
     .filter((name) => name.endsWith(".json"))
     .map((name) => path.join(resultsDir, name))
@@ -447,6 +471,7 @@ function findLatestSuccessfulDryRunResult() {
       if (parsed.status !== "inbox_dry_run_completed") continue;
       if (bridge.runnerStatus !== "dry_run_completed") continue;
       if (!operationRequestId || !payload || payload.action !== "skill_run") continue;
+      if (promotedLiveKeys.has(livePromotionKey(parsed.sourceKey, operationRequestId))) continue;
       return {
         resultPath: file,
         sourcePath: parsed.sourcePath,
@@ -570,7 +595,7 @@ function runNext() {
   const report = summary(status, next, bridge, resultPath, {
     writesControlCenterRuntimeOnly: true,
   });
-  report.pendingCount = pending.length;
+  report.pendingCount = findNext().pending.length;
   emit(report, ok ? 0 : 2);
 }
 
