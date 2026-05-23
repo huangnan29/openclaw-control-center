@@ -28,6 +28,7 @@ export interface ManagedActionLiveGateDecision {
     | "blocked_missing_dry_run"
     | "blocked_invalid_dry_run"
     | "blocked_rollout_not_allowed"
+    | "blocked_skill_run_policy"
     | "ready"
     | "ready_not_implemented";
   message: string;
@@ -49,6 +50,7 @@ export function evaluateManagedActionLiveGate(input: {
   operationRequestId?: string;
   dryRunReferenceValid?: boolean;
   rolloutAllowed?: boolean;
+  skillRunPolicyAllowed?: boolean;
   executorWired?: boolean;
   confirmedText?: string;
 }): ManagedActionLiveGateDecision {
@@ -76,6 +78,9 @@ export function evaluateManagedActionLiveGate(input: {
   }
   if (input.rolloutAllowed !== true) {
     return blocked("blocked_rollout_not_allowed", "Managed action live rollout config does not allow this request.", 403);
+  }
+  if (input.action === "skill_run" && input.skillRunPolicyAllowed !== true) {
+    return blocked("blocked_skill_run_policy", "Managed action skill_run is blocked by skill-run live policy.", 403);
   }
 
   if (input.executorWired === true) {

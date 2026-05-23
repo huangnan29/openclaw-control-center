@@ -3,8 +3,15 @@ import type { AgentRunThinkingLevel } from "../contracts/openclaw-tools";
 import { createScopedToolClient } from "../clients/factory";
 import { buildCollectorSnapshot, selectCollectorExportScope, writeCollectorSnapshotFile } from "./collector-exporter";
 import { loadOpenClawInstanceConfigs } from "./instance-config";
+import {
+  evaluateManagedActionSkillRunPolicy,
+  runtimeManagedActionSkillRunPolicy,
+  type ManagedActionSkillRunPolicy,
+} from "./managed-action-skill-run-policy";
 
-export function createProductionManagedActionExecutor(): ManagedActionExecutor {
+export function createProductionManagedActionExecutor(options: {
+  skillRunPolicy?: ManagedActionSkillRunPolicy;
+} = {}): ManagedActionExecutor {
   return {
     async healthcheck(input) {
       const client = createScopedToolClient(input.instance);
@@ -100,6 +107,29 @@ export function createProductionManagedActionExecutor(): ManagedActionExecutor {
           targetInstanceId: input.instance.id,
           operationRequestId: input.operationRequestId,
           detail: "skill_run requires skillName, message, and one of agentId/sessionKey/sessionId.",
+        };
+      }
+      const policy = evaluateManagedActionSkillRunPolicy({
+        policy: options.skillRunPolicy ?? runtimeManagedActionSkillRunPolicy(),
+        instanceId: input.instance.id,
+        skillName,
+        agentId: input.agentId,
+        sessionKey: input.sessionKey,
+        sessionId: input.sessionId,
+        message,
+        timeoutSeconds: input.timeoutSeconds,
+        deliver: input.deliver,
+      });
+      if (!policy.allowed) {
+        return {
+          ok: false,
+          status: "blocked_invalid_payload",
+          liveExecution: false,
+          mutatesOpenClawInstance: false,
+          action: input.action,
+          targetInstanceId: input.instance.id,
+          operationRequestId: input.operationRequestId,
+          detail: policy.detail,
         };
       }
 

@@ -519,3 +519,151 @@ test("managed action live route executes collector refresh when explicitly allow
     }
   }
 });
+
+test("managed action live route blocks skill_run unless skill policy allowlist is configured", async () => {
+  const previousInstancesJson = process.env.OPENCLAW_INSTANCES_JSON;
+  const previousInstancesFile = process.env.OPENCLAW_INSTANCES_FILE;
+  process.env.OPENCLAW_INSTANCES_JSON = JSON.stringify({
+    instances: [instance("tom")],
+  });
+  delete process.env.OPENCLAW_INSTANCES_FILE;
+
+  let executorCalled = false;
+  const server = startUiServer(0, new ReadonlyToolClient(), {
+    readonlyMode: false,
+    localTokenAuthRequired: false,
+    managedActionLiveGate: {
+      enabled: true,
+      readonlyMode: false,
+      allowedActions: ["skill_run"],
+      requiredConfirmationText: "LIVE-ACTION-APPROVED",
+    },
+    managedActionProductionExecutorEnabled: true,
+    managedActionSkillRunPolicy: {
+      allowedSkills: [],
+      allowedInstances: [],
+      maxTimeoutSeconds: 600,
+      deliverAllowed: false,
+    },
+    managedActionExecutor: {
+      async skill_run(input) {
+        executorCalled = true;
+        return {
+          ok: true,
+          status: "executed_skill_run",
+          liveExecution: true,
+          mutatesOpenClawInstance: true,
+          action: input.action,
+          targetInstanceId: input.instance.id,
+          operationRequestId: input.operationRequestId,
+          detail: "unexpected skill_run execution",
+        };
+      },
+    },
+    managedActionLiveRolloutConfig: {
+      source: "file",
+      path: "/tmp/test-rollout-skill-run.json",
+      enabled: true,
+      issues: [],
+      rules: [
+        {
+          action: "skill_run",
+          instanceId: "tom",
+          operators: ["Anan"],
+          risk: "high",
+          enabled: true,
+          maxDryRunAgeMinutes: 60,
+        },
+      ],
+    },
+  });
+
+  try {
+    if (!server.listening) {
+      await new Promise<void>((resolve, reject) => {
+        server.once("listening", resolve);
+        server.once("error", reject);
+      });
+    }
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Failed to bind ephemeral UI port.");
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+
+    const dryRunResponse = await fetch(`${baseUrl}/api/managed-actions/dry-run`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        instanceId: "tom",
+        action: "skill_run",
+        operator: "Anan",
+        reason: "skill_run live 前置预演",
+        confirmedText: "DRY-RUN-ONLY",
+        skillName: "zhihu-human-ops-writing",
+        agentId: "main",
+        message: "只做安全预演，不发布。",
+      }),
+    });
+    assert.equal(dryRunResponse.status, 200);
+    const dryRun = await dryRunResponse.json() as { review: { operationRequestId: string } };
+
+    const liveResponse = await fetch(`${baseUrl}/api/managed-actions/live`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        instanceId: "tom",
+        action: "skill_run",
+        operator: "Anan",
+        reason: "skill_run policy 未配置时必须阻断",
+        operationRequestId: dryRun.review.operationRequestId,
+        confirmedText: "LIVE-ACTION-APPROVED",
+        skillName: "zhihu-human-ops-writing",
+        agentId: "main",
+        message: "只做安全预演，不发布。",
+      }),
+    });
+    assert.equal(liveResponse.status, 403);
+    const live = await liveResponse.json() as {
+      ok: boolean;
+      status: string;
+      liveExecution: boolean;
+      skillRunPolicy: { allowed: boolean; status: string };
+    };
+    assert.equal(live.ok, false);
+    assert.equal(live.status, "blocked_skill_run_policy");
+    assert.equal(live.liveExecution, false);
+    assert.equal(live.skillRunPolicy.allowed, false);
+    assert.equal(live.skillRunPolicy.status, "blocked_skill_policy_not_configured");
+    assert.equal(executorCalled, false);
+
+    const readinessResponse = await fetch(`${baseUrl}/api/managed-actions/readiness`);
+    assert.equal(readinessResponse.status, 200);
+    const readiness = await readinessResponse.json() as {
+      status: string;
+      liveExecutionAvailable: boolean;
+      mutatesOpenClawInstance: boolean;
+      skillRunPolicy: { required: boolean; allowedSkills: string[]; allowedInstances: string[] };
+      blockers: Array<{ id: string }>;
+    };
+    assert.equal(readiness.status, "blocked");
+    assert.equal(readiness.liveExecutionAvailable, false);
+    assert.equal(readiness.mutatesOpenClawInstance, true);
+    assert.equal(readiness.skillRunPolicy.required, true);
+    assert.deepEqual(readiness.skillRunPolicy.allowedSkills, []);
+    assert.deepEqual(readiness.skillRunPolicy.allowedInstances, []);
+    assert(readiness.blockers.some((item) => item.id === "skill_run_policy_not_configured"));
+  } finally {
+    if (server.listening) {
+      await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+    }
+    if (previousInstancesJson === undefined) {
+      delete process.env.OPENCLAW_INSTANCES_JSON;
+    } else {
+      process.env.OPENCLAW_INSTANCES_JSON = previousInstancesJson;
+    }
+    if (previousInstancesFile === undefined) {
+      delete process.env.OPENCLAW_INSTANCES_FILE;
+    } else {
+      process.env.OPENCLAW_INSTANCES_FILE = previousInstancesFile;
+    }
+  }
+});

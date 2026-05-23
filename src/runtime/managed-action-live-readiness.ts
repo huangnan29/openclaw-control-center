@@ -2,6 +2,7 @@ import type { ManagedActionAuditSnapshot } from "./managed-action-audit";
 import { MANAGED_ACTION_DRY_RUN_REFERENCE_MAX_AGE_MS } from "./managed-action-audit";
 import type { ManagedActionLiveGate } from "./managed-action-live";
 import type { ManagedActionLiveRolloutConfig, ManagedActionLiveRolloutRule } from "./managed-action-live-rollout";
+import { runtimeManagedActionSkillRunPolicy, type ManagedActionSkillRunPolicy } from "./managed-action-skill-run-policy";
 import type { ManagedActionName } from "./managed-actions";
 
 export type ManagedActionLiveReadinessStatus = "blocked" | "review_required" | "ready";
@@ -14,7 +15,8 @@ export type ManagedActionLiveReadinessFindingId =
   | "rollout_config_issues"
   | "rollout_enabled_rules_empty"
   | "production_executor_missing"
-  | "dry_run_audit_empty";
+  | "dry_run_audit_empty"
+  | "skill_run_policy_not_configured";
 
 export interface ManagedActionLiveReadinessFinding {
   id: ManagedActionLiveReadinessFindingId;
@@ -28,7 +30,7 @@ export interface ManagedActionLiveReadinessSnapshot {
   status: ManagedActionLiveReadinessStatus;
   liveExecutionAvailable: boolean;
   liveExecutionAttempted: false;
-  mutatesOpenClawInstance: false;
+  mutatesOpenClawInstance: boolean;
   gate: {
     enabled: boolean;
     readonlyMode: boolean;
@@ -62,6 +64,13 @@ export interface ManagedActionLiveReadinessSnapshot {
     status: "missing" | "wired";
     mockOnly: boolean;
   };
+  skillRunPolicy: {
+    allowedSkills: string[];
+    allowedInstances: string[];
+    maxTimeoutSeconds: number;
+    deliverAllowed: boolean;
+    required: boolean;
+  };
   findings: ManagedActionLiveReadinessFinding[];
   blockers: ManagedActionLiveReadinessFinding[];
   reviewItems: ManagedActionLiveReadinessFinding[];
@@ -72,16 +81,22 @@ export function buildManagedActionLiveReadiness(input: {
   rolloutConfig: ManagedActionLiveRolloutConfig;
   dryRunAudit: ManagedActionAuditSnapshot;
   productionExecutorWired?: boolean;
+  skillRunPolicy?: ManagedActionSkillRunPolicy;
   generatedAt?: string;
 }): ManagedActionLiveReadinessSnapshot {
   const productionExecutorWired = input.productionExecutorWired === true;
   const enabledRules = input.rolloutConfig.rules.filter((rule) => rule.enabled);
+  const skillRunPolicy = input.skillRunPolicy ?? runtimeManagedActionSkillRunPolicy();
+  const skillRunPolicyRequired = input.gate.allowedActions.includes("skill_run")
+    || enabledRules.some((rule) => rule.action === "skill_run");
   const findings = buildFindings({
     gate: input.gate,
     rolloutConfig: input.rolloutConfig,
     enabledRules,
     dryRunAudit: input.dryRunAudit,
     productionExecutorWired,
+    skillRunPolicy,
+    skillRunPolicyRequired,
   });
   const blockers = findings.filter((finding) => finding.severity === "block");
   const reviewItems = findings.filter((finding) => finding.severity === "review");
@@ -96,7 +111,7 @@ export function buildManagedActionLiveReadiness(input: {
     status,
     liveExecutionAvailable,
     liveExecutionAttempted: false,
-    mutatesOpenClawInstance: false,
+    mutatesOpenClawInstance: skillRunPolicyRequired,
     gate: {
       enabled: input.gate.enabled,
       readonlyMode: input.gate.readonlyMode,
@@ -134,6 +149,13 @@ export function buildManagedActionLiveReadiness(input: {
       status: productionExecutorWired ? "wired" : "missing",
       mockOnly: !productionExecutorWired,
     },
+    skillRunPolicy: {
+      allowedSkills: skillRunPolicy.allowedSkills,
+      allowedInstances: skillRunPolicy.allowedInstances,
+      maxTimeoutSeconds: skillRunPolicy.maxTimeoutSeconds,
+      deliverAllowed: skillRunPolicy.deliverAllowed,
+      required: skillRunPolicyRequired,
+    },
     findings,
     blockers,
     reviewItems,
@@ -146,6 +168,8 @@ function buildFindings(input: {
   enabledRules: ManagedActionLiveRolloutRule[];
   dryRunAudit: ManagedActionAuditSnapshot;
   productionExecutorWired: boolean;
+  skillRunPolicy: ManagedActionSkillRunPolicy;
+  skillRunPolicyRequired: boolean;
 }): ManagedActionLiveReadinessFinding[] {
   const findings: ManagedActionLiveReadinessFinding[] = [];
   if (!input.gate.enabled) {
@@ -195,6 +219,16 @@ function buildFindings(input: {
       id: "production_executor_missing",
       severity: "block",
       detail: "No production managed action executor is wired.",
+    });
+  }
+  if (
+    input.skillRunPolicyRequired
+    && (input.skillRunPolicy.allowedSkills.length === 0 || input.skillRunPolicy.allowedInstances.length === 0)
+  ) {
+    findings.push({
+      id: "skill_run_policy_not_configured",
+      severity: "block",
+      detail: "skill_run is exposed by gate or rollout but its live skill/instance allowlist is incomplete.",
     });
   }
   if (input.dryRunAudit.count === 0) {

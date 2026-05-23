@@ -65,6 +65,12 @@ import {
   type ManagedActionLiveGate,
 } from "../runtime/managed-action-live";
 import {
+  evaluateManagedActionSkillRunPolicy,
+  runtimeManagedActionSkillRunPolicy,
+  type ManagedActionSkillRunPolicy,
+  type ManagedActionSkillRunPolicyDecision,
+} from "../runtime/managed-action-skill-run-policy";
+import {
   defaultManagedActionLiveRolloutConfig,
   evaluateManagedActionLiveRollout,
   loadManagedActionLiveRolloutConfig,
@@ -1094,6 +1100,7 @@ interface StartUiServerOptions {
   readonlyMode?: boolean;
   managedActionLiveGate?: ManagedActionLiveGate;
   managedActionLiveRolloutConfig?: ManagedActionLiveRolloutConfig;
+  managedActionSkillRunPolicy?: ManagedActionSkillRunPolicy;
   managedActionProductionExecutorEnabled?: boolean;
   managedActionExecutor?: ManagedActionExecutor;
   createMultiInstanceSnapshot?: (
@@ -1144,8 +1151,12 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
   const readonlyMode = options.readonlyMode ?? READONLY_MODE;
   const managedActionProductionExecutorEnabled =
     options.managedActionProductionExecutorEnabled ?? MANAGED_ACTIONS_LIVE_EXECUTOR_ENABLED;
+  const resolveManagedActionSkillRunPolicy = (): ManagedActionSkillRunPolicy =>
+    options.managedActionSkillRunPolicy ?? runtimeManagedActionSkillRunPolicy();
   const managedActionExecutor = managedActionProductionExecutorEnabled
-    ? options.managedActionExecutor ?? createProductionManagedActionExecutor()
+    ? options.managedActionExecutor ?? createProductionManagedActionExecutor({
+      skillRunPolicy: resolveManagedActionSkillRunPolicy(),
+    })
     : {};
   const resolveManagedActionLiveGate = (): ManagedActionLiveGate =>
     options.managedActionLiveGate ?? runtimeManagedActionLiveGate();
@@ -1158,6 +1169,7 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
     gate: resolveManagedActionLiveGate(),
     rolloutConfig: await resolveManagedActionLiveRolloutConfig(),
     productionExecutorWired: managedActionProductionExecutorEnabled,
+    skillRunPolicy: resolveManagedActionSkillRunPolicy(),
   });
   const assertMutationAuthorized = (
     req: IncomingMessage,
@@ -1651,6 +1663,19 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
           instanceId,
           operator,
         });
+        const skillRunPolicyDecision = action === "skill_run"
+          ? evaluateManagedActionSkillRunPolicy({
+            policy: resolveManagedActionSkillRunPolicy(),
+            instanceId,
+            skillName,
+            agentId,
+            sessionKey,
+            sessionId,
+            message,
+            timeoutSeconds,
+            deliver,
+          })
+          : managedActionSkillRunPolicyAllowed();
         const gate = resolveManagedActionLiveGate();
         const decision = evaluateManagedActionLiveGate({
           gate,
@@ -1658,6 +1683,7 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
           operationRequestId,
           dryRunReferenceValid: dryRunReference.valid && dryRunCommandPreviewMatches,
           rolloutAllowed: rollout.allowed,
+          skillRunPolicyAllowed: skillRunPolicyDecision.allowed,
           executorWired: managedActionProductionExecutorEnabled,
           confirmedText,
         });
@@ -1693,6 +1719,7 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
               dryRunCommandPreviewMatches,
               dryRunReference: managedActionDryRunReferenceSummary(dryRunReference),
               rollout: managedActionRolloutSummary(rollout),
+              skillRunPolicy: managedActionSkillRunPolicySummary(skillRunPolicyDecision),
               executor: managedActionExecutorSummary(managedActionProductionExecutorEnabled),
               liveExecution: false,
               gate: {
@@ -1712,6 +1739,7 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
             dryRunCommandPreviewMatches,
             liveCommandPreview,
             rollout: managedActionRolloutSummary(rollout),
+            skillRunPolicy: managedActionSkillRunPolicySummary(skillRunPolicyDecision),
             executor: managedActionExecutorSummary(managedActionProductionExecutorEnabled),
             gate: {
               enabled: gate.enabled,
@@ -1786,6 +1814,7 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
           dryRunCommandPreviewMatches,
           liveCommandPreview,
           rollout: managedActionRolloutSummary(rollout),
+          skillRunPolicy: managedActionSkillRunPolicySummary(skillRunPolicyDecision),
           executor: managedActionExecutorSummary(managedActionProductionExecutorEnabled),
           gate: {
             enabled: gate.enabled,
@@ -9808,6 +9837,7 @@ function renderManagedActionReadinessPanel(
     renderReadinessChip(t("Dry-run audit", "Dry-run 审计"), String(readiness.dryRun.count), readiness.dryRun.count > 0 ? "" : "review"),
     renderReadinessChip(t("Executor", "执行器"), readiness.executor.productionWired ? t("wired", "已接入") : t("missing", "未接入"), readiness.executor.productionWired ? "" : "blocked"),
     renderReadinessChip(t("Instance mutation", "实例写入"), readiness.mutatesOpenClawInstance ? t("possible", "可能") : t("blocked", "阻断"), readiness.mutatesOpenClawInstance ? "review" : ""),
+    renderReadinessChip(t("Skill policy", "Skill 策略"), readiness.skillRunPolicy.required ? t("required", "必需") : t("inactive", "未启用"), readiness.skillRunPolicy.required ? "review" : ""),
   ].join("");
   const findingRows = readiness.findings
     .map((finding) => {
@@ -9831,6 +9861,7 @@ function renderManagedActionReadinessPanel(
     <div class="meta">${escapeHtml(t("Rollout source", "灰度来源"))}: <code>${escapeHtml(rolloutPath)}</code></div>
     <div class="meta">${escapeHtml(t("Allowed actions", "允许动作"))}: <code>${escapeHtml(readiness.gate.allowedActions.join(", ") || "-")}</code></div>
     <div class="meta">${escapeHtml(t("Blocked live actions", "live 阻断动作"))}: <code>${escapeHtml(blockedLiveActions.join(", ") || "-")}</code></div>
+    <div class="meta">${escapeHtml(t("Skill-run policy", "skill_run 策略"))}: ${escapeHtml(t("skills", "技能"))}=<code>${escapeHtml(readiness.skillRunPolicy.allowedSkills.join(", ") || "-")}</code> · ${escapeHtml(t("instances", "实例"))}=<code>${escapeHtml(readiness.skillRunPolicy.allowedInstances.join(", ") || "-")}</code> · timeout=<code>${escapeHtml(String(readiness.skillRunPolicy.maxTimeoutSeconds))}s</code> · deliver=<code>${escapeHtml(String(readiness.skillRunPolicy.deliverAllowed))}</code></div>
     <div class="meta">${escapeHtml(t("Latest dry-run", "最近 dry-run"))}: <code>${escapeHtml(latestDryRunText || "-")}</code></div>
     <div class="meta">${escapeHtml(t("Reference max age", "引用有效期"))}: ${escapeHtml(formatDurationMinutes(readiness.dryRun.referenceMaxAgeMs, language))}</div>
     ${findingHtml}
@@ -9871,6 +9902,8 @@ function managedActionReadinessFindingText(
       return pickUiText(language, "Production executor is not wired yet.", "生产执行器尚未接入。");
     case "dry_run_audit_empty":
       return pickUiText(language, "No dry-run audit record is visible yet.", "当前还没有可见的 dry-run 审计记录。");
+    case "skill_run_policy_not_configured":
+      return pickUiText(language, "skill_run is exposed but its live skill/instance allowlist is incomplete.", "skill_run 已暴露，但 live 技能/实例 allowlist 尚未配置完整。");
     default:
       return finding.detail;
   }
@@ -24170,6 +24203,7 @@ async function readManagedActionLiveReadinessSnapshot(input: {
   gate: ManagedActionLiveGate;
   rolloutConfig: ManagedActionLiveRolloutConfig;
   productionExecutorWired: boolean;
+  skillRunPolicy: ManagedActionSkillRunPolicy;
 }): Promise<ManagedActionLiveReadinessSnapshot> {
   const audit = input.dryRunAudit ?? await readManagedActionDryRunAudits({ limit: 20 });
   return buildManagedActionLiveReadiness({
@@ -24177,6 +24211,7 @@ async function readManagedActionLiveReadinessSnapshot(input: {
     rolloutConfig: input.rolloutConfig,
     dryRunAudit: audit,
     productionExecutorWired: input.productionExecutorWired,
+    skillRunPolicy: input.skillRunPolicy,
   });
 }
 
@@ -24191,6 +24226,7 @@ function buildFallbackManagedActionLiveReadiness(): ManagedActionLiveReadinessSn
       records: [],
     },
     productionExecutorWired: false,
+    skillRunPolicy: runtimeManagedActionSkillRunPolicy(),
   });
 }
 
@@ -24198,6 +24234,22 @@ function managedActionExecutorSummary(enabled: boolean): Record<string, unknown>
   return {
     productionWired: enabled,
     status: enabled ? "wired" : "missing",
+  };
+}
+
+function managedActionSkillRunPolicyAllowed(): ManagedActionSkillRunPolicyDecision {
+  return {
+    allowed: true,
+    status: "allowed",
+    detail: "skill_run policy is not required for this action.",
+  };
+}
+
+function managedActionSkillRunPolicySummary(input: ManagedActionSkillRunPolicyDecision): Record<string, unknown> {
+  return {
+    allowed: input.allowed,
+    status: input.status,
+    detail: input.detail,
   };
 }
 
