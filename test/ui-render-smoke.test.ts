@@ -277,7 +277,7 @@ test("multi-instance overview renders status metrics detail links and selected s
   };
 
   const html = renderMultiInstanceOverviewForSmoke(snapshot, "zh");
-  assert(html.includes("多实例只读总览"));
+  assert(html.includes("多实例受控总览"));
 	  assert(html.includes("Tom Workspace"));
 	  assert(html.includes("Jerry Workspace"));
 	  assert(html.includes("instance-avatar-rail"));
@@ -297,9 +297,9 @@ test("multi-instance overview renders status metrics detail links and selected s
   assert(html.includes("快照新鲜"));
   assert(html.includes("snapshot.json"));
   assert(html.includes("真实执行上线条件"));
-  assert(html.includes("本卡片不调用 live API"));
+  assert(html.includes("不会自行调用 live API"));
   assert(html.includes("生产执行器尚未接入"));
-  assert(html.includes("管理动作预览"));
+  assert(html.includes("实例操作入口"));
   assert(html.includes("动作操作台"));
   assert(html.includes("data-managed-action-preset=\"healthcheck\""));
   assert(html.includes("data-managed-action-preset=\"collector_refresh\""));
@@ -317,6 +317,10 @@ test("multi-instance overview renders status metrics detail links and selected s
   assert(html.includes("LIVE-ACTION-APPROVED"));
   assert(html.includes("mutatesOpenClawInstance"));
   assert(html.includes("操作者"));
+  assert(html.includes("Skill 指令"));
+  assert(html.includes("Agent"));
+  assert(html.includes("超时秒数"));
+  assert(html.includes("zhihu-human-ops-writing"));
   assert(html.includes("确认短语"));
   assert(html.includes("DRY-RUN-ONLY"));
   assert(html.includes("管理动作审计"));
@@ -554,7 +558,7 @@ test("multi-instance routes render overview detail and invalid-instance fallback
     const overviewResponse = await fetch(`${baseUrl}/`);
     assert.equal(overviewResponse.status, 200);
     const overviewHtml = await overviewResponse.text();
-    assert(overviewHtml.includes("多实例只读总览"));
+    assert(overviewHtml.includes("多实例受控总览"));
     assert(overviewHtml.includes('href="/?instance=tom&amp;section=overview'));
     assert(overviewHtml.includes('href="/?server=tom-oracle&amp;section=overview&amp;lang=zh"'));
 
@@ -568,7 +572,8 @@ test("multi-instance routes render overview detail and invalid-instance fallback
     const detailResponse = await fetch(`${baseUrl}/?instance=tom&section=projects-tasks&lang=zh`);
     assert.equal(detailResponse.status, 200);
     const detailHtml = await detailResponse.text();
-    assert(detailHtml.includes("只读实例详情"));
+    assert(detailHtml.includes("受控实例详情"));
+    assert(detailHtml.includes("实例操作入口"));
     assert(detailHtml.includes("Tom Workspace"));
     assert(detailHtml.includes("tom-route-session"));
     assert(detailHtml.includes("运行态分布"));
@@ -599,7 +604,7 @@ test("multi-instance routes render overview detail and invalid-instance fallback
     assert(detailHtml.includes("Tom Workspace project"));
     assert(detailHtml.includes("Tom Workspace task"));
     assert(detailHtml.includes("main token budget"));
-    assert(detailHtml.includes("本页不挂载执行、编辑或审批控件"));
+    assert(detailHtml.includes("下方操作入口会先 dry-run"));
     assert(detailHtml.includes('href="/?section=projects-tasks&amp;lang=zh"'));
 	  assert(detailHtml.includes('href="/?instance=tom&amp;section=projects-tasks&amp;lang=zh"'));
 	  assert(detailHtml.includes('href="/?instance=jerry&amp;section=projects-tasks&amp;lang=zh"'));
@@ -609,13 +614,14 @@ test("multi-instance routes render overview detail and invalid-instance fallback
 	  assert(!detailHtml.includes("data-task-room-approve"));
 	  assert(!detailHtml.includes("/api/approvals"));
 	  assert(!detailHtml.includes("/api/files/content"));
-	  assert(!detailHtml.includes("fetch("));
+	  assert(detailHtml.includes("/api/managed-actions/dry-run"));
+	  assert(detailHtml.includes("/api/managed-actions/live"));
 
     const invalidResponse = await fetch(`${baseUrl}/?instance=missing`);
     assert.equal(invalidResponse.status, 200);
     const invalidHtml = await invalidResponse.text();
     assert(invalidHtml.includes("未找到该实例"));
-    assert(invalidHtml.includes("多实例只读总览"));
+    assert(invalidHtml.includes("多实例受控总览"));
     assert.deepEqual(calls, ["tom", "tom", "tom", "missing"]);
   } finally {
     if (server.listening) {
@@ -660,14 +666,15 @@ test("explicit single instance config still uses multi-instance overview", async
     const response = await fetch(`http://127.0.0.1:${address.port}/`);
     assert.equal(response.status, 200);
     const html = await response.text();
-    assert(html.includes("多实例只读总览"));
+    assert(html.includes("多实例受控总览"));
     assert(html.includes("Solo Workspace"));
     assert(html.includes('href="/?instance=solo&amp;section=overview'));
 
     const detailResponse = await fetch(`http://127.0.0.1:${address.port}/?instance=solo&section=overview&lang=zh`);
     assert.equal(detailResponse.status, 200);
     const detailHtml = await detailResponse.text();
-    assert(detailHtml.includes("只读实例详情"));
+    assert(detailHtml.includes("受控实例详情"));
+    assert(detailHtml.includes("实例操作入口"));
     assert(detailHtml.includes("Solo Workspace"));
     assert(detailHtml.includes("solo-route-session"));
   } finally {

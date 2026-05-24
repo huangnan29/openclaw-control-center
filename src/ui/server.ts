@@ -1313,12 +1313,17 @@ export function startUiServer(port: number, toolClient: ToolClient, options: Sta
             return writeText(res, 200, html, "text/html; charset=utf-8");
           }
 
+          const [managedActionAudit, managedActionReadiness] = await Promise.all([
+            readManagedActionDryRunAudits({ limit: 8, instanceId: selectedInstance.id }),
+            readManagedActionReadiness(),
+          ]);
           const html = renderMultiInstanceDetail(
             snapshot,
             selectedInstance.id,
             language,
             section,
-            await readManagedActionReadiness(),
+            managedActionReadiness,
+            managedActionAudit,
           );
           return writeText(res, 200, html, "text/html; charset=utf-8");
         }
@@ -9276,13 +9281,6 @@ function renderMultiInstanceSectionBody(input: {
     ${renderServerHealthPanel(snapshot, language)}
     ${renderCollectorSnapshotPanel(snapshot.instances, language, snapshot.generatedAt)}
     ${renderManagedActionReadinessPanel(input.managedActionReadiness ?? buildFallbackManagedActionLiveReadiness(), language)}
-    ${renderManagedActionDryRunPanel(
-      snapshot.instances,
-      language,
-      snapshot.selectedInstanceId,
-      input.managedActionReadiness ?? buildFallbackManagedActionLiveReadiness(),
-      input.managedActionAudit?.records ?? [],
-    )}
     ${renderManagedActionAuditPanel(input.managedActionAudit?.records ?? [], language)}
     <section class="overview-layout">
       <div>
@@ -9520,10 +9518,13 @@ function renderMultiInstanceOverview(
     a.button { display: inline-flex; margin-top: 8px; text-decoration: none; color: #005cb9; font-weight: 600; }
     .control-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; align-items: end; }
     .control-field { display: grid; gap: 5px; }
+	    .control-field-wide { grid-column: 1 / -1; }
 	    .control-field label { color: var(--muted); font-size: 12px; font-weight: 600; }
 	    .control-field select, .control-field input, .control-field textarea { width: 100%; min-height: 38px; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font: inherit; background: #fff; color: var(--text); }
     .control-field textarea { min-height: 76px; resize: vertical; }
 	    .control-field button { min-height: 38px; border: 1px solid rgba(0, 113, 227, 0.45); border-radius: 8px; padding: 8px 12px; font: inherit; font-weight: 700; color: #005cb9; background: #eff8ff; cursor: pointer; }
+	    .control-check { min-height: 38px; display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; background: #fff; color: #344054; font-size: 13px; }
+	    .control-check input { width: 16px; height: 16px; accent-color: #005cb9; }
 	    .action-console { display: grid; gap: 10px; margin: 0 0 12px; }
 	    .action-console-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; align-items: center; }
 	    .action-console-head strong { font-size: 14px; }
@@ -9563,6 +9564,13 @@ function renderMultiInstanceOverview(
 	    ${warningHtml}
 		    <section class="status-strip">${totalChips}</section>
 		    ${renderInstanceAvatarRail(snapshot, language)}
+		    ${activeSection === "overview" ? renderManagedActionDryRunPanel(
+          snapshot.instances,
+          language,
+          snapshot.selectedInstanceId,
+          managedActionReadiness ?? buildFallbackManagedActionLiveReadiness(),
+          managedActionAudit?.records ?? [],
+        ) : ""}
 		    ${instanceLoadPanel}
 		    ${sectionBody}
 	  </main>
@@ -9596,8 +9604,8 @@ function renderManagedActionDryRunPanel(
   return `<section class="panel" id="managed-actions-dry-run">
     <div class="panel-head">
       <div>
-        <h2>${escapeHtml(t("Managed action preview", "管理动作预览"))}</h2>
-        <div class="meta">${escapeHtml(t("Dry-run and audit only. No OpenClaw instance command is executed.", "仅 dry-run 与审计，不执行 OpenClaw 实例命令。"))}</div>
+        <h2>${escapeHtml(t("Instance operation console", "实例操作入口"))}</h2>
+        <div class="meta">${escapeHtml(t("Pick an instance, choose an action, and write the skill message. The first submit only creates a dry-run audit.", "选择实例、动作，并填写 skill 指令。第一次提交只创建 dry-run 审计。"))}</div>
       </div>
       ${badge("partial", "dry-run")}
 	    </div>
@@ -9618,11 +9626,30 @@ function renderManagedActionDryRunPanel(
         </div>
         <div class="control-field">
           <label for="managed-action-skill">${escapeHtml(t("Skill", "Skill"))}</label>
-          <input id="managed-action-skill" name="skillName" type="text" autocomplete="off" placeholder="${escapeHtml(t("Optional", "可选"))}" />
+          <input id="managed-action-skill" name="skillName" type="text" autocomplete="off" placeholder="${escapeHtml(t("Required for skill_run", "skill_run 必填"))}" />
+        </div>
+        <div class="control-field">
+          <label for="managed-action-agent">${escapeHtml(t("Agent", "Agent"))}</label>
+          <input id="managed-action-agent" name="agentId" type="text" autocomplete="off" placeholder="main" />
         </div>
         <div class="control-field">
           <label for="managed-action-reason">${escapeHtml(t("Reason", "原因"))}</label>
           <input id="managed-action-reason" name="reason" type="text" autocomplete="off" required placeholder="${escapeHtml(t("Before rollout check", "上线前检查"))}" />
+        </div>
+        <div class="control-field">
+          <label for="managed-action-timeout">${escapeHtml(t("Timeout seconds", "超时秒数"))}</label>
+          <input id="managed-action-timeout" name="timeoutSeconds" type="number" min="1" max="7200" step="1" value="90" />
+        </div>
+        <div class="control-field">
+          <label for="managed-action-thinking">${escapeHtml(t("Thinking", "推理强度"))}</label>
+          <select id="managed-action-thinking" name="thinking">
+            <option value="">${escapeHtml(t("Default", "默认"))}</option>
+            <option value="minimal">minimal</option>
+            <option value="low">low</option>
+            <option value="medium">medium</option>
+            <option value="high">high</option>
+            <option value="xhigh">xhigh</option>
+          </select>
         </div>
         <div class="control-field">
           <label for="managed-action-confirmed">${escapeHtml(t("Confirmation", "确认短语"))}</label>
@@ -9632,6 +9659,14 @@ function renderManagedActionDryRunPanel(
           <label for="managed-action-token">${escapeHtml(t("Local token", "本地令牌"))}</label>
           <input id="managed-action-token" name="localToken" type="password" autocomplete="current-password" />
         </div>
+        <div class="control-field control-field-wide">
+          <label for="managed-action-message">${escapeHtml(t("Skill message", "Skill 指令"))}</label>
+          <textarea id="managed-action-message" name="message" autocomplete="off" placeholder="${escapeHtml(t("Describe what this instance should do. Dry-run will only preview the command.", "写清楚希望该实例执行什么。dry-run 只预览命令。"))}"></textarea>
+        </div>
+        <label class="control-check">
+          <input name="deliver" type="checkbox" value="true" />
+          <span>${escapeHtml(t("Allow deliver=true for this request", "允许本次请求 deliver=true"))}</span>
+        </label>
         <div class="control-field">
           <button type="submit">${escapeHtml(t("Generate preview", "生成预览"))}</button>
         </div>
@@ -9717,9 +9752,28 @@ function renderManagedActionLiveControlPanel(
           <input id="managed-action-live-agent" name="agentId" type="text" autocomplete="off" placeholder="${escapeHtml(t("Only needed for skill_run", "仅 skill_run 需要"))}" />
         </div>
         <div class="control-field">
+          <label for="managed-action-live-timeout">${escapeHtml(t("Timeout seconds", "超时秒数"))}</label>
+          <input id="managed-action-live-timeout" name="timeoutSeconds" type="number" min="1" max="7200" step="1" value="90" />
+        </div>
+        <div class="control-field">
+          <label for="managed-action-live-thinking">${escapeHtml(t("Thinking", "推理强度"))}</label>
+          <select id="managed-action-live-thinking" name="thinking">
+            <option value="">${escapeHtml(t("Default", "默认"))}</option>
+            <option value="minimal">minimal</option>
+            <option value="low">low</option>
+            <option value="medium">medium</option>
+            <option value="high">high</option>
+            <option value="xhigh">xhigh</option>
+          </select>
+        </div>
+        <div class="control-field">
           <label for="managed-action-live-message">${escapeHtml(t("Message", "消息"))}</label>
           <textarea id="managed-action-live-message" name="message" autocomplete="off" placeholder="${escapeHtml(t("Only needed for skill_run", "仅 skill_run 需要"))}"></textarea>
         </div>
+        <label class="control-check">
+          <input name="deliver" type="checkbox" value="true" />
+          <span>${escapeHtml(t("Allow deliver=true for this request", "允许本次请求 deliver=true"))}</span>
+        </label>
         <div class="control-field">
           <button type="submit">${escapeHtml(t("Submit live request", "提交 live 请求"))}</button>
         </div>
@@ -9751,7 +9805,7 @@ function renderManagedActionPresetConsole(
       const liveLabel = liveReady && allowedActions.has(definition.action)
         ? t("live-ready", "live 已就绪")
         : t("dry-run only", "仅 dry-run");
-      return `<button type="button" class="action-preset" data-managed-action-preset="${escapeHtml(definition.action)}" data-managed-action-reason="${escapeHtml(labels.reason)}" data-managed-action-skill="${escapeHtml(labels.skillName ?? "")}">
+      return `<button type="button" class="action-preset" data-managed-action-preset="${escapeHtml(definition.action)}" data-managed-action-reason="${escapeHtml(labels.reason)}" data-managed-action-skill="${escapeHtml(labels.skillName ?? "")}" data-managed-action-agent="${escapeHtml(labels.agentId ?? "")}" data-managed-action-message="${escapeHtml(labels.message ?? "")}" data-managed-action-timeout="${escapeHtml(labels.timeoutSeconds ? String(labels.timeoutSeconds) : "")}">
         <span class="action-preset-title"><span>${escapeHtml(managedActionUiLabel(definition.action, language))}</span>${badge(liveReady && allowedActions.has(definition.action) ? "connected" : "partial", liveLabel)}</span>
         <span class="action-preset-desc">${escapeHtml(labels.description)}</span>
         <span class="action-preset-last">${escapeHtml(latestForActionText)}</span>
@@ -9793,7 +9847,7 @@ function managedActionAuditCompactText(record: ManagedActionAuditRecord, languag
 function managedActionPresetUi(
   action: ManagedActionName,
   language: UiLanguage,
-): { description: string; reason: string; skillName?: string } {
+): { description: string; reason: string; skillName?: string; agentId?: string; message?: string; timeoutSeconds?: number } {
   if (action === "healthcheck") {
     return {
       description: pickUiText(language, "Preview the control-center healthcheck command for the selected instance.", "预览选中实例的控制中心健康检查命令。"),
@@ -9807,8 +9861,16 @@ function managedActionPresetUi(
     };
   }
   return {
-    description: pickUiText(language, "Preview a skill invocation. Fill Skill before generating the command preview.", "预览 skill 调用。生成命令预览前需要填写 Skill。"),
+    description: pickUiText(language, "Preview a skill invocation. The current live allowlist is prepared for zhihu-human-ops-writing.", "预览 skill 调用。当前 live allowlist 已按 zhihu-human-ops-writing 准备。"),
     reason: pickUiText(language, "Skill invocation preview", "skill 调用预览"),
+    skillName: "zhihu-human-ops-writing",
+    agentId: "main",
+    message: pickUiText(
+      language,
+      "Run a minimal zhihu-human-ops-writing connectivity check only. Do not publish, do not generate images, and do not operate the browser.",
+      "仅执行 zhihu-human-ops-writing 最小连通性检查。不要发布，不要生成图片，不要操作浏览器。",
+    ),
+    timeoutSeconds: 90,
   };
 }
 
@@ -9979,21 +10041,40 @@ function renderManagedActionDryRunScript(language: UiLanguage): string {
     const field = form.querySelector('[name="' + name + '"]');
     if (field && "value" in field) field.value = value == null ? "" : String(value);
   };
+  const setCheckValue = (form, name, value) => {
+    const field = form.querySelector('[name="' + name + '"]');
+    if (field && "checked" in field) field.checked = value === true;
+  };
+  const parseOptionalInteger = (value) => {
+    const text = String(value == null ? "" : value).trim();
+    if (!text) return undefined;
+    const parsed = Number(text);
+    return Number.isInteger(parsed) ? parsed : undefined;
+  };
   const fillManagedActionForm = (form, button) => {
     const instanceSelect = form.querySelector('[name="instanceId"]');
     const actionSelect = form.querySelector('[name="action"]');
     const reasonInput = form.querySelector('[name="reason"]');
     const skillInput = form.querySelector('[name="skillName"]');
+    const agentInput = form.querySelector('[name="agentId"]');
+    const messageInput = form.querySelector('[name="message"]');
+    const timeoutInput = form.querySelector('[name="timeoutSeconds"]');
     const confirmInput = form.querySelector('[name="confirmedText"]');
     const operatorInput = form.querySelector('[name="operator"]');
     const instanceId = button.getAttribute("data-managed-action-instance") || "";
     const action = button.getAttribute("data-managed-action-preset") || "";
     const reason = button.getAttribute("data-managed-action-reason") || "";
     const skill = button.getAttribute("data-managed-action-skill") || "";
+    const agent = button.getAttribute("data-managed-action-agent") || "";
+    const message = button.getAttribute("data-managed-action-message") || "";
+    const timeout = button.getAttribute("data-managed-action-timeout") || "";
     if (instanceSelect && "value" in instanceSelect && instanceId) instanceSelect.value = instanceId;
     if (actionSelect && "value" in actionSelect) actionSelect.value = action;
     if (reasonInput && "value" in reasonInput) reasonInput.value = reason;
     if (skillInput && "value" in skillInput && skill) skillInput.value = skill;
+    if (agentInput && "value" in agentInput && agent) agentInput.value = agent;
+    if (messageInput && "value" in messageInput && message) messageInput.value = message;
+    if (timeoutInput && "value" in timeoutInput && timeout) timeoutInput.value = timeout;
     if (confirmInput && "value" in confirmInput) confirmInput.value = "DRY-RUN-ONLY";
     if (operatorInput && typeof operatorInput.focus === "function") operatorInput.focus();
     if (!form.contains(button) && typeof form.scrollIntoView === "function") {
@@ -10009,6 +10090,11 @@ function renderManagedActionDryRunScript(language: UiLanguage): string {
     setFieldValue(form, "operator", body?.review?.operator || payload.operator);
     setFieldValue(form, "reason", payload.reason);
     setFieldValue(form, "skillName", payload.skillName);
+    setFieldValue(form, "agentId", payload.agentId);
+    setFieldValue(form, "message", payload.message);
+    setFieldValue(form, "thinking", payload.thinking);
+    setFieldValue(form, "timeoutSeconds", payload.timeoutSeconds || "");
+    setCheckValue(form, "deliver", payload.deliver === true);
     setFieldValue(form, "confirmedText", "");
   };
   Array.from(document.querySelectorAll("[data-managed-action-preset]")).forEach((button) => {
@@ -10031,6 +10117,11 @@ function renderManagedActionDryRunScript(language: UiLanguage): string {
         instanceId: String(data.get("instanceId") || ""),
         action: String(data.get("action") || ""),
         skillName: String(data.get("skillName") || ""),
+        agentId: String(data.get("agentId") || ""),
+        message: String(data.get("message") || ""),
+        thinking: String(data.get("thinking") || ""),
+        timeoutSeconds: parseOptionalInteger(data.get("timeoutSeconds")),
+        deliver: data.get("deliver") === "true",
         reason: String(data.get("reason") || ""),
         operator: String(data.get("operator") || ""),
         confirmedText: String(data.get("confirmedText") || ""),
@@ -10057,6 +10148,7 @@ function renderManagedActionDryRunScript(language: UiLanguage): string {
           copy.request + ": " + String(body.review?.operationRequestId || "-"),
           copy.operator + ": " + String(body.review?.operator || payload.operator || "-"),
           copy.target + ": " + String(body.target?.instanceName || body.target?.instanceId || payload.instanceId),
+          "skill=" + String(payload.skillName || "-") + ", agent=" + String(payload.agentId || "-") + ", timeout=" + String(payload.timeoutSeconds || "-") + "s, deliver=" + String(payload.deliver === true),
           copy.mode + ": " + copy.dryRun + " / liveExecution=" + String(body.liveExecution === true),
           copy.safety + ": mutatesOpenClawInstance=" + String(body.safety?.mutatesOpenClawInstance === true) + ", requiresConfirmation=" + String(body.safety?.requiresConfirmation !== false),
           copy.commandPreview + ":",
@@ -10089,6 +10181,9 @@ function renderManagedActionDryRunScript(language: UiLanguage): string {
         skillName: String(data.get("skillName") || ""),
         agentId: String(data.get("agentId") || ""),
         message: String(data.get("message") || ""),
+        thinking: String(data.get("thinking") || ""),
+        timeoutSeconds: parseOptionalInteger(data.get("timeoutSeconds")),
+        deliver: data.get("deliver") === "true",
       };
       try {
         const response = await fetch("/api/managed-actions/live", {
@@ -10253,10 +10348,10 @@ function renderMultiInstanceCard(
 function renderInstanceActionShortcut(
   instanceId: string,
   action: ManagedActionName,
-  preset: { reason: string; skillName?: string },
+  preset: { reason: string; skillName?: string; agentId?: string; message?: string; timeoutSeconds?: number },
   language: UiLanguage,
 ): string {
-  return `<button type="button" class="instance-action-shortcut" data-managed-action-instance="${escapeHtml(instanceId)}" data-managed-action-preset="${escapeHtml(action)}" data-managed-action-reason="${escapeHtml(preset.reason)}" data-managed-action-skill="${escapeHtml(preset.skillName ?? "")}">${escapeHtml(managedActionUiLabel(action, language))}</button>`;
+  return `<button type="button" class="instance-action-shortcut" data-managed-action-instance="${escapeHtml(instanceId)}" data-managed-action-preset="${escapeHtml(action)}" data-managed-action-reason="${escapeHtml(preset.reason)}" data-managed-action-skill="${escapeHtml(preset.skillName ?? "")}" data-managed-action-agent="${escapeHtml(preset.agentId ?? "")}" data-managed-action-message="${escapeHtml(preset.message ?? "")}" data-managed-action-timeout="${escapeHtml(preset.timeoutSeconds ? String(preset.timeoutSeconds) : "")}">${escapeHtml(managedActionUiLabel(action, language))}</button>`;
 }
 
 function latestManagedActionAuditRecordForInstance(
@@ -10281,6 +10376,7 @@ function renderMultiInstanceDetail(
   language: UiLanguage,
   section: DashboardSection,
   managedActionReadiness?: ManagedActionLiveReadinessSnapshot,
+  managedActionAudit?: Awaited<ReturnType<typeof readManagedActionDryRunAudits>>,
 ): string {
   const t = (en: string, zh: string): string => pickUiText(language, en, zh);
   const overviewHref = `/?section=${encodeURIComponent(section)}&amp;lang=${encodeURIComponent(language)}`;
@@ -10439,6 +10535,34 @@ function renderMultiInstanceDetail(
     .readiness-list { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; }
     .readiness-list li { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: start; color: var(--muted); font-size: 12px; border-bottom: 1px solid rgba(17, 24, 39, 0.08); padding-bottom: 8px; }
     .readiness-list li:last-child { border-bottom: 0; padding-bottom: 0; }
+    .control-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; align-items: end; }
+    .control-field { display: grid; gap: 5px; }
+    .control-field-wide { grid-column: 1 / -1; }
+    .control-field label { color: var(--muted); font-size: 12px; font-weight: 600; }
+    .control-field select, .control-field input, .control-field textarea { width: 100%; min-height: 38px; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font: inherit; background: #fff; color: var(--text); }
+    .control-field textarea { min-height: 76px; resize: vertical; }
+    .control-field button { min-height: 38px; border: 1px solid rgba(0, 113, 227, 0.45); border-radius: 8px; padding: 8px 12px; font: inherit; font-weight: 700; color: #005cb9; background: #eff8ff; cursor: pointer; }
+    .control-check { min-height: 38px; display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; background: #fff; color: #344054; font-size: 13px; }
+    .control-check input { width: 16px; height: 16px; accent-color: #005cb9; }
+    .action-console { display: grid; gap: 10px; margin: 0 0 12px; }
+    .action-console-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; align-items: center; }
+    .action-console-head strong { font-size: 14px; }
+    .action-console-latest { border: 1px solid rgba(17, 24, 39, 0.1); border-radius: 999px; padding: 4px 8px; background: rgba(255, 255, 255, 0.72); color: var(--muted); font-size: 12px; }
+    .action-preset-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px; }
+    .action-preset { display: grid; gap: 6px; min-height: 112px; border: 1px solid var(--border); border-radius: 8px; padding: 10px; text-align: left; background: rgba(255, 255, 255, 0.88); color: inherit; font: inherit; cursor: pointer; }
+    .action-preset:hover, .action-preset:focus-visible { border-color: rgba(0, 113, 227, 0.48); background: #eff8ff; outline: none; }
+    .action-preset-title { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; font-weight: 800; }
+    .action-preset-title span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .action-preset-desc { color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .action-preset-meta { display: flex; flex-wrap: wrap; gap: 6px; color: var(--muted); font-size: 11px; }
+    .action-preset-meta span { border: 1px solid rgba(17, 24, 39, 0.1); border-radius: 999px; padding: 3px 7px; background: rgba(255, 255, 255, 0.72); }
+    .action-preset-last { display: block; min-height: 16px; color: var(--muted); font-size: 11px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .live-action-box { margin-top: 12px; border-top: 1px solid rgba(17, 24, 39, 0.08); padding-top: 12px; display: grid; gap: 10px; }
+    .live-action-head { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+    .live-action-head h3 { margin: 0 0 4px; font-size: 14px; letter-spacing: 0; }
+    .action-result { margin: 10px 0 0; white-space: pre-wrap; border: 1px solid var(--border); border-radius: 8px; padding: 10px; background: #f9fafb; color: #344054; font-size: 12px; overflow-x: auto; }
+    .action-result.ok { border-color: rgba(22, 163, 74, 0.28); background: #f0fdf4; color: #05603a; }
+    .action-result.error { border-color: rgba(220, 38, 38, 0.28); background: #fef3f2; color: #b42318; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
     th, td { text-align: left; border-bottom: 1px solid rgba(17, 24, 39, 0.08); padding: 8px 6px; vertical-align: top; }
     th { color: var(--muted); font-weight: 600; }
@@ -10465,13 +10589,20 @@ function renderMultiInstanceDetail(
 	        <div class="meta">OpenClaw Control Center</div>
 	        <h1>${escapeHtml(title)}</h1>
 	        <div>${selected ? badge(selected.status, multiInstanceStatusLabel(selected.status, language)) : ""}</div>
-	        <div class="meta">${escapeHtml(t("Controlled monitoring only. This page does not mount execution, edit, or approval controls.", "仅用于受控监控。本页不挂载执行、编辑或审批控件。"))}</div>
+	        <div class="meta">${escapeHtml(t("Monitoring is visible here, and the operation console below starts from dry-run before any live request.", "这里展示监控信息；下方操作入口会先 dry-run，再进入真实执行确认。"))}</div>
 	        <div class="meta">${escapeHtml(t("Updated", "更新时间"))}${escapeHtml(language === "zh" ? "：" : ": ")}${escapeHtml(formatUiTimestamp(snapshot.generatedAt, language))}</div>
 	        <div class="meta">${escapeHtml(selected?.detail ?? "")}</div>
 	      </div>
 	    </section>
     ${notFound}
     <section class="status-strip">${metrics}</section>
+    ${selected ? renderManagedActionDryRunPanel(
+      [selected],
+      language,
+      selectedInstanceId,
+      managedActionReadiness ?? buildFallbackManagedActionLiveReadiness(),
+      managedActionAudit?.records ?? [],
+    ) : ""}
     ${selected ? renderCollectorSnapshotPanel([selected], language, snapshot.generatedAt) : ""}
     ${renderManagedActionReadinessPanel(managedActionReadiness ?? buildFallbackManagedActionLiveReadiness(), language)}
     ${selected ? renderMultiInstanceHealthPanel([selected], language) : ""}
@@ -10530,6 +10661,7 @@ function renderMultiInstanceDetail(
       ${budgetRows ? `<div class="table-wrap"><table><thead><tr><th>${escapeHtml(t("Label", "标签"))}</th><th>${escapeHtml(t("State", "状态"))}</th><th>${escapeHtml(t("Scope", "范围"))}</th><th>${escapeHtml(t("Metrics", "指标"))}</th></tr></thead><tbody>${budgetRows}</tbody></table></div>` : `<div class="meta">${escapeHtml(t("No budget warnings.", "暂无预算关注。"))}</div>`}
     </section>
 	  </main>
+	  ${renderManagedActionDryRunScript(language)}
 	  ${renderAgentVisualEnhancerScript()}
 	</body>
 	</html>`;
